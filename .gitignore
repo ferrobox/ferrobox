@@ -17,3 +17,7 @@ Cargo.lock
 .DS_Store
 .vscode/
 .idea/
+
+# Infraestructura local (Fase 0)
+infra/.env
+infra/garage/garage.toml
