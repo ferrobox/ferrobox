@@ -1,0 +1,9 @@
+[package]
+name = "ferrobox-application"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+ferrobox-domain = { path = "../domain" }
+ferrobox-ports = { path = "../ports" }
