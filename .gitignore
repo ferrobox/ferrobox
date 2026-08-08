@@ -1,0 +1,19 @@
+# Rust
+/backend/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node / Vite (frontend)
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/
+
+# Entorno y secretos
+.env
+.env.local
+*.pem
+
+# Sistema operativo / editor
+.DS_Store
+.vscode/
+.idea/
