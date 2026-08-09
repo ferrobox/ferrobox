@@ -46,6 +46,42 @@ impl From<ArtifactId> for Uuid {
     }
 }
 
+/// Identificador único de un repositorio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RepositoryId(Uuid);
+
+impl RepositoryId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for RepositoryId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for RepositoryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for RepositoryId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<RepositoryId> for Uuid {
+    fn from(value: RepositoryId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
