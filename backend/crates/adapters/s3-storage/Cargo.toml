@@ -1,0 +1,17 @@
+[package]
+name = "ferrobox-adapter-s3-storage"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+ferrobox-ports = { path = "../../ports" }
+async-trait.workspace = true
+bytes.workspace = true
+aws-sdk-s3.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
