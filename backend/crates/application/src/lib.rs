@@ -6,6 +6,9 @@
 /// Deriva claves de almacenamiento para artefactos.
 mod storage_key;
 
+/// Caso de uso: crear un nuevo repositorio.
+pub mod create_repository;
+
 /// Caso de uso: publicar un artefacto en un repositorio existente.
 pub mod publish_artifact;
 
