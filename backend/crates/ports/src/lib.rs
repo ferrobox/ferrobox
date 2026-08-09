@@ -10,3 +10,6 @@ pub mod storage;
 
 /// El puerto de persistencia de la entidad `Repository`.
 pub mod repository_store;
+
+/// El puerto de persistencia de la entidad `Artifact`.
+pub mod artifact_store;
