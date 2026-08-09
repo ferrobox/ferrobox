@@ -1,4 +1,4 @@
-//! Puertos de FerroBox.
+//! Puertos de `FerroBox`.
 //!
 //! Define los contratos basados en traits ("puertos", en la terminología
 //! de la Arquitectura Hexagonal de Alistair Cockburn, 2005) que la capa de
