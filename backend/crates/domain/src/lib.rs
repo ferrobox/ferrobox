@@ -7,3 +7,6 @@
 //! Limpia (Robert C. Martin, *Clean Architecture*, 2017): el resto de
 //! crates pueden depender de este, pero este crate nunca puede depender
 //! de ellos.
+
+/// Identificadores de dominio (objetos de valor).
+pub mod ids;
