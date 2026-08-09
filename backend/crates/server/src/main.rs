@@ -18,15 +18,19 @@ use config::Config;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
+use ferrobox_application::create_repository::{CreateRepositoryError, CreateRepositoryUseCase};
 use ferrobox_application::download_artifact::{DownloadArtifactError, DownloadArtifactUseCase};
 use ferrobox_application::publish_artifact::{PublishArtifactError, PublishArtifactUseCase};
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
-use serde::Serialize;
+use ferrobox_domain::repository::RepositoryName;
+use ferrobox_ports::repository_store::RepositoryStoreError;
+use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 /// Estado compartido por todos los manejadores de rutas.
 struct AppState {
+    create_repository: CreateRepositoryUseCase,
     publish_artifact: PublishArtifactUseCase,
     download_artifact: DownloadArtifactUseCase,
 }
@@ -50,6 +54,7 @@ async fn main() {
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
 
     let state = Arc::new(AppState {
+        create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
         publish_artifact: PublishArtifactUseCase::new(
             repository_store,
             artifact_store.clone(),
@@ -60,6 +65,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/repositories", post(create_repository))
         .route(
             "/repositories/{repository_id}/artifacts",
             post(publish_artifact),
@@ -81,7 +87,31 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// Respuesta al publicar un artefacto correctamente.
+#[derive(Deserialize)]
+struct CreateRepositoryRequest {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct CreateRepositoryResponse {
+    id: String,
+}
+
+async fn create_repository(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateRepositoryRequest>,
+) -> Result<(StatusCode, Json<CreateRepositoryResponse>), ApiError> {
+    let name =
+        RepositoryName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+
+    let id = state.create_repository.execute(name).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateRepositoryResponse { id: id.to_string() }),
+    ))
+}
+
 #[derive(Serialize)]
 struct PublishResponse {
     id: String,
@@ -117,13 +147,14 @@ async fn download_artifact(
     Ok(content)
 }
 
-/// Cuerpo de una respuesta de error.
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
 }
 
 enum ApiError {
+    BadRequest(String),
+    Conflict(String),
     NotFound(String),
     Internal(String),
 }
@@ -131,11 +162,26 @@ enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, message),
         };
 
         (status, Json(ErrorResponse { error: message })).into_response()
+    }
+}
+
+impl From<CreateRepositoryError> for ApiError {
+    fn from(err: CreateRepositoryError) -> Self {
+        match &err {
+            CreateRepositoryError::Persistence(RepositoryStoreError::DuplicateName(_)) => {
+                Self::Conflict(err.to_string())
+            }
+            CreateRepositoryError::Persistence(RepositoryStoreError::Backend(_)) => {
+                Self::Internal(err.to_string())
+            }
+        }
     }
 }
 

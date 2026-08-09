@@ -18,10 +18,19 @@ pub(crate) struct InMemoryRepositoryStore {
 #[async_trait]
 impl RepositoryStore for InMemoryRepositoryStore {
     async fn save(&self, repository: &Repository) -> Result<(), RepositoryStoreError> {
-        self.repositories
-            .lock()
-            .unwrap()
-            .insert(repository.id(), repository.clone());
+        let mut repositories = self.repositories.lock().unwrap();
+
+        let name_taken_by_another = repositories.values().any(|existing| {
+            existing.id() != repository.id() && existing.name() == repository.name()
+        });
+
+        if name_taken_by_another {
+            return Err(RepositoryStoreError::DuplicateName(
+                repository.name().clone(),
+            ));
+        }
+
+        repositories.insert(repository.id(), repository.clone());
         Ok(())
     }
 
