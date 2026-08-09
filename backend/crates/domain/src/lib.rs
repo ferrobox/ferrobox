@@ -9,4 +9,8 @@
 //! de ellos.
 
 /// Identificadores de dominio (objetos de valor).
+/// Checksums validados de artefactos.
+pub mod checksum;
+
+/// Identificadores de dominio (objetos de valor).
 pub mod ids;
