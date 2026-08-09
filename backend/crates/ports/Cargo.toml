@@ -6,6 +6,12 @@ publish = false
 
 [dependencies]
 ferrobox-domain = { path = "../domain" }
+async-trait.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
 
 [lints]
 workspace = true
