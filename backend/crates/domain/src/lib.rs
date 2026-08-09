@@ -1,7 +1,7 @@
-//! Capa de dominio de FerroBox.
+//! Capa de dominio de `FerroBox`.
 //!
 //! Contiene entidades, objetos de valor e invariantes de negocio. Este
-//! crate no tiene ninguna dependencia hacia otro crate de FerroBox y nunca
+//! crate no tiene ninguna dependencia hacia otro crate de `FerroBox` y nunca
 //! debe depender de detalles de infraestructura (bases de datos, HTTP,
 //! almacenamiento de objetos). Es el anillo más interno de la Arquitectura
 //! Limpia (Robert C. Martin, *Clean Architecture*, 2017): el resto de
