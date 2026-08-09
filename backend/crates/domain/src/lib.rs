@@ -11,6 +11,10 @@
 /// Identificadores de dominio (objetos de valor).
 /// Checksums validados de artefactos.
 /// La entidad Artifact y su ciclo de vida.
+/// `RepositoryKind` y, próximamente, la entidad Repository.
+pub mod repository;
+
+/// La entidad Artifact y su ciclo de vida.
 pub mod artifact;
 
 /// Checksums validados de artefactos.
