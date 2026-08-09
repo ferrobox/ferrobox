@@ -1,0 +1,24 @@
+[package]
+name = "ferrobox-server"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+ferrobox-domain = { path = "../domain" }
+ferrobox-ports = { path = "../ports" }
+ferrobox-application = { path = "../application" }
+ferrobox-adapter-postgres = { path = "../adapters/postgres" }
+ferrobox-adapter-s3-storage = { path = "../adapters/s3-storage" }
+axum.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
+sqlx.workspace = true
+aws-sdk-s3.workspace = true
+dotenvy.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+uuid.workspace = true
+bytes.workspace = true
+
+[lints]
+workspace = true
