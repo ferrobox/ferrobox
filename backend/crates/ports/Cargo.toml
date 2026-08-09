@@ -6,3 +6,6 @@ publish = false
 
 [dependencies]
 ferrobox-domain = { path = "../domain" }
+
+[lints]
+workspace = true
