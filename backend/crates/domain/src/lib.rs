@@ -10,6 +10,10 @@
 
 /// Identificadores de dominio (objetos de valor).
 /// Checksums validados de artefactos.
+/// La entidad Artifact y su ciclo de vida.
+pub mod artifact;
+
+/// Checksums validados de artefactos.
 pub mod checksum;
 
 /// Identificadores de dominio (objetos de valor).
