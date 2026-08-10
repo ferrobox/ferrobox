@@ -26,6 +26,11 @@ pub struct Config {
     pub s3_bucket: String,
     /// Dirección y puerto en los que escucha el servidor HTTP.
     pub bind_address: String,
+    /// URL pública (esquema + host + puerto, sin barra final) bajo la
+    /// que este servidor es alcanzable. Se usa para construir URLs
+    /// absolutas en protocolos que las requieren, como el `config.json`
+    /// del índice disperso de Cargo.
+    pub public_base_url: String,
 }
 
 impl Config {
@@ -44,6 +49,7 @@ impl Config {
             s3_secret_access_key: require_env("S3_SECRET_ACCESS_KEY")?,
             s3_bucket: require_env("S3_BUCKET")?,
             bind_address: env_or("BIND_ADDRESS", "127.0.0.1:3000"),
+            public_base_url: env_or("PUBLIC_BASE_URL", "http://127.0.0.1:3000"),
         })
     }
 }

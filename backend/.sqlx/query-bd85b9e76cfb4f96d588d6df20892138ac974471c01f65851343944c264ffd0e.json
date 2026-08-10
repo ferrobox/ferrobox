@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO repositories (id, name, kind, kind_data, ecosystem)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (id) DO UPDATE\n            SET name = EXCLUDED.name,\n                kind = EXCLUDED.kind,\n                kind_data = EXCLUDED.kind_data,\n                ecosystem = EXCLUDED.ecosystem\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bd85b9e76cfb4f96d588d6df20892138ac974471c01f65851343944c264ffd0e"
+}

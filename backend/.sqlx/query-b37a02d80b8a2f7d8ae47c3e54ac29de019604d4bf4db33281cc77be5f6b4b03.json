@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, kind, kind_data FROM repositories WHERE id = $1",
+  "query": "SELECT id, name, kind, kind_data, ecosystem FROM repositories WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "kind_data",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "ecosystem",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "8f3d76fd248f2569aeb186a1474b49a21b311a7fedb9a2ecfb4e849828b15926"
+  "hash": "b37a02d80b8a2f7d8ae47c3e54ac29de019604d4bf4db33281cc77be5f6b4b03"
 }
