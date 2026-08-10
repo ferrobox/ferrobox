@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::{Json, Router};
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
@@ -22,10 +22,24 @@ use crate::error::ApiError;
 
 /// Construye el subrouter con todas las rutas del protocolo de Cargo,
 /// anidadas bajo `/cargo/{repository_id}`.
+///
+/// Es importante que `config.json` y las rutas de índice compartan
+/// exactamente la misma raíz: el protocolo de índice disperso no separa
+/// "dónde vive `config.json`" de "dónde viven las entradas de índice" --
+/// ambas cosas viven bajo la misma URL base, la que el cliente configura
+/// como `index` de su registro (`sparse+http://.../cargo/{repository_id}/`).
+/// Las rutas de publicación y descarga, en cambio, sí pueden vivir en
+/// cualquier otra ruta -- `config.json` les indica al cliente dónde
+/// encontrarlas mediante los campos `dl` y `api`, así que aquí se
+/// anidan bajo `.../api/v1/crates/...` únicamente por claridad. `axum`
+/// resuelve los conflictos aparentes entre estas rutas literales y el
+/// comodín de índice dando prioridad a la coincidencia más específica.
 pub(crate) fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/cargo/{repository_id}/config.json", axum::routing::get(config_json))
-        .route("/cargo/{repository_id}/index/{*rest}", axum::routing::get(index))
+        .route(
+            "/cargo/{repository_id}/config.json",
+            axum::routing::get(config_json),
+        )
         .route(
             "/cargo/{repository_id}/api/v1/crates/new",
             axum::routing::put(publish),
@@ -34,6 +48,7 @@ pub(crate) fn router() -> Router<Arc<AppState>> {
             "/cargo/{repository_id}/api/v1/crates/{name}/{version}/download",
             axum::routing::get(download),
         )
+        .route("/cargo/{repository_id}/{*rest}", axum::routing::get(index))
 }
 
 fn cargo_strategy(state: &AppState) -> Result<Arc<dyn PackagingStrategy>, ApiError> {
@@ -74,16 +89,18 @@ async fn config_json(
     }))
 }
 
-/// `GET /cargo/{repository_id}/index/{*rest}`: responde al protocolo de
-/// índice disperso. `cargo` siempre calcula `rest` por sí mismo
-/// aplicando las reglas de fragmentación oficiales (ver
-/// [`super::packaging::cargo::cargo_index_shard_path`] en
-/// `ferrobox-application`); a este manejador solo le importa el último
-/// segmento de la ruta, que siempre es el nombre del paquete.
+/// `GET /cargo/{repository_id}/{*rest}`: responde al protocolo de
+/// índice disperso para cualquier ruta que no coincida con ninguna otra
+/// ruta más específica de este router (`config.json`, `api/v1/crates/...`).
+/// `cargo` siempre calcula `rest` por sí mismo aplicando las reglas de
+/// fragmentación oficiales (ver
+/// [`ferrobox_application::packaging::cargo::cargo_index_shard_path`]);
+/// a este manejador solo le importa el último segmento de la ruta, que
+/// siempre es el nombre del paquete.
 async fn index(
     State(state): State<Arc<AppState>>,
     Path((repository_id, rest)): Path<(Uuid, String)>,
-) -> Result<Bytes, ApiError> {
+) -> Result<(HeaderMap, Bytes), ApiError> {
     let repository = state
         .get_repository
         .execute(RepositoryId::from(repository_id))
@@ -95,7 +112,18 @@ async fn index(
         PackageName::parse(package_name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
     let body = strategy.index(&repository, &name).await?;
-    Ok(body)
+
+    // El índice disperso es dinámico -- cada publicación lo cambia --
+    // así que se desactiva explícitamente cualquier caché intermedia
+    // (proxy del cliente, CDN...) en vez de depender del comportamiento
+    // heurístico por defecto del cliente HTTP. Sin esto, `cargo publish`
+    // podría, en teoría, seguir sirviendo una respuesta 404 cacheada
+    // justo después de publicar una versión nueva de un paquete que
+    // antes no existía.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+
+    Ok((headers, body))
 }
 
 /// Cuerpo de respuesta que `cargo publish` espera tras una publicación
