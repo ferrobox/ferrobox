@@ -8,10 +8,7 @@
 //! crates pueden depender de este, pero este crate nunca puede depender
 //! de ellos.
 
-/// Identificadores de dominio (objetos de valor).
-/// Checksums validados de artefactos.
-/// La entidad Artifact y su ciclo de vida.
-/// `RepositoryKind` y, próximamente, la entidad Repository.
+/// `RepositoryKind`, `PackageEcosystem` y la entidad Repository.
 pub mod repository;
 
 /// La entidad Artifact y su ciclo de vida.
@@ -22,3 +19,9 @@ pub mod checksum;
 
 /// Identificadores de dominio (objetos de valor).
 pub mod ids;
+
+/// Coordenadas de paquete (`PackageEcosystem`, `PackageName`,
+/// `PackageVersion`): identifican unívocamente una versión concreta de
+/// un paquete dentro de un ecosistema, independientemente de en qué
+/// repositorio esté publicada.
+pub mod package_coordinate;
