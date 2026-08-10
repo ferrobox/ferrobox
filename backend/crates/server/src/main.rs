@@ -20,9 +20,12 @@ use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::create_repository::{CreateRepositoryError, CreateRepositoryUseCase};
 use ferrobox_application::download_artifact::{DownloadArtifactError, DownloadArtifactUseCase};
+use ferrobox_application::list_repository_artifacts::ListRepositoryArtifactsUseCase;
 use ferrobox_application::publish_artifact::{PublishArtifactError, PublishArtifactUseCase};
+use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::repository::RepositoryName;
+use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
@@ -33,6 +36,7 @@ struct AppState {
     create_repository: CreateRepositoryUseCase,
     publish_artifact: PublishArtifactUseCase,
     download_artifact: DownloadArtifactUseCase,
+    list_repository_artifacts: ListRepositoryArtifactsUseCase,
 }
 
 #[tokio::main]
@@ -60,7 +64,8 @@ async fn main() {
             artifact_store.clone(),
             storage.clone(),
         ),
-        download_artifact: DownloadArtifactUseCase::new(artifact_store, storage),
+        download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage),
+        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store),
     });
 
     let app = Router::new()
@@ -68,7 +73,7 @@ async fn main() {
         .route("/repositories", post(create_repository))
         .route(
             "/repositories/{repository_id}/artifacts",
-            post(publish_artifact),
+            post(publish_artifact).get(list_repository_artifacts),
         )
         .route("/artifacts/{artifact_id}", get(download_artifact))
         .with_state(state);
@@ -148,6 +153,37 @@ async fn download_artifact(
 }
 
 #[derive(Serialize)]
+struct ArtifactResponse {
+    id: String,
+    checksum: String,
+    size_bytes: u64,
+}
+
+impl From<Artifact> for ArtifactResponse {
+    fn from(artifact: Artifact) -> Self {
+        Self {
+            id: artifact.id().to_string(),
+            checksum: artifact.checksum().to_string(),
+            size_bytes: artifact.size_bytes(),
+        }
+    }
+}
+
+async fn list_repository_artifacts(
+    State(state): State<Arc<AppState>>,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Json<Vec<ArtifactResponse>>, ApiError> {
+    let artifacts = state
+        .list_repository_artifacts
+        .execute(RepositoryId::from(repository_id))
+        .await?;
+
+    Ok(Json(
+        artifacts.into_iter().map(ArtifactResponse::from).collect(),
+    ))
+}
+
+#[derive(Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -200,6 +236,12 @@ impl From<DownloadArtifactError> for ApiError {
             DownloadArtifactError::NotFound(_) => Self::NotFound(err.to_string()),
             other => Self::Internal(other.to_string()),
         }
+    }
+}
+
+impl From<ArtifactStoreError> for ApiError {
+    fn from(err: ArtifactStoreError) -> Self {
+        Self::Internal(err.to_string())
     }
 }
 
