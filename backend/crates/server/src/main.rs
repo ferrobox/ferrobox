@@ -29,6 +29,7 @@ use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// Estado compartido por todos los manejadores de rutas.
@@ -92,12 +93,16 @@ async fn health() -> &'static str {
     "ok"
 }
 
-#[derive(Deserialize)]
+/// Cuerpo de la petición para crear un repositorio.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
 struct CreateRepositoryRequest {
     name: String,
 }
 
-#[derive(Serialize)]
+/// Respuesta al crear un repositorio correctamente.
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct CreateRepositoryResponse {
     id: String,
 }
@@ -117,7 +122,9 @@ async fn create_repository(
     ))
 }
 
-#[derive(Serialize)]
+/// Respuesta al publicar un artefacto correctamente.
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct PublishResponse {
     id: String,
 }
@@ -152,10 +159,13 @@ async fn download_artifact(
     Ok(content)
 }
 
-#[derive(Serialize)]
+/// Representación de un artefacto en las respuestas de la API.
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct ArtifactResponse {
     id: String,
     checksum: String,
+    #[ts(type = "number")]
     size_bytes: u64,
 }
 
@@ -183,7 +193,9 @@ async fn list_repository_artifacts(
     ))
 }
 
-#[derive(Serialize)]
+/// Cuerpo de una respuesta de error.
+#[derive(Serialize, TS)]
+#[ts(export)]
 struct ErrorResponse {
     error: String,
 }
