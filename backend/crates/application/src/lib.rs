@@ -15,5 +15,8 @@ pub mod publish_artifact;
 /// Caso de uso: descargar un artefacto ya publicado.
 pub mod download_artifact;
 
+/// Caso de uso: listar los artefactos de un repositorio.
+pub mod list_repository_artifacts;
+
 #[cfg(test)]
 mod test_support;

@@ -91,6 +91,25 @@ impl ArtifactStore for PostgresArtifactStore {
             .transpose()
     }
 
+    async fn find_by_repository_id(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<Artifact>, ArtifactStoreError> {
+        let repository_id: Uuid = repository_id.into();
+
+        let rows = sqlx::query!(
+            r#"SELECT id, repository_id, checksum, size_bytes FROM artifacts WHERE repository_id = $1 ORDER BY created_at"#,
+            repository_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|r| row_to_artifact(r.id, r.repository_id, r.checksum, r.size_bytes))
+            .collect()
+    }
+
     async fn delete(&self, id: ArtifactId) -> Result<(), ArtifactStoreError> {
         let id: Uuid = id.into();
 

@@ -79,6 +79,20 @@ impl ArtifactStore for InMemoryArtifactStore {
         Ok(self.artifacts.lock().unwrap().get(&id).cloned())
     }
 
+    async fn find_by_repository_id(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<Artifact>, ArtifactStoreError> {
+        Ok(self
+            .artifacts
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|artifact| artifact.repository_id() == repository_id)
+            .cloned()
+            .collect())
+    }
+
     async fn delete(&self, id: ArtifactId) -> Result<(), ArtifactStoreError> {
         self.artifacts.lock().unwrap().remove(&id);
         Ok(())

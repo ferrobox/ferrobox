@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::ArtifactId;
+use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use thiserror::Error;
 
 /// Motivos por los que una operación de persistencia de artefactos puede
@@ -32,6 +32,17 @@ pub trait ArtifactStore: Send + Sync {
     /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
     /// falla.
     async fn find_by_id(&self, id: ArtifactId) -> Result<Option<Artifact>, ArtifactStoreError>;
+
+    /// Lista todos los artefactos de un repositorio.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn find_by_repository_id(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<Artifact>, ArtifactStoreError>;
 
     /// Elimina un artefacto. No es un error eliminar un identificador que
     /// no existe.
