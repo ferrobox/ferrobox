@@ -58,6 +58,14 @@ pub trait RepositoryStore: Send + Sync {
         name: &RepositoryName,
     ) -> Result<Option<Repository>, RepositoryStoreError>;
 
+    /// Lista todos los repositorios existentes.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`RepositoryStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError>;
+
     /// Elimina un repositorio. No es un error eliminar un identificador
     /// que no existe.
     ///
@@ -73,6 +81,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
+    use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::RepositoryKind;
 
     use super::*;
@@ -121,6 +130,10 @@ mod tests {
                 .cloned())
         }
 
+        async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError> {
+            Ok(self.repositories.lock().unwrap().values().cloned().collect())
+        }
+
         async fn delete(&self, id: RepositoryId) -> Result<(), RepositoryStoreError> {
             self.repositories.lock().unwrap().remove(&id);
             Ok(())
@@ -128,7 +141,12 @@ mod tests {
     }
 
     fn forge(name: &str) -> Repository {
-        Repository::new(RepositoryName::parse(name).unwrap(), RepositoryKind::Forge).unwrap()
+        Repository::new(
+            RepositoryName::parse(name).unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Generic,
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -162,6 +180,24 @@ mod tests {
             result,
             Err(RepositoryStoreError::DuplicateName(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn find_all_returns_every_saved_repository() {
+        let store = InMemoryRepositoryStore::default();
+        store.save(&forge("cargo-releases")).await.unwrap();
+        store.save(&forge("npm-releases")).await.unwrap();
+
+        let all = store.find_all().await.unwrap();
+
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_all_on_an_empty_store_returns_an_empty_list() {
+        let store = InMemoryRepositoryStore::default();
+
+        assert_eq!(store.find_all().await.unwrap(), Vec::new());
     }
 
     #[tokio::test]
