@@ -4,7 +4,7 @@ use thiserror::Error;
 
 const MAX_COMPONENT_LENGTH: usize = 214;
 
-/// Los ecosistemas de paquetes que FerroBox puede indexar.
+/// Los ecosistemas de paquetes que `FerroBox` puede indexar.
 ///
 /// A diferencia de `RepositoryKind`, ninguna variante necesita datos
 /// adicionales -- el ecosistema en sí es solo una etiqueta que, a partir

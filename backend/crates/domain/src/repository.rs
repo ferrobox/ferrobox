@@ -4,6 +4,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::ids::RepositoryId;
+use crate::package_coordinate::PackageEcosystem;
 
 const MAX_NAME_LENGTH: usize = 100;
 
@@ -133,16 +134,27 @@ impl RepositoryKind {
 }
 
 /// Un repositorio de artefactos: agrupa una estrategia de origen
-/// (`RepositoryKind`) bajo un nombre único.
+/// (`RepositoryKind`) y un ecosistema de paquetes (`PackageEcosystem`)
+/// bajo un nombre único.
 ///
-/// Es una **Entidad**: dos instancias con el mismo identificador son el
-/// mismo repositorio, independientemente de si su nombre o su tipo
-/// cambiaron entre una lectura y otra.
+/// `RepositoryKind` y `PackageEcosystem` son deliberadamente dos campos
+/// independientes, no una sola jerarquía: el primero responde a "¿de
+/// dónde viene el contenido y cómo se almacena?" (almacenamiento propio,
+/// réplica cacheada, o agregación de otros repositorios), mientras que
+/// el segundo responde a "¿qué formato de paquete contiene?" (Cargo,
+/// npm, genérico...). Ambas preguntas son ortogonales -- un repositorio
+/// `Mirror` puede replicar tanto un registro de Cargo como uno de npm, y
+/// un repositorio `Forge` de Cargo se comporta, en cuanto a
+/// almacenamiento, igual que uno `Forge` genérico. Nexus y Artifactory
+/// modelan esta misma distinción con dos ejes independientes
+/// (tipo de repositorio y formato de paquete); `FerroBox` sigue el mismo
+/// principio de diseño con su propio vocabulario.
 #[derive(Debug, Clone)]
 pub struct Repository {
     id: RepositoryId,
     name: RepositoryName,
     kind: RepositoryKind,
+    ecosystem: PackageEcosystem,
 }
 
 /// Motivos por los que una combinación de nombre y tipo no forma un
@@ -161,12 +173,17 @@ impl Repository {
     /// # Errors
     ///
     /// Devuelve [`RepositoryError`] si `kind` es un `Alloy` sin miembros.
-    pub fn new(name: RepositoryName, kind: RepositoryKind) -> Result<Self, RepositoryError> {
+    pub fn new(
+        name: RepositoryName,
+        kind: RepositoryKind,
+        ecosystem: PackageEcosystem,
+    ) -> Result<Self, RepositoryError> {
         Self::validate(&kind)?;
         Ok(Self {
             id: RepositoryId::new(),
             name,
             kind,
+            ecosystem,
         })
     }
 
@@ -183,9 +200,15 @@ impl Repository {
         id: RepositoryId,
         name: RepositoryName,
         kind: RepositoryKind,
+        ecosystem: PackageEcosystem,
     ) -> Result<Self, RepositoryError> {
         Self::validate(&kind)?;
-        Ok(Self { id, name, kind })
+        Ok(Self {
+            id,
+            name,
+            kind,
+            ecosystem,
+        })
     }
 
     fn validate(kind: &RepositoryKind) -> Result<(), RepositoryError> {
@@ -213,6 +236,12 @@ impl Repository {
     #[must_use]
     pub fn kind(&self) -> &RepositoryKind {
         &self.kind
+    }
+
+    /// Ecosistema de paquetes que este repositorio indexa.
+    #[must_use]
+    pub fn ecosystem(&self) -> PackageEcosystem {
+        self.ecosystem
     }
 }
 
@@ -255,13 +284,17 @@ mod tests {
     #[test]
     fn a_forge_repository_can_be_created() {
         let name = RepositoryName::parse("cargo-releases").unwrap();
-        assert!(Repository::new(name, RepositoryKind::Forge).is_ok());
+        assert!(Repository::new(name, RepositoryKind::Forge, PackageEcosystem::Cargo).is_ok());
     }
 
     #[test]
     fn an_alloy_without_members_is_rejected() {
         let name = RepositoryName::parse("public-cargo").unwrap();
-        let result = Repository::new(name, RepositoryKind::Alloy { members: vec![] });
+        let result = Repository::new(
+            name,
+            RepositoryKind::Alloy { members: vec![] },
+            PackageEcosystem::Cargo,
+        );
 
         assert_eq!(result, Err(RepositoryError::EmptyAlloy));
     }
@@ -273,7 +306,7 @@ mod tests {
             members: vec![RepositoryId::new()],
         };
 
-        assert!(Repository::new(name, kind).is_ok());
+        assert!(Repository::new(name, kind, PackageEcosystem::Cargo).is_ok());
     }
 
     #[test]
@@ -283,15 +316,26 @@ mod tests {
             id,
             RepositoryName::parse("cargo-releases").unwrap(),
             RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
         )
         .unwrap();
         let renamed = Repository::from_parts(
             id,
             RepositoryName::parse("cargo-releases-v2").unwrap(),
             RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
         )
         .unwrap();
 
         assert_eq!(original, renamed);
+    }
+
+    #[test]
+    fn exposes_the_package_ecosystem_it_indexes() {
+        let name = RepositoryName::parse("npm-releases").unwrap();
+        let repository =
+            Repository::new(name, RepositoryKind::Forge, PackageEcosystem::Npm).unwrap();
+
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Npm);
     }
 }

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO package_index_entries\n                (repository_id, ecosystem, package_name, package_version, artifact_id, entry)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            ON CONFLICT (repository_id, ecosystem, package_name, package_version) DO UPDATE\n            SET artifact_id = EXCLUDED.artifact_id,\n                entry = EXCLUDED.entry\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "860fbadbfb30b7165aa73c2d9aec526c98d8664a7e09476622ff28ffb1bbd4e3"
+}

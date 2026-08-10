@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT artifact_id\n            FROM package_index_entries\n            WHERE repository_id = $1\n              AND ecosystem = $2\n              AND lower(package_name) = lower($3)\n              AND package_version = $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "518e2a2c0e619afe1351711aca3346d07961e333c630629fd10e54757a9c4901"
+}

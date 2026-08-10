@@ -13,3 +13,6 @@ pub mod repository_store;
 
 /// El puerto de persistencia de la entidad `Artifact`.
 pub mod artifact_store;
+
+/// El puerto de persistencia del índice de paquetes por ecosistema.
+pub mod package_index_store;

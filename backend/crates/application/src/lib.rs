@@ -18,5 +18,15 @@ pub mod download_artifact;
 /// Caso de uso: listar los artefactos de un repositorio.
 pub mod list_repository_artifacts;
 
+/// Caso de uso: listar todos los repositorios existentes.
+pub mod list_repositories;
+
+/// Caso de uso: consultar el detalle de un repositorio existente.
+pub mod get_repository;
+
+/// El patrón Strategy para publicar, indexar y descargar paquetes según
+/// su ecosistema (Cargo, npm, ...).
+pub mod packaging;
+
 #[cfg(test)]
 mod test_support;

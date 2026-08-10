@@ -8,6 +8,7 @@ publish = false
 ferrobox-domain = { path = "../../domain" }
 ferrobox-ports = { path = "../../ports" }
 async-trait.workspace = true
+bytes.workspace = true
 thiserror.workspace = true
 url.workspace = true
 uuid.workspace = true
