@@ -124,6 +124,7 @@ impl ArtifactStore for PostgresArtifactStore {
 
 #[cfg(test)]
 mod tests {
+    use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
     use ferrobox_ports::repository_store::RepositoryStore;
     use sqlx::postgres::PgPoolOptions;
@@ -152,6 +153,7 @@ mod tests {
         let repository = Repository::new(
             RepositoryName::parse("integration-test-artifacts-repo").unwrap(),
             RepositoryKind::Forge,
+            PackageEcosystem::Generic,
         )
         .unwrap();
         repository_store.save(&repository).await.unwrap();

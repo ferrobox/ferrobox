@@ -868,6 +868,7 @@ name = "ferrobox-adapter-postgres"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "ferrobox-domain",
  "ferrobox-ports",
  "serde_json",
@@ -897,6 +898,8 @@ dependencies = [
  "bytes",
  "ferrobox-domain",
  "ferrobox-ports",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror",
  "tokio",

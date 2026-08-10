@@ -48,6 +48,7 @@ fn row_to_repository(
     name: String,
     kind: &str,
     kind_data: &serde_json::Value,
+    ecosystem: &str,
 ) -> Result<Repository, RepositoryStoreError> {
     let repository_kind = match kind {
         "forge" => RepositoryKind::Forge,
@@ -80,8 +81,10 @@ fn row_to_repository(
     };
 
     let name = RepositoryName::parse(name).map_err(|err| backend_error(err.to_string()))?;
+    let ecosystem =
+        crate::ecosystem_column::from_column(ecosystem).map_err(backend_error)?;
 
-    Repository::from_parts(RepositoryId::from(id), name, repository_kind)
+    Repository::from_parts(RepositoryId::from(id), name, repository_kind, ecosystem)
         .map_err(|err| backend_error(err.to_string()))
 }
 
@@ -99,21 +102,24 @@ fn translate_save_error(name: &RepositoryName, err: &sqlx::Error) -> RepositoryS
 impl RepositoryStore for PostgresRepositoryStore {
     async fn save(&self, repository: &Repository) -> Result<(), RepositoryStoreError> {
         let (kind, kind_data) = repository_kind_to_columns(repository.kind());
+        let ecosystem = crate::ecosystem_column::to_column(repository.ecosystem());
         let id: Uuid = repository.id().into();
 
         sqlx::query!(
             r#"
-            INSERT INTO repositories (id, name, kind, kind_data)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO repositories (id, name, kind, kind_data, ecosystem)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO UPDATE
             SET name = EXCLUDED.name,
                 kind = EXCLUDED.kind,
-                kind_data = EXCLUDED.kind_data
+                kind_data = EXCLUDED.kind_data,
+                ecosystem = EXCLUDED.ecosystem
             "#,
             id,
             repository.name().as_str(),
             kind,
             kind_data,
+            ecosystem,
         )
         .execute(&self.pool)
         .await
@@ -129,14 +135,14 @@ impl RepositoryStore for PostgresRepositoryStore {
         let id: Uuid = id.into();
 
         let row = sqlx::query!(
-            r#"SELECT id, name, kind, kind_data FROM repositories WHERE id = $1"#,
+            r#"SELECT id, name, kind, kind_data, ecosystem FROM repositories WHERE id = $1"#,
             id
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|r| row_to_repository(r.id, r.name, &r.kind, &r.kind_data))
+        row.map(|r| row_to_repository(r.id, r.name, &r.kind, &r.kind_data, &r.ecosystem))
             .transpose()
     }
 
@@ -145,15 +151,28 @@ impl RepositoryStore for PostgresRepositoryStore {
         name: &RepositoryName,
     ) -> Result<Option<Repository>, RepositoryStoreError> {
         let row = sqlx::query!(
-            r#"SELECT id, name, kind, kind_data FROM repositories WHERE name = $1"#,
+            r#"SELECT id, name, kind, kind_data, ecosystem FROM repositories WHERE name = $1"#,
             name.as_str()
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|r| row_to_repository(r.id, r.name, &r.kind, &r.kind_data))
+        row.map(|r| row_to_repository(r.id, r.name, &r.kind, &r.kind_data, &r.ecosystem))
             .transpose()
+    }
+
+    async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError> {
+        let rows = sqlx::query!(
+            r#"SELECT id, name, kind, kind_data, ecosystem FROM repositories ORDER BY created_at"#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|r| row_to_repository(r.id, r.name, &r.kind, &r.kind_data, &r.ecosystem))
+            .collect()
     }
 
     async fn delete(&self, id: RepositoryId) -> Result<(), RepositoryStoreError> {
@@ -170,6 +189,7 @@ impl RepositoryStore for PostgresRepositoryStore {
 
 #[cfg(test)]
 mod tests {
+    use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::RepositoryKind;
     use sqlx::postgres::PgPoolOptions;
 
@@ -186,7 +206,12 @@ mod tests {
     }
 
     fn forge(name: &str) -> Repository {
-        Repository::new(RepositoryName::parse(name).unwrap(), RepositoryKind::Forge).unwrap()
+        Repository::new(
+            RepositoryName::parse(name).unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Generic,
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -205,6 +230,24 @@ mod tests {
 
         store.delete(repository.id()).await.unwrap();
         assert_eq!(store.find_by_id(repository.id()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running PostgreSQL instance; run with `cargo test -- --ignored`"]
+    async fn find_all_returns_every_persisted_repository() {
+        let store = PostgresRepositoryStore::new(pool_from_env().await);
+        let first = forge("integration-test-find-all-first");
+        let second = forge("integration-test-find-all-second");
+        store.save(&first).await.unwrap();
+        store.save(&second).await.unwrap();
+
+        let all = store.find_all().await.unwrap();
+
+        store.delete(first.id()).await.unwrap();
+        store.delete(second.id()).await.unwrap();
+
+        assert!(all.contains(&first));
+        assert!(all.contains(&second));
     }
 
     #[tokio::test]
