@@ -5,8 +5,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
+use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
+use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 
@@ -52,6 +54,10 @@ impl RepositoryStore for InMemoryRepositoryStore {
             .values()
             .find(|r| r.name() == name)
             .cloned())
+    }
+
+    async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError> {
+        Ok(self.repositories.lock().unwrap().values().cloned().collect())
     }
 
     async fn delete(&self, id: RepositoryId) -> Result<(), RepositoryStoreError> {
@@ -130,6 +136,83 @@ impl StoragePort for InMemoryStorage {
     }
 }
 
+/// Doble en memoria de [`PackageIndexStore`]. Usa un `Vec`, no un
+/// `HashMap`, deliberadamente: preserva el orden de publicación, tal y
+/// como exige el contrato del puerto y tal y como lo garantiza el
+/// adaptador real (`ORDER BY created_at`).
+#[derive(Default)]
+pub(crate) struct InMemoryPackageIndexStore {
+    entries: Mutex<Vec<(RepositoryId, PackageCoordinate, ArtifactId, Bytes)>>,
+}
+
+#[async_trait]
+impl PackageIndexStore for InMemoryPackageIndexStore {
+    async fn upsert_entry(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+        artifact_id: ArtifactId,
+        entry: Bytes,
+    ) -> Result<(), PackageIndexStoreError> {
+        let mut entries = self.entries.lock().unwrap();
+
+        if let Some(existing) = entries
+            .iter_mut()
+            .find(|(repo_id, existing_coordinate, ..)| {
+                *repo_id == repository_id && existing_coordinate == coordinate
+            })
+        {
+            existing.2 = artifact_id;
+            existing.3 = entry;
+        } else {
+            entries.push((repository_id, coordinate.clone(), artifact_id, entry));
+        }
+
+        Ok(())
+    }
+
+    async fn entries_for_package(
+        &self,
+        repository_id: RepositoryId,
+        ecosystem: PackageEcosystem,
+        name: &PackageName,
+    ) -> Result<Vec<Bytes>, PackageIndexStoreError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(repo_id, coordinate, ..)| {
+                *repo_id == repository_id
+                    && coordinate.ecosystem() == ecosystem
+                    && coordinate.name() == name
+            })
+            .map(|(.., entry)| entry.clone())
+            .collect())
+    }
+
+    async fn artifact_for(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<Option<ArtifactId>, PackageIndexStoreError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(repo_id, existing_coordinate, ..)| {
+                *repo_id == repository_id && existing_coordinate == coordinate
+            })
+            .map(|(_, _, artifact_id, _)| *artifact_id))
+    }
+}
+
 pub(crate) fn forge(name: &str) -> Repository {
-    Repository::new(RepositoryName::parse(name).unwrap(), RepositoryKind::Forge).unwrap()
+    Repository::new(
+        RepositoryName::parse(name).unwrap(),
+        RepositoryKind::Forge,
+        PackageEcosystem::Generic,
+    )
+    .unwrap()
 }

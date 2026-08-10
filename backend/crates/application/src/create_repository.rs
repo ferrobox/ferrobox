@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ferrobox_domain::ids::RepositoryId;
+use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
@@ -26,7 +27,8 @@ impl CreateRepositoryUseCase {
         Self { repository_store }
     }
 
-    /// Crea un repositorio `Forge` con el nombre indicado.
+    /// Crea un repositorio `Forge` con el nombre y el ecosistema de
+    /// paquetes indicados.
     ///
     /// # Errors
     ///
@@ -41,8 +43,9 @@ impl CreateRepositoryUseCase {
     pub async fn execute(
         &self,
         name: RepositoryName,
+        ecosystem: PackageEcosystem,
     ) -> Result<RepositoryId, CreateRepositoryError> {
-        let repository = Repository::new(name, RepositoryKind::Forge)
+        let repository = Repository::new(name, RepositoryKind::Forge, ecosystem)
             .expect("RepositoryKind::Forge never violates the Alloy non-empty invariant");
 
         self.repository_store.save(&repository).await?;
@@ -65,11 +68,31 @@ mod tests {
         let use_case = CreateRepositoryUseCase::new(repository_store.clone());
 
         let id = use_case
-            .execute(RepositoryName::parse("cargo-releases").unwrap())
+            .execute(
+                RepositoryName::parse("cargo-releases").unwrap(),
+                PackageEcosystem::Cargo,
+            )
             .await
             .unwrap();
 
         assert!(repository_store.find_by_id(id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn creates_a_repository_with_the_requested_ecosystem() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("npm-releases").unwrap(),
+                PackageEcosystem::Npm,
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Npm);
     }
 
     #[tokio::test]
@@ -78,12 +101,18 @@ mod tests {
         let use_case = CreateRepositoryUseCase::new(repository_store);
 
         use_case
-            .execute(RepositoryName::parse("cargo-releases").unwrap())
+            .execute(
+                RepositoryName::parse("cargo-releases").unwrap(),
+                PackageEcosystem::Cargo,
+            )
             .await
             .unwrap();
 
         let result = use_case
-            .execute(RepositoryName::parse("cargo-releases").unwrap())
+            .execute(
+                RepositoryName::parse("cargo-releases").unwrap(),
+                PackageEcosystem::Cargo,
+            )
             .await;
 
         assert!(matches!(
