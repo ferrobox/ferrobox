@@ -35,3 +35,4 @@ sha2 = "0.10"
 axum = "0.8"
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
+ts-rs = "12"
