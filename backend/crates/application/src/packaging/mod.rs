@@ -21,6 +21,7 @@ use bytes::Bytes;
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::Repository;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
+use ferrobox_ports::http_client::HttpClientError;
 use ferrobox_ports::package_index_store::PackageIndexStoreError;
 use ferrobox_ports::storage::StorageError;
 use thiserror::Error;
@@ -76,6 +77,19 @@ pub enum PackagingError {
     /// Fallo al leer o escribir el índice de paquetes.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
+
+    /// El repositorio es de solo lectura (por ejemplo, un `Mirror`) y
+    /// no acepta publicaciones.
+    #[error("repository is read-only and does not accept publishes")]
+    ReadOnlyRepository,
+
+    /// Fallo al consultar el *upstream* de un repositorio `Mirror`.
+    #[error(transparent)]
+    Upstream(#[from] HttpClientError),
+
+    /// La respuesta del *upstream* no tiene el formato esperado.
+    #[error("invalid upstream response: {0}")]
+    InvalidUpstream(String),
 }
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.
@@ -186,13 +200,16 @@ mod tests {
 
     use super::cargo::CargoPackagingStrategy;
     use super::*;
-    use crate::test_support::{InMemoryArtifactStore, InMemoryPackageIndexStore, InMemoryStorage};
+    use crate::test_support::{
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryStorage,
+    };
 
     fn cargo_strategy() -> Arc<dyn PackagingStrategy> {
         Arc::new(CargoPackagingStrategy::new(
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
         ))
     }
 
