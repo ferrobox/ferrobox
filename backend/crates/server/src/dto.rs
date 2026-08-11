@@ -7,6 +7,7 @@
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::{Repository, RepositoryKind};
+use ferrobox_domain::user::{Role, User};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -176,6 +177,59 @@ pub(crate) struct LoginRequest {
 pub(crate) struct UserResponse {
     pub(crate) id: String,
     pub(crate) username: String,
+    pub(crate) role: RoleDto,
+}
+
+impl From<&User> for UserResponse {
+    fn from(user: &User) -> Self {
+        Self {
+            id: user.id().to_string(),
+            username: user.username().to_string(),
+            role: user.role().into(),
+        }
+    }
+}
+
+/// Rol de autorización, tal y como viaja en la API HTTP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RoleDto {
+    /// Gestión completa.
+    Admin,
+    /// Puede escribir repositorios y artefactos.
+    Developer,
+    /// Solo lectura.
+    Reader,
+}
+
+impl From<Role> for RoleDto {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Admin => Self::Admin,
+            Role::Developer => Self::Developer,
+            Role::Reader => Self::Reader,
+        }
+    }
+}
+
+impl From<RoleDto> for Role {
+    fn from(role: RoleDto) -> Self {
+        match role {
+            RoleDto::Admin => Self::Admin,
+            RoleDto::Developer => Self::Developer,
+            RoleDto::Reader => Self::Reader,
+        }
+    }
+}
+
+/// Cuerpo de la petición para crear un usuario.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateUserRequest {
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) role: RoleDto,
 }
 
 /// Respuesta al iniciar sesión correctamente.

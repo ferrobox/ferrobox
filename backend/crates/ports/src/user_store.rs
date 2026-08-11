@@ -56,6 +56,23 @@ pub trait UserStore: Send + Sync {
         username: &Username,
     ) -> Result<Option<(User, String)>, UserStoreError>;
 
+    /// Lista todos los usuarios, ordenados por nombre.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn find_all(&self) -> Result<Vec<User>, UserStoreError>;
+
+    /// Elimina un usuario. No es un error eliminar un identificador
+    /// que no existe; en ese caso devuelve `false`.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn delete(&self, id: UserId) -> Result<bool, UserStoreError>;
+
     /// Cuenta cuántos usuarios existen. Se usa al arrancar para decidir
     /// si hay que crear el administrador inicial.
     ///
@@ -64,12 +81,22 @@ pub trait UserStore: Send + Sync {
     /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
     /// falla.
     async fn count(&self) -> Result<u64, UserStoreError>;
+
+    /// Cuenta cuántos usuarios tienen rol de administrador.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn count_admins(&self) -> Result<u64, UserStoreError>;
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    use ferrobox_domain::user::Role;
 
     use super::*;
 
@@ -121,15 +148,41 @@ mod tests {
                 .map(|(user, hash)| (user.clone(), hash.clone())))
         }
 
+        async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
+            let mut users: Vec<_> = self
+                .users
+                .lock()
+                .unwrap()
+                .values()
+                .map(|(user, _)| user.clone())
+                .collect();
+            users.sort_by(|a, b| a.username().as_str().cmp(b.username().as_str()));
+            Ok(users)
+        }
+
+        async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
+            Ok(self.users.lock().unwrap().remove(&id).is_some())
+        }
+
         async fn count(&self) -> Result<u64, UserStoreError> {
             Ok(self.users.lock().unwrap().len() as u64)
+        }
+
+        async fn count_admins(&self) -> Result<u64, UserStoreError> {
+            Ok(self
+                .users
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|(user, _)| user.role() == Role::Admin)
+                .count() as u64)
         }
     }
 
     #[tokio::test]
     async fn save_then_find_by_username_returns_user_and_hash() {
         let store = InMemoryUserStore::default();
-        let user = User::new(Username::parse("admin").unwrap());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
 
         store
             .save_with_password_hash(&user, "hash-admin")
@@ -143,6 +196,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(found.0, user);
+        assert_eq!(found.0.role(), Role::Admin);
         assert_eq!(found.1, "hash-admin");
     }
 
@@ -150,27 +204,67 @@ mod tests {
     async fn saving_a_duplicate_username_is_rejected() {
         let store = InMemoryUserStore::default();
         store
-            .save_with_password_hash(&User::new(Username::parse("admin").unwrap()), "a")
+            .save_with_password_hash(
+                &User::new(Username::parse("admin").unwrap(), Role::Admin),
+                "a",
+            )
             .await
             .unwrap();
 
         let result = store
-            .save_with_password_hash(&User::new(Username::parse("admin").unwrap()), "b")
+            .save_with_password_hash(
+                &User::new(Username::parse("admin").unwrap(), Role::Developer),
+                "b",
+            )
             .await;
 
         assert!(matches!(result, Err(UserStoreError::DuplicateUsername(_))));
     }
 
     #[tokio::test]
-    async fn count_reflects_saved_users() {
+    async fn count_and_count_admins_reflect_saved_users() {
         let store = InMemoryUserStore::default();
         assert_eq!(store.count().await.unwrap(), 0);
 
         store
-            .save_with_password_hash(&User::new(Username::parse("admin").unwrap()), "a")
+            .save_with_password_hash(
+                &User::new(Username::parse("admin").unwrap(), Role::Admin),
+                "a",
+            )
+            .await
+            .unwrap();
+        store
+            .save_with_password_hash(
+                &User::new(Username::parse("dev").unwrap(), Role::Developer),
+                "b",
+            )
             .await
             .unwrap();
 
-        assert_eq!(store.count().await.unwrap(), 1);
+        assert_eq!(store.count().await.unwrap(), 2);
+        assert_eq!(store.count_admins().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn find_all_orders_by_username() {
+        let store = InMemoryUserStore::default();
+        store
+            .save_with_password_hash(
+                &User::new(Username::parse("zoe").unwrap(), Role::Reader),
+                "a",
+            )
+            .await
+            .unwrap();
+        store
+            .save_with_password_hash(
+                &User::new(Username::parse("ada").unwrap(), Role::Admin),
+                "b",
+            )
+            .await
+            .unwrap();
+
+        let all = store.find_all().await.unwrap();
+        assert_eq!(all[0].username().as_str(), "ada");
+        assert_eq!(all[1].username().as_str(), "zoe");
     }
 }

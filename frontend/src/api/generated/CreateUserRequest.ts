@@ -2,6 +2,6 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Representación de un usuario en las respuestas de la API.
+ * Cuerpo de la petición para crear un usuario.
  */
-export type UserResponse = { id: string, username: string, role: RoleDto, };
+export type CreateUserRequest = { username: string, password: string, role: RoleDto, };

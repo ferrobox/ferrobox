@@ -11,6 +11,7 @@ use ferrobox_application::login::LoginError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
+use ferrobox_application::manage_users::{CreateUserError, DeleteUserError, ListUsersError};
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
@@ -22,6 +23,7 @@ use crate::dto::ErrorResponse;
 pub(crate) enum ApiError {
     BadRequest(String),
     Unauthorized(String),
+    Forbidden(String),
     Conflict(String),
     NotFound(String),
     Internal(String),
@@ -32,6 +34,7 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
             Self::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
+            Self::Forbidden(message) => (StatusCode::FORBIDDEN, message),
             Self::Conflict(message) => (StatusCode::CONFLICT, message),
             Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
             Self::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, message),
@@ -151,6 +154,38 @@ impl From<AuthenticateTokenError> for ApiError {
             AuthenticateTokenError::InvalidToken => Self::Unauthorized(err.to_string()),
             AuthenticateTokenError::TokenPersistence(_)
             | AuthenticateTokenError::UserPersistence(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<CreateUserError> for ApiError {
+    fn from(err: CreateUserError) -> Self {
+        match &err {
+            CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_)) => {
+                Self::Conflict(err.to_string())
+            }
+            CreateUserError::PasswordHashing(_)
+            | CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::Backend(_)) => {
+                Self::Internal(err.to_string())
+            }
+        }
+    }
+}
+
+impl From<ListUsersError> for ApiError {
+    fn from(err: ListUsersError) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
+impl From<DeleteUserError> for ApiError {
+    fn from(err: DeleteUserError) -> Self {
+        match err {
+            DeleteUserError::NotFound => Self::NotFound(err.to_string()),
+            DeleteUserError::CannotDeleteSelf | DeleteUserError::CannotDeleteLastAdmin => {
+                Self::Conflict(err.to_string())
+            }
+            DeleteUserError::Persistence(_) => Self::Internal(err.to_string()),
         }
     }
 }

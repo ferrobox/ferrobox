@@ -79,7 +79,7 @@ mod tests {
     use std::sync::Mutex;
 
     use ferrobox_domain::api_token::ApiTokenName;
-    use ferrobox_domain::user::{User, Username};
+    use ferrobox_domain::user::{Role, User, Username};
 
     use super::*;
 
@@ -155,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn save_then_find_by_hash_returns_the_token() {
         let store = InMemoryApiTokenStore::default();
-        let user = User::new(Username::parse("admin").unwrap());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
         let token = ApiToken::new(
             user.id(),
             ApiTokenName::parse("session").unwrap(),
@@ -173,8 +173,8 @@ mod tests {
     #[tokio::test]
     async fn delete_for_user_only_removes_owned_tokens() {
         let store = InMemoryApiTokenStore::default();
-        let owner = User::new(Username::parse("admin").unwrap());
-        let other = User::new(Username::parse("other").unwrap());
+        let owner = User::new(Username::parse("admin").unwrap(), Role::Admin);
+        let other = User::new(Username::parse("other").unwrap(), Role::Developer);
         let token = ApiToken::new(
             owner.id(),
             ApiTokenName::parse("session").unwrap(),

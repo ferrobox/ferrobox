@@ -2,7 +2,9 @@ import { LogOut, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useAuth } from "@/auth/AuthProvider";
+import { roleLabel } from "@/auth/roles";
 import { HealthIndicator } from "@/components/layout/HealthIndicator";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 export function Topbar() {
@@ -16,8 +18,9 @@ export function Topbar() {
 
       <div className="flex items-center gap-2">
         {user ? (
-          <span className="hidden text-sm text-muted-foreground sm:inline">
+          <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
             {user.username}
+            <Badge variant="outline">{roleLabel(user.role)}</Badge>
           </span>
         ) : null}
         <Button

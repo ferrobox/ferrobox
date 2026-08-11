@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::UserId;
-use ferrobox_domain::user::{User, Username};
+use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use sqlx::PgPool;
 use thiserror::Error;
@@ -38,6 +38,12 @@ fn translate_save_error(username: &Username, err: &sqlx::Error) -> UserStoreErro
     backend_error(err.to_string())
 }
 
+fn row_to_user(id: Uuid, username: String, role: &str) -> Result<User, UserStoreError> {
+    let username = Username::parse(username).map_err(|err| backend_error(err.to_string()))?;
+    let role = Role::parse(role).map_err(|err| backend_error(err.to_string()))?;
+    Ok(User::from_parts(UserId::from(id), username, role))
+}
+
 #[async_trait]
 impl UserStore for PostgresUserStore {
     async fn save_with_password_hash(
@@ -49,15 +55,17 @@ impl UserStore for PostgresUserStore {
 
         sqlx::query!(
             r#"
-            INSERT INTO users (id, username, password_hash)
-            VALUES ($1, $2, $3)
+            INSERT INTO users (id, username, password_hash, role)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (id) DO UPDATE
             SET username = EXCLUDED.username,
-                password_hash = EXCLUDED.password_hash
+                password_hash = EXCLUDED.password_hash,
+                role = EXCLUDED.role
             "#,
             id,
             user.username().as_str(),
             password_hash,
+            user.role().as_str(),
         )
         .execute(&self.pool)
         .await
@@ -71,7 +79,7 @@ impl UserStore for PostgresUserStore {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, username
+            SELECT id, username, role
             FROM users
             WHERE id = $1
             "#,
@@ -81,12 +89,8 @@ impl UserStore for PostgresUserStore {
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|row| {
-            let username =
-                Username::parse(row.username).map_err(|err| backend_error(err.to_string()))?;
-            Ok(User::from_parts(UserId::from(row.id), username))
-        })
-        .transpose()
+        row.map(|row| row_to_user(row.id, row.username, &row.role))
+            .transpose()
     }
 
     async fn find_by_username_with_password_hash(
@@ -95,7 +99,7 @@ impl UserStore for PostgresUserStore {
     ) -> Result<Option<(User, String)>, UserStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, username, password_hash
+            SELECT id, username, password_hash, role
             FROM users
             WHERE username = $1
             "#,
@@ -106,14 +110,44 @@ impl UserStore for PostgresUserStore {
         .map_err(|err| backend_error(err.to_string()))?;
 
         row.map(|row| {
-            let username =
-                Username::parse(row.username).map_err(|err| backend_error(err.to_string()))?;
-            Ok((
-                User::from_parts(UserId::from(row.id), username),
-                row.password_hash,
-            ))
+            let user = row_to_user(row.id, row.username, &row.role)?;
+            Ok((user, row.password_hash))
         })
         .transpose()
+    }
+
+    async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, username, role
+            FROM users
+            ORDER BY username ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| row_to_user(row.id, row.username, &row.role))
+            .collect()
+    }
+
+    async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
+        let id: Uuid = id.into();
+
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM users
+            WHERE id = $1
+            "#,
+            id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        Ok(result.rows_affected() > 0)
     }
 
     async fn count(&self) -> Result<u64, UserStoreError> {
@@ -129,11 +163,26 @@ impl UserStore for PostgresUserStore {
 
         Ok(u64::try_from(row.count).unwrap_or(0))
     }
+
+    async fn count_admins(&self) -> Result<u64, UserStoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM users
+            WHERE role = 'admin'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        Ok(u64::try_from(row.count).unwrap_or(0))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use ferrobox_domain::user::Username;
+    use ferrobox_domain::user::{Role, Username};
     use sqlx::postgres::PgPoolOptions;
 
     use super::*;
@@ -152,7 +201,10 @@ mod tests {
     #[ignore = "requires a running PostgreSQL instance; run with `cargo test -- --ignored`"]
     async fn save_then_find_by_username() {
         let store = PostgresUserStore::new(pool_from_env().await);
-        let user = User::new(Username::parse("integration-auth-user").unwrap());
+        let user = User::new(
+            Username::parse("integration-auth-user").unwrap(),
+            Role::Developer,
+        );
 
         store
             .save_with_password_hash(&user, "hash-integration")
@@ -166,6 +218,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(found.0, user);
+        assert_eq!(found.0.role(), Role::Developer);
         assert_eq!(found.1, "hash-integration");
     }
 }

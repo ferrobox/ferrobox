@@ -107,6 +107,8 @@ impl LoginUseCase {
 mod tests {
     use std::sync::Arc;
 
+    use ferrobox_domain::user::Role;
+
     use crate::auth_crypto::hash_password;
     use crate::test_support::{InMemoryApiTokenStore, InMemoryUserStore};
 
@@ -115,7 +117,7 @@ mod tests {
     async fn seeded_stores() -> (Arc<InMemoryUserStore>, Arc<InMemoryApiTokenStore>, User) {
         let user_store = Arc::new(InMemoryUserStore::default());
         let api_token_store = Arc::new(InMemoryApiTokenStore::default());
-        let user = User::new(Username::parse("admin").unwrap());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
         let hash = hash_password("admin").unwrap();
         user_store
             .save_with_password_hash(&user, &hash)

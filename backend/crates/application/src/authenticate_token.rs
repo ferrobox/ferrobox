@@ -80,7 +80,7 @@ mod tests {
     use std::sync::Arc;
 
     use ferrobox_domain::api_token::ApiTokenName;
-    use ferrobox_domain::user::Username;
+    use ferrobox_domain::user::{Role, User, Username};
 
     use crate::auth_crypto::{generate_api_token_secret, hash_api_token_secret, hash_password};
     use crate::test_support::{InMemoryApiTokenStore, InMemoryUserStore};
@@ -91,7 +91,7 @@ mod tests {
     async fn authenticates_a_valid_secret() {
         let user_store = Arc::new(InMemoryUserStore::default());
         let api_token_store = Arc::new(InMemoryApiTokenStore::default());
-        let user = User::new(Username::parse("admin").unwrap());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
         user_store
             .save_with_password_hash(&user, &hash_password("admin").unwrap())
             .await

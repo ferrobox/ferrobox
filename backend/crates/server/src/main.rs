@@ -4,11 +4,13 @@
 mod artifacts;
 mod auth;
 mod auth_extract;
+mod authz;
 mod cargo_registry;
 mod config;
 mod dto;
 mod error;
 mod repositories;
+mod users;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,6 +38,7 @@ use ferrobox_application::login::LoginUseCase;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
 };
+use ferrobox_application::manage_users::{CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase};
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
@@ -57,6 +60,9 @@ struct AppState {
     create_api_token: CreateApiTokenUseCase,
     list_api_tokens: ListApiTokensUseCase,
     revoke_api_token: RevokeApiTokenUseCase,
+    create_user: CreateUserUseCase,
+    list_users: ListUsersUseCase,
+    delete_user: DeleteUserUseCase,
 }
 
 #[tokio::main]
@@ -109,6 +115,9 @@ async fn main() {
         create_api_token: CreateApiTokenUseCase::new(api_token_store.clone()),
         list_api_tokens: ListApiTokensUseCase::new(api_token_store.clone()),
         revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
+        create_user: CreateUserUseCase::new(user_store.clone()),
+        list_users: ListUsersUseCase::new(user_store.clone()),
+        delete_user: DeleteUserUseCase::new(user_store),
     });
 
     let public = Router::new()
@@ -122,6 +131,8 @@ async fn main() {
             get(auth::list_tokens).post(auth::create_token),
         )
         .route("/auth/tokens/{token_id}", delete(auth::revoke_token))
+        .route("/users", get(users::list_users).post(users::create_user))
+        .route("/users/{user_id}", delete(users::delete_user))
         .route(
             "/repositories",
             post(repositories::create_repository).get(repositories::list_repositories),

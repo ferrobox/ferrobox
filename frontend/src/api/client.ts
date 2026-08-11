@@ -4,6 +4,7 @@ import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateRepositoryResponse } from "@/api/generated/CreateRepositoryResponse";
+import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { ErrorResponse } from "@/api/generated/ErrorResponse";
 import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
@@ -113,6 +114,21 @@ export function createApiToken(
 
 export function revokeApiToken(tokenId: string): Promise<void> {
   return request<void>(`/auth/tokens/${tokenId}`, { method: "DELETE" });
+}
+
+export function listUsers(): Promise<UserResponse[]> {
+  return request<UserResponse[]>("/users");
+}
+
+export function createUser(payload: CreateUserRequest): Promise<UserResponse> {
+  return request<UserResponse>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(userId: string): Promise<void> {
+  return request<void>(`/users/${userId}`, { method: "DELETE" });
 }
 
 export function listRepositories(): Promise<RepositoryResponse[]> {

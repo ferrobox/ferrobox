@@ -6,6 +6,75 @@ use crate::ids::UserId;
 
 const MAX_USERNAME_LENGTH: usize = 64;
 
+/// Rol de autorización de un usuario en `FerroBox`.
+///
+/// Los roles son deliberadamente pocos y ordenados por privilegio:
+/// `Admin` gestiona usuarios y puede escribir; `Developer` puede
+/// publicar y crear repositorios; `Reader` solo lee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Role {
+    /// Gestión completa: usuarios, repositorios y publicación.
+    Admin,
+    /// Puede crear repositorios y publicar artefactos; no gestiona
+    /// usuarios.
+    Developer,
+    /// Solo lectura de repositorios y artefactos.
+    Reader,
+}
+
+impl Role {
+    /// Etiqueta estable usada en persistencia y en la API HTTP.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Developer => "developer",
+            Self::Reader => "reader",
+        }
+    }
+
+    /// Parsea la etiqueta estable de un rol.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`RoleError::Unknown`] si la etiqueta no es conocida.
+    pub fn parse(value: &str) -> Result<Self, RoleError> {
+        match value {
+            "admin" => Ok(Self::Admin),
+            "developer" => Ok(Self::Developer),
+            "reader" => Ok(Self::Reader),
+            other => Err(RoleError::Unknown(other.to_string())),
+        }
+    }
+
+    /// `true` si este rol puede gestionar usuarios.
+    #[must_use]
+    pub fn can_manage_users(self) -> bool {
+        matches!(self, Self::Admin)
+    }
+
+    /// `true` si este rol puede crear repositorios y publicar
+    /// artefactos.
+    #[must_use]
+    pub fn can_write_artifacts(self) -> bool {
+        matches!(self, Self::Admin | Self::Developer)
+    }
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Motivos por los que una cadena no es un [`Role`] válido.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RoleError {
+    /// Etiqueta de rol desconocida.
+    #[error("unknown role: '{0}'")]
+    Unknown(String),
+}
+
 /// Nombre de usuario validado: no vacío, con longitud acotada, y
 /// restringido a caracteres seguros para identificadores.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -88,8 +157,8 @@ impl TryFrom<String> for Username {
     }
 }
 
-/// Un usuario de `FerroBox`: identidad autenticable que puede poseer
-/// tokens de API.
+/// Un usuario de `FerroBox`: identidad autenticable con un rol de
+/// autorización, que puede poseer tokens de API.
 ///
 /// El hash de la contraseña no forma parte de esta entidad: es un
 /// detalle de credenciales que vive en la capa de aplicación /
@@ -98,15 +167,17 @@ impl TryFrom<String> for Username {
 pub struct User {
     id: UserId,
     username: Username,
+    role: Role,
 }
 
 impl User {
     /// Registra un usuario nuevo, asignándole un identificador nuevo.
     #[must_use]
-    pub fn new(username: Username) -> Self {
+    pub fn new(username: Username, role: Role) -> Self {
         Self {
             id: UserId::new(),
             username,
+            role,
         }
     }
 
@@ -114,8 +185,12 @@ impl User {
     /// identificador conocido (por ejemplo, al cargarlo desde
     /// persistencia).
     #[must_use]
-    pub fn from_parts(id: UserId, username: Username) -> Self {
-        Self { id, username }
+    pub fn from_parts(id: UserId, username: Username, role: Role) -> Self {
+        Self {
+            id,
+            username,
+            role,
+        }
     }
 
     /// Identificador único de este usuario.
@@ -128,6 +203,12 @@ impl User {
     #[must_use]
     pub fn username(&self) -> &Username {
         &self.username
+    }
+
+    /// Rol de autorización de este usuario.
+    #[must_use]
+    pub fn role(&self) -> Role {
+        self.role
     }
 }
 
@@ -170,9 +251,25 @@ mod tests {
     #[test]
     fn equality_is_based_on_identity() {
         let id = UserId::new();
-        let first = User::from_parts(id, Username::parse("admin").unwrap());
-        let second = User::from_parts(id, Username::parse("other").unwrap());
+        let first = User::from_parts(id, Username::parse("admin").unwrap(), Role::Admin);
+        let second = User::from_parts(id, Username::parse("other").unwrap(), Role::Reader);
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn admin_can_manage_users_and_write() {
+        assert!(Role::Admin.can_manage_users());
+        assert!(Role::Admin.can_write_artifacts());
+        assert!(!Role::Developer.can_manage_users());
+        assert!(Role::Developer.can_write_artifacts());
+        assert!(!Role::Reader.can_write_artifacts());
+    }
+
+    #[test]
+    fn role_round_trips_through_label() {
+        for role in [Role::Admin, Role::Developer, Role::Reader] {
+            assert_eq!(Role::parse(role.as_str()).unwrap(), role);
+        }
     }
 }

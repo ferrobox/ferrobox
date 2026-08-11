@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { useRepository } from "@/api/queries";
+import { useAuth } from "@/auth/AuthProvider";
+import { canWriteArtifacts } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
 import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
@@ -25,8 +27,10 @@ export function RepositoryDetailPage() {
 }
 
 function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
+  const { user } = useAuth();
   const { data: repository, isPending, isError, error, refetch, isFetching } =
     useRepository(repositoryId);
+  const canWrite = canWriteArtifacts(user?.role);
 
   if (isPending) {
     return (
@@ -70,7 +74,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           </div>
         }
         title={repository.name}
-        actions={<UploadArtifactButton repositoryId={repositoryId} />}
+        actions={canWrite ? <UploadArtifactButton repositoryId={repositoryId} /> : undefined}
       />
 
       <div className="mb-6 flex flex-wrap items-center gap-2">

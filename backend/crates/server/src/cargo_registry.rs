@@ -18,6 +18,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::auth_extract::AuthenticatedUser;
+use crate::authz::require_write_artifacts;
 use crate::error::ApiError;
 
 /// Construye el subrouter con todas las rutas del protocolo de Cargo,
@@ -149,9 +151,12 @@ struct PublishResponse {
 /// [`ferrobox_application::packaging::cargo`]).
 async fn publish(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
+    require_write_artifacts(&user)?;
+
     let repository = state
         .get_repository
         .execute(RepositoryId::from(repository_id))

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ferrobox_domain::user::{User, Username};
+use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use thiserror::Error;
 
@@ -41,8 +41,8 @@ impl BootstrapAdminUseCase {
         Self { user_store }
     }
 
-    /// Si no hay usuarios, crea uno con el nombre y la contraseña
-    /// indicados. Si ya hay usuarios, no hace nada.
+    /// Si no hay usuarios, crea uno con rol [`Role::Admin`] y las
+    /// credenciales indicadas. Si ya hay usuarios, no hace nada.
     ///
     /// # Errors
     ///
@@ -57,7 +57,7 @@ impl BootstrapAdminUseCase {
             return Ok(BootstrapAdminOutcome::AlreadyInitialized);
         }
 
-        let user = User::new(username);
+        let user = User::new(username, Role::Admin);
         let password_hash = hash_password(password)?;
         self.user_store
             .save_with_password_hash(&user, &password_hash)
@@ -87,6 +87,8 @@ mod tests {
 
         assert_eq!(outcome, BootstrapAdminOutcome::Created);
         assert_eq!(user_store.count().await.unwrap(), 1);
+        let admin = user_store.find_all().await.unwrap().pop().unwrap();
+        assert_eq!(admin.role(), Role::Admin);
     }
 
     #[tokio::test]
