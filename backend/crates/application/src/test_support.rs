@@ -4,13 +4,17 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use bytes::Bytes;
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::{ArtifactId, RepositoryId};
+use ferrobox_domain::api_token::ApiToken;
+use ferrobox_domain::ids::{ApiTokenId, ArtifactId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
+use ferrobox_ports::user_store::{UserStore, UserStoreError};
 
 #[derive(Default)]
 pub(crate) struct InMemoryRepositoryStore {
@@ -215,4 +219,148 @@ pub(crate) fn forge(name: &str) -> Repository {
         PackageEcosystem::Generic,
     )
     .unwrap()
+}
+
+#[derive(Default)]
+pub(crate) struct InMemoryUserStore {
+    users: Mutex<HashMap<UserId, (User, String)>>,
+}
+
+#[async_trait]
+impl UserStore for InMemoryUserStore {
+    async fn save_with_password_hash(
+        &self,
+        user: &User,
+        password_hash: &str,
+    ) -> Result<(), UserStoreError> {
+        let mut users = self.users.lock().unwrap();
+
+        let name_taken_by_another = users.values().any(|(existing, _)| {
+            existing.id() != user.id() && existing.username() == user.username()
+        });
+
+        if name_taken_by_another {
+            return Err(UserStoreError::DuplicateUsername(user.username().clone()));
+        }
+
+        users.insert(user.id(), (user.clone(), password_hash.to_string()));
+        Ok(())
+    }
+
+    async fn find_by_id(&self, id: UserId) -> Result<Option<User>, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|(user, _)| user.clone()))
+    }
+
+    async fn find_by_username_with_password_hash(
+        &self,
+        username: &Username,
+    ) -> Result<Option<(User, String)>, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(user, _)| user.username() == username)
+            .map(|(user, hash)| (user.clone(), hash.clone())))
+    }
+
+    async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
+        let mut users: Vec<_> = self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(user, _)| user.clone())
+            .collect();
+        users.sort_by(|a, b| a.username().as_str().cmp(b.username().as_str()));
+        Ok(users)
+    }
+
+    async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
+        Ok(self.users.lock().unwrap().remove(&id).is_some())
+    }
+
+    async fn count(&self) -> Result<u64, UserStoreError> {
+        Ok(self.users.lock().unwrap().len() as u64)
+    }
+
+    async fn count_admins(&self) -> Result<u64, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(user, _)| user.role() == Role::Admin)
+            .count() as u64)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct InMemoryApiTokenStore {
+    tokens: Mutex<HashMap<ApiTokenId, (ApiToken, String, String)>>,
+}
+
+#[async_trait]
+impl ApiTokenStore for InMemoryApiTokenStore {
+    async fn save(&self, token: &ApiToken, token_hash: &str) -> Result<(), ApiTokenStoreError> {
+        self.tokens.lock().unwrap().insert(
+            token.id(),
+            (
+                token.clone(),
+                token_hash.to_string(),
+                "2026-01-01T00:00:00Z".to_string(),
+            ),
+        );
+        Ok(())
+    }
+
+    async fn find_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<ApiToken>, ApiTokenStoreError> {
+        Ok(self
+            .tokens
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(_, hash, _)| hash == token_hash)
+            .map(|(token, _, _)| token.clone()))
+    }
+
+    async fn list_for_user(
+        &self,
+        user_id: UserId,
+    ) -> Result<Vec<ApiTokenRecord>, ApiTokenStoreError> {
+        Ok(self
+            .tokens
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(token, _, _)| token.user_id() == user_id)
+            .map(|(token, _, created_at)| ApiTokenRecord {
+                token: token.clone(),
+                created_at_rfc3339: created_at.clone(),
+            })
+            .collect())
+    }
+
+    async fn delete_for_user(
+        &self,
+        token_id: ApiTokenId,
+        user_id: UserId,
+    ) -> Result<bool, ApiTokenStoreError> {
+        let mut tokens = self.tokens.lock().unwrap();
+        match tokens.get(&token_id) {
+            Some((token, _, _)) if token.user_id() == user_id => {
+                tokens.remove(&token_id);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
 }

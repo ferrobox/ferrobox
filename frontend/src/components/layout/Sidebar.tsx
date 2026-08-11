@@ -1,6 +1,8 @@
 import { Boxes, Package, Settings2, ShieldCheck, Users } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
+import { useAuth } from "@/auth/AuthProvider";
+import { canManageUsers } from "@/auth/roles";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -8,16 +10,20 @@ interface NavItem {
   readonly to: string;
   readonly icon: typeof Boxes;
   readonly disabled?: boolean;
+  readonly adminOnly?: boolean;
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
   { label: "Repositorios", to: "/repositories", icon: Boxes },
-  { label: "Usuarios", to: "/users", icon: Users, disabled: true },
-  { label: "Seguridad", to: "/security", icon: ShieldCheck, disabled: true },
+  { label: "Seguridad", to: "/security", icon: ShieldCheck },
+  { label: "Usuarios", to: "/users", icon: Users, adminOnly: true },
   { label: "Configuración", to: "/settings", icon: Settings2, disabled: true },
 ];
 
 export function Sidebar() {
+  const { user } = useAuth();
+  const items = NAV_ITEMS.filter((item) => !item.adminOnly || canManageUsers(user?.role));
+
   return (
     <aside className="bg-sidebar text-sidebar-foreground flex h-full w-64 flex-col border-r border-sidebar-border">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
@@ -31,7 +37,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <SidebarLink key={item.to} item={item} />
         ))}
       </nav>

@@ -1,6 +1,7 @@
 import { AlertCircle, Download, FileBox, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
-import { artifactDownloadUrl } from "@/api/client";
+import { ApiError, downloadArtifact } from "@/api/client";
 import { useRepositoryArtifacts } from "@/api/queries";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -81,11 +82,21 @@ export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
                 {formatBytes(artifact.size_bytes)}
               </TableCell>
               <TableCell className="text-right">
-                <Button asChild variant="ghost" size="sm">
-                  <a href={artifactDownloadUrl(artifact.id)} download>
-                    <Download />
-                    Descargar
-                  </a>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    void downloadArtifact(artifact.id).catch((err: unknown) => {
+                      toast.error(
+                        err instanceof ApiError
+                          ? err.message
+                          : "No se pudo descargar el artefacto",
+                      );
+                    });
+                  }}
+                >
+                  <Download />
+                  Descargar
                 </Button>
               </TableCell>
             </TableRow>

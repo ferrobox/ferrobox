@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
+import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
+import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
   repository: (id: string) => ["repositories", id] as const,
   repositoryArtifacts: (id: string) => ["repositories", id, "artifacts"] as const,
+  apiTokens: ["auth", "tokens"] as const,
+  users: ["users"] as const,
 };
 
 export function useRepositories() {
@@ -39,6 +43,13 @@ export function useCargoRegistryConfig(repositoryId: string, enabled: boolean) {
   });
 }
 
+export function useApiTokens() {
+  return useQuery({
+    queryKey: queryKeys.apiTokens,
+    queryFn: api.listApiTokens,
+  });
+}
+
 export function useCreateRepository() {
   const queryClient = useQueryClient();
 
@@ -59,6 +70,57 @@ export function usePublishArtifact(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
+    },
+  });
+}
+
+export function useCreateApiToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateApiTokenRequest) => api.createApiToken(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens });
+    },
+  });
+}
+
+export function useRevokeApiToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (tokenId: string) => api.revokeApiToken(tokenId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.apiTokens });
+    },
+  });
+}
+
+export function useUsers() {
+  return useQuery({
+    queryKey: queryKeys.users,
+    queryFn: api.listUsers,
+  });
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateUserRequest) => api.createUser(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
+  });
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (userId: string) => api.deleteUser(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users });
     },
   });
 }

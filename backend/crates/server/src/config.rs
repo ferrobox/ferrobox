@@ -31,6 +31,10 @@ pub struct Config {
     /// absolutas en protocolos que las requieren, como el `config.json`
     /// del índice disperso de Cargo.
     pub public_base_url: String,
+    /// Nombre del administrador inicial (solo se usa si no hay usuarios).
+    pub admin_username: String,
+    /// Contraseña del administrador inicial (solo se usa si no hay usuarios).
+    pub admin_password: String,
 }
 
 impl Config {
@@ -50,6 +54,8 @@ impl Config {
             s3_bucket: require_env("S3_BUCKET")?,
             bind_address: env_or("BIND_ADDRESS", "127.0.0.1:3000"),
             public_base_url: env_or("PUBLIC_BASE_URL", "http://127.0.0.1:3000"),
+            admin_username: env_or("ADMIN_USERNAME", "admin"),
+            admin_password: env_or("ADMIN_PASSWORD", "admin"),
         })
     }
 }

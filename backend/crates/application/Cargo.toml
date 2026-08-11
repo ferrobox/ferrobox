@@ -13,6 +13,10 @@ sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+argon2.workspace = true
+rand.workspace = true
+hex.workspace = true
+password-hash.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

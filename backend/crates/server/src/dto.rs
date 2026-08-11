@@ -7,6 +7,7 @@
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::{Repository, RepositoryKind};
+use ferrobox_domain::user::{Role, User};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -160,4 +161,110 @@ impl From<Artifact> for ArtifactResponse {
 #[ts(export)]
 pub(crate) struct PublishResponse {
     pub(crate) id: String,
+}
+
+/// Cuerpo de la petición de inicio de sesión.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct LoginRequest {
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
+/// Representación de un usuario en las respuestas de la API.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct UserResponse {
+    pub(crate) id: String,
+    pub(crate) username: String,
+    pub(crate) role: RoleDto,
+}
+
+impl From<&User> for UserResponse {
+    fn from(user: &User) -> Self {
+        Self {
+            id: user.id().to_string(),
+            username: user.username().to_string(),
+            role: user.role().into(),
+        }
+    }
+}
+
+/// Rol de autorización, tal y como viaja en la API HTTP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RoleDto {
+    /// Gestión completa.
+    Admin,
+    /// Puede escribir repositorios y artefactos.
+    Developer,
+    /// Solo lectura.
+    Reader,
+}
+
+impl From<Role> for RoleDto {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Admin => Self::Admin,
+            Role::Developer => Self::Developer,
+            Role::Reader => Self::Reader,
+        }
+    }
+}
+
+impl From<RoleDto> for Role {
+    fn from(role: RoleDto) -> Self {
+        match role {
+            RoleDto::Admin => Self::Admin,
+            RoleDto::Developer => Self::Developer,
+            RoleDto::Reader => Self::Reader,
+        }
+    }
+}
+
+/// Cuerpo de la petición para crear un usuario.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateUserRequest {
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) role: RoleDto,
+}
+
+/// Respuesta al iniciar sesión correctamente.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct LoginResponse {
+    /// Secreto del token de sesión (mostrado una sola vez).
+    pub(crate) token: String,
+    pub(crate) user: UserResponse,
+}
+
+/// Cuerpo de la petición para crear un token de API.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateApiTokenRequest {
+    pub(crate) name: String,
+}
+
+/// Representación de un token de API (sin secreto) en listados.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ApiTokenResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) prefix: String,
+    pub(crate) created_at: String,
+}
+
+/// Respuesta al crear un token de API: incluye el secreto una sola vez.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ApiTokenCreatedResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) prefix: String,
+    /// Secreto en claro. Solo se expone en esta respuesta.
+    pub(crate) token: String,
 }

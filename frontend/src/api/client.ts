@@ -1,9 +1,16 @@
+import type { ApiTokenCreatedResponse } from "@/api/generated/ApiTokenCreatedResponse";
+import type { ApiTokenResponse } from "@/api/generated/ApiTokenResponse";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
+import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateRepositoryResponse } from "@/api/generated/CreateRepositoryResponse";
+import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { ErrorResponse } from "@/api/generated/ErrorResponse";
+import type { LoginRequest } from "@/api/generated/LoginRequest";
+import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { UserResponse } from "@/api/generated/UserResponse";
 
 /**
  * Todas las peticiones se dirigen a `/api`, que el servidor de
@@ -13,6 +20,8 @@ import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
  */
 const API_BASE_URL = "/api";
 
+const TOKEN_STORAGE_KEY = "ferrobox.auth.token";
+
 /** Error tipado lanzado por el cliente HTTP ante cualquier respuesta no exitosa. */
 export class ApiError extends Error {
   readonly status: number;
@@ -21,6 +30,18 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
     this.status = status;
+  }
+}
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setStoredToken(token: string | null): void {
+  if (token === null) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } else {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
   }
 }
 
@@ -36,10 +57,24 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return `${response.status} ${response.statusText}`;
 }
 
+function authHeaders(extra?: HeadersInit): Headers {
+  const headers = new Headers(extra);
+  const token = getStoredToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return headers;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "content-type": "application/json",
+    ...init?.headers,
+  });
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "content-type": "application/json", ...init?.headers },
     ...init,
+    headers,
   });
 
   if (!response.ok) {
@@ -51,6 +86,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export function login(payload: LoginRequest): Promise<LoginResponse> {
+  return request<LoginResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getMe(): Promise<UserResponse> {
+  return request<UserResponse>("/auth/me");
+}
+
+export function listApiTokens(): Promise<ApiTokenResponse[]> {
+  return request<ApiTokenResponse[]>("/auth/tokens");
+}
+
+export function createApiToken(
+  payload: CreateApiTokenRequest,
+): Promise<ApiTokenCreatedResponse> {
+  return request<ApiTokenCreatedResponse>("/auth/tokens", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeApiToken(tokenId: string): Promise<void> {
+  return request<void>(`/auth/tokens/${tokenId}`, { method: "DELETE" });
+}
+
+export function listUsers(): Promise<UserResponse[]> {
+  return request<UserResponse[]>("/users");
+}
+
+export function createUser(payload: CreateUserRequest): Promise<UserResponse> {
+  return request<UserResponse>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(userId: string): Promise<void> {
+  return request<void>(`/users/${userId}`, { method: "DELETE" });
 }
 
 export function listRepositories(): Promise<RepositoryResponse[]> {
@@ -80,7 +158,7 @@ export async function publishArtifact(
 ): Promise<PublishResponse> {
   const response = await fetch(`${API_BASE_URL}/repositories/${repositoryId}/artifacts`, {
     method: "POST",
-    headers: { "content-type": "application/octet-stream" },
+    headers: authHeaders({ "content-type": "application/octet-stream" }),
     body: file,
   });
 
@@ -91,9 +169,25 @@ export async function publishArtifact(
   return (await response.json()) as PublishResponse;
 }
 
-/** URL de descarga directa de un artefacto -- se usa como `href`, no vía `fetch`. */
-export function artifactDownloadUrl(artifactId: string): string {
-  return `${API_BASE_URL}/artifacts/${artifactId}`;
+/** Descarga un artefacto con autenticación y dispara el guardado local. */
+export async function downloadArtifact(artifactId: string, filename?: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}`, {
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename ?? artifactId;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 /**
