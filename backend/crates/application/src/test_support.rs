@@ -8,7 +8,7 @@ use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::ids::{ApiTokenId, ArtifactId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
-use ferrobox_domain::user::{User, Username};
+use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
@@ -269,8 +269,34 @@ impl UserStore for InMemoryUserStore {
             .map(|(user, hash)| (user.clone(), hash.clone())))
     }
 
+    async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
+        let mut users: Vec<_> = self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(user, _)| user.clone())
+            .collect();
+        users.sort_by(|a, b| a.username().as_str().cmp(b.username().as_str()));
+        Ok(users)
+    }
+
+    async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
+        Ok(self.users.lock().unwrap().remove(&id).is_some())
+    }
+
     async fn count(&self) -> Result<u64, UserStoreError> {
         Ok(self.users.lock().unwrap().len() as u64)
+    }
+
+    async fn count_admins(&self) -> Result<u64, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(user, _)| user.role() == Role::Admin)
+            .count() as u64)
     }
 }
 

@@ -2,6 +2,8 @@ import { AlertCircle, Boxes, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useRepositories } from "@/api/queries";
+import { useAuth } from "@/auth/AuthProvider";
+import { canWriteArtifacts } from "@/auth/roles";
 import { CreateRepositoryDialog } from "@/components/repository/CreateRepositoryDialog";
 import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
 import { RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
@@ -19,14 +21,16 @@ import {
 } from "@/components/ui/table";
 
 export function RepositoriesPage() {
+  const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } = useRepositories();
+  const canWrite = canWriteArtifacts(user?.role);
 
   return (
     <div>
       <PageHeader
         title="Repositorios"
         description="Gestiona los repositorios de artefactos de tu organización."
-        actions={<CreateRepositoryDialog />}
+        actions={canWrite ? <CreateRepositoryDialog /> : undefined}
       />
 
       {isPending ? <RepositoriesTableSkeleton /> : null}

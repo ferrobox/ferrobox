@@ -29,20 +29,14 @@ pub(crate) async fn login(
 
     Ok(Json(LoginResponse {
         token: result.plaintext_secret,
-        user: UserResponse {
-            id: result.user.id().to_string(),
-            username: result.user.username().to_string(),
-        },
+        user: UserResponse::from(&result.user),
     }))
 }
 
 pub(crate) async fn me(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
 ) -> Json<UserResponse> {
-    Json(UserResponse {
-        id: user.id().to_string(),
-        username: user.username().to_string(),
-    })
+    Json(UserResponse::from(&user))
 }
 
 pub(crate) async fn list_tokens(

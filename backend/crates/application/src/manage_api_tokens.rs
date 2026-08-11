@@ -147,7 +147,7 @@ mod tests {
     use std::sync::Arc;
 
     use ferrobox_domain::ids::UserId;
-    use ferrobox_domain::user::{User, Username};
+    use ferrobox_domain::user::{Role, User, Username};
 
     use crate::test_support::InMemoryApiTokenStore;
 
@@ -156,7 +156,7 @@ mod tests {
     #[tokio::test]
     async fn create_list_and_revoke_a_token() {
         let store = Arc::new(InMemoryApiTokenStore::default());
-        let user = User::new(Username::parse("admin").unwrap());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
 
         let created = CreateApiTokenUseCase::new(store.clone())
             .execute(

@@ -10,13 +10,18 @@ use ferrobox_domain::repository::RepositoryName;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::auth_extract::AuthenticatedUser;
+use crate::authz::require_write_artifacts;
 use crate::dto::{CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn create_repository(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Json(payload): Json<CreateRepositoryRequest>,
 ) -> Result<(StatusCode, Json<CreateRepositoryResponse>), ApiError> {
+    require_write_artifacts(&user)?;
+
     let name =
         RepositoryName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 

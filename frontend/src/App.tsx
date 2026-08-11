@@ -13,6 +13,7 @@ import NotFoundPage from "@/pages/NotFoundPage";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailPage } from "@/pages/RepositoryDetailPage";
 import { SecurityPage } from "@/pages/SecurityPage";
+import { UsersPage } from "@/pages/UsersPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,7 @@ export default function App() {
                       element={<RepositoryDetailPage />}
                     />
                     <Route path="security" element={<SecurityPage />} />
+                    <Route path="users" element={<UsersPage />} />
                     <Route path="*" element={<NotFoundPage />} />
                   </Route>
                 </Route>

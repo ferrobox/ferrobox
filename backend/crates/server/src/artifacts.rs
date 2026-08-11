@@ -11,14 +11,19 @@ use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::auth_extract::AuthenticatedUser;
+use crate::authz::require_write_artifacts;
 use crate::dto::{ArtifactResponse, PublishResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn publish_artifact(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
+    require_write_artifacts(&user)?;
+
     let artifact_id = state
         .publish_artifact
         .execute(RepositoryId::from(repository_id), body)
