@@ -82,6 +82,78 @@ impl From<RepositoryId> for Uuid {
     }
 }
 
+/// Identificador único de un usuario.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UserId(Uuid);
+
+impl UserId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for UserId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for UserId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for UserId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<UserId> for Uuid {
+    fn from(value: UserId) -> Self {
+        value.0
+    }
+}
+
+/// Identificador único de un token de API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ApiTokenId(Uuid);
+
+impl ApiTokenId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for ApiTokenId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ApiTokenId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for ApiTokenId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ApiTokenId> for Uuid {
+    fn from(value: ApiTokenId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +173,14 @@ mod tests {
         let restored: ArtifactId = uuid.into();
 
         assert_eq!(id, restored);
+    }
+
+    #[test]
+    fn user_and_token_ids_round_trip_through_uuid() {
+        let user_id = UserId::new();
+        let token_id = ApiTokenId::new();
+
+        assert_eq!(UserId::from(Uuid::from(user_id)), user_id);
+        assert_eq!(ApiTokenId::from(Uuid::from(token_id)), token_id);
     }
 }

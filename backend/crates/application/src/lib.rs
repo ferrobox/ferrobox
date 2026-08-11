@@ -28,5 +28,20 @@ pub mod get_repository;
 /// su ecosistema (Cargo, npm, ...).
 pub mod packaging;
 
+/// Hashing de contraseñas y secretos de tokens de API.
+pub mod auth_crypto;
+
+/// Caso de uso: crear el administrador inicial si no hay usuarios.
+pub mod bootstrap_admin;
+
+/// Caso de uso: autenticar con usuario y contraseña.
+pub mod login;
+
+/// Casos de uso: crear, listar y revocar tokens de API.
+pub mod manage_api_tokens;
+
+/// Caso de uso: resolver un secreto Bearer a un principal autenticado.
+pub mod authenticate_token;
+
 #[cfg(test)]
 mod test_support;

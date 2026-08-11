@@ -161,3 +161,56 @@ impl From<Artifact> for ArtifactResponse {
 pub(crate) struct PublishResponse {
     pub(crate) id: String,
 }
+
+/// Cuerpo de la petición de inicio de sesión.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct LoginRequest {
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
+/// Representación de un usuario en las respuestas de la API.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct UserResponse {
+    pub(crate) id: String,
+    pub(crate) username: String,
+}
+
+/// Respuesta al iniciar sesión correctamente.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct LoginResponse {
+    /// Secreto del token de sesión (mostrado una sola vez).
+    pub(crate) token: String,
+    pub(crate) user: UserResponse,
+}
+
+/// Cuerpo de la petición para crear un token de API.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateApiTokenRequest {
+    pub(crate) name: String,
+}
+
+/// Representación de un token de API (sin secreto) en listados.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ApiTokenResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) prefix: String,
+    pub(crate) created_at: String,
+}
+
+/// Respuesta al crear un token de API: incluye el secreto una sola vez.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ApiTokenCreatedResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) prefix: String,
+    /// Secreto en claro. Solo se expone en esta respuesta.
+    pub(crate) token: String,
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO api_tokens (id, user_id, name, prefix, token_hash)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (id) DO UPDATE\n            SET name = EXCLUDED.name,\n                prefix = EXCLUDED.prefix,\n                token_hash = EXCLUDED.token_hash\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "705b781366758b15af9a020d6614813b785ab3bc898e2f6869fc6d03ece34354"
+}

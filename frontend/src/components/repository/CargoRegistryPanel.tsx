@@ -76,14 +76,27 @@ export function CargoRegistryPanel({ repositoryId }: { repositoryId: string }) {
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          2. Publica tu crate
+          2. Guarda un token de API
+        </p>
+        <CopyableCodeBlock
+          code={`[registry-tokens]\nferrobox = "fb_…"  # créalo en Seguridad`}
+        />
+        <p className="text-xs text-muted-foreground">
+          Emite el token en <span className="font-medium">Seguridad</span> y
+          añádelo a <code className="font-mono">~/.cargo/credentials.toml</code>.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          3. Publica tu crate
         </p>
         <CopyableCodeBlock code="cargo publish --registry ferrobox" />
       </div>
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          3. Añádelo como dependencia
+          4. Añádelo como dependencia
         </p>
         <CopyableCodeBlock code="cargo add mi-crate --registry ferrobox" />
       </div>

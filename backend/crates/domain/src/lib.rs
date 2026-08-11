@@ -25,3 +25,9 @@ pub mod ids;
 /// un paquete dentro de un ecosistema, independientemente de en qué
 /// repositorio esté publicada.
 pub mod package_coordinate;
+
+/// La entidad `User` y el objeto de valor `Username`.
+pub mod user;
+
+/// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.
+pub mod api_token;
