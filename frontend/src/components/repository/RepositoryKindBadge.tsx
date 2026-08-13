@@ -7,20 +7,17 @@ export type RepositoryStorageKind = RepositoryKindDto["type"];
 
 export const KIND_META = {
   forge: {
-    label: "Local",
-    domain: "Forge",
+    label: "Forge",
     description: "Almacenamiento propio: publicas tú los artefactos",
     icon: Warehouse,
   },
   mirror: {
-    label: "Remoto",
-    domain: "Mirror",
+    label: "Mirror",
     description: "Caché pull-through de un registro externo",
     icon: Radar,
   },
   alloy: {
-    label: "Virtual",
-    domain: "Alloy",
+    label: "Alloy",
     description: "Agrega otros repositorios en una sola URL",
     icon: Layers,
   },

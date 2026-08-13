@@ -99,7 +99,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold tracking-[0.2em] text-muted-foreground uppercase">
-              {kind.label} · {kind.domain}
+              {kind.label}
             </p>
             <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
               {repository.name}

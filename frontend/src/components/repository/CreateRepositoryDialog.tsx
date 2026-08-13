@@ -127,9 +127,9 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
           <DialogHeader>
             <DialogTitle>Crear repositorio</DialogTitle>
             <DialogDescription>
-              Local (Forge) guarda artefactos que publicas tú. Remoto (Mirror)
-              cachea un índice Cargo externo como crates.io. Virtual (Alloy)
-              llegará más adelante.
+              Un Forge guarda artefactos que publicas tú. Un Mirror cachea un
+              índice Cargo externo como crates.io. Alloy (agregar varios
+              repositorios en una sola URL) llegará más adelante.
             </DialogDescription>
           </DialogHeader>
 
@@ -161,8 +161,11 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="forge">Local (Forge)</SelectItem>
-                  <SelectItem value="mirror">Remoto (Mirror Cargo)</SelectItem>
+                  <SelectItem value="forge">Forge</SelectItem>
+                  <SelectItem value="mirror">Mirror (Cargo)</SelectItem>
+                  <SelectItem value="alloy" disabled>
+                    Alloy (pronto)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
