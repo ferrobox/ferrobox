@@ -89,17 +89,73 @@ pub(crate) async fn require_auth(
     Ok(next.run(request).await)
 }
 
-/// Extrae el secreto de `Authorization: Bearer …` o
-/// `Authorization: Token …` (este último lo usa `cargo publish`).
+/// Extrae el secreto de `Authorization`.
+///
+/// `cargo publish` envía el token **tal cual** (`Authorization: fb_…`),
+/// sin esquema. La UI y curl suelen usar `Bearer` o `Token`.
 pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let secret = value
-        .strip_prefix("Bearer ")
-        .or_else(|| value.strip_prefix("Token "))?;
-    let secret = secret.trim();
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    let secret = strip_auth_scheme(value, "Bearer")
+        .or_else(|| strip_auth_scheme(value, "Token"))
+        .unwrap_or(value)
+        .trim();
+
     if secret.is_empty() {
         None
     } else {
         Some(secret.to_string())
+    }
+}
+
+fn strip_auth_scheme<'a>(value: &'a str, scheme: &str) -> Option<&'a str> {
+    let rest = value.get(scheme.len()..)?;
+    let (separator, secret) = rest.split_at(1.min(rest.len()));
+    if separator != " " || !value[..scheme.len()].eq_ignore_ascii_case(scheme) {
+        return None;
+    }
+    Some(secret)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(value: &str) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        map.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(value).expect("valid header"),
+        );
+        map
+    }
+
+    #[test]
+    fn extracts_cargo_raw_token() {
+        assert_eq!(
+            extract_bearer_token(&headers("fb_deadbeef")).as_deref(),
+            Some("fb_deadbeef")
+        );
+    }
+
+    #[test]
+    fn extracts_bearer_and_token_schemes() {
+        assert_eq!(
+            extract_bearer_token(&headers("Bearer fb_secret")).as_deref(),
+            Some("fb_secret")
+        );
+        assert_eq!(
+            extract_bearer_token(&headers("token fb_secret")).as_deref(),
+            Some("fb_secret")
+        );
+    }
+
+    #[test]
+    fn missing_or_blank_authorization_is_none() {
+        assert_eq!(extract_bearer_token(&HeaderMap::new()), None);
+        assert_eq!(extract_bearer_token(&headers("   ")), None);
     }
 }

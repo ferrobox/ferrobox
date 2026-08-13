@@ -9,7 +9,8 @@
 //! Las lecturas (`config.json`, índice, descarga y búsqueda) son
 //! públicas: `cargo build` / `cargo add` no envían credenciales salvo
 //! que `auth-required` sea `true`. Las escrituras (`publish`, `yank`,
-//! `unyank`) exigen `Authorization: Bearer` o `Token` y rol de escritura.
+//! `unyank`) exigen `Authorization` (token en crudo, `Bearer` o `Token`)
+//! y rol de escritura.
 
 use std::sync::Arc;
 
@@ -232,8 +233,8 @@ struct SearchResponse {
 }
 
 /// `PUT /cargo/{repository_id}/api/v1/crates/new`: el endpoint que
-/// `cargo publish` invoca. Exige `Authorization: Bearer <token>`
-/// (también se acepta el esquema `Token` que envía `cargo` por defecto).
+/// `cargo publish` invoca. Acepta el token en crudo (`Authorization: fb_…`,
+/// como lo envía `cargo`) o con esquema `Bearer` / `Token`.
 async fn publish(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
@@ -565,6 +566,27 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn publish_accepts_cargo_raw_authorization_header() {
+        let fx = fixture().await;
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball",
+        );
+        let (status, _) = send(
+            fx.app,
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", fx.developer_token)
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]

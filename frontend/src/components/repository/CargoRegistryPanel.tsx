@@ -97,6 +97,7 @@ export function CargoRegistryPanel({
           <span className="font-medium">Seguridad</span> y guárdalo en{" "}
           <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
           <code className="font-mono">.cargo/credentials.toml</code> del proyecto). Alternativa:{" "}
+          <code className="font-mono">cargo login --registry ferrobox</code> o{" "}
           <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>. No
           subas el token al repositorio.
         </p>
