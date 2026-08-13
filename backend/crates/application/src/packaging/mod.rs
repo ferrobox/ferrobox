@@ -105,6 +105,15 @@ pub enum PackagingError {
 /// El resultado de publicar un paquete: su coordenada recién asignada.
 pub type PublishOutcome = PackageCoordinate;
 
+/// Una coincidencia de `cargo search` contra el índice de un repositorio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSearchHit {
+    /// Nombre del paquete.
+    pub name: String,
+    /// Última versión no yankada (o la última publicada, si todas lo están).
+    pub max_version: String,
+}
+
 /// Estrategia de empaquetado para un ecosistema concreto.
 ///
 /// Cada implementación encapsula las tres operaciones que el gestor de
@@ -162,6 +171,40 @@ pub trait PackagingStrategy: Send + Sync {
         repository: &Repository,
         coordinate: &PackageCoordinate,
     ) -> Result<Bytes, PackagingError>;
+
+    /// Marca (o desmarca) una versión ya publicada como *yanked*. No
+    /// borra el binario: `cargo` sigue pudiendo descargarlo si está
+    /// fijado en un `Cargo.lock`, pero deja de considerarlo para
+    /// resoluciones nuevas.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
+    /// pertenece a este ecosistema, [`PackagingError::ReadOnlyRepository`]
+    /// si es un `Mirror`, [`PackagingError::VersionNotFound`] si esa
+    /// coordenada no existe, o cualquier otro error si falla el puerto
+    /// correspondiente.
+    async fn set_yanked(
+        &self,
+        repository: &Repository,
+        coordinate: &PackageCoordinate,
+        yanked: bool,
+    ) -> Result<(), PackagingError>;
+
+    /// Busca paquetes cuyo nombre contiene `query` (sin distinguir
+    /// mayúsculas), hasta `limit` coincidencias.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
+    /// pertenece a este ecosistema, o cualquier otro error si falla el
+    /// puerto correspondiente.
+    async fn search(
+        &self,
+        repository: &Repository,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<PackageSearchHit>, PackagingError>;
 }
 
 /// Selecciona, en tiempo de ejecución, la [`PackagingStrategy`] adecuada

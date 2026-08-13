@@ -63,8 +63,8 @@ export function CargoRegistryPanel({
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
           {isMirror
-            ? "Este Mirror cachea paquetes del upstream la primera vez que se resuelven o descargan. No acepta cargo publish."
-            : "Este repositorio implementa el protocolo de índice disperso de Cargo, así que funciona con cargo publish, cargo add y cargo build de forma nativa."}
+            ? "Este Mirror cachea paquetes del upstream la primera vez que se resuelven o descargan. No acepta cargo publish ni cargo yank."
+            : "Este repositorio implementa el protocolo de índice disperso de Cargo: cargo publish, cargo yank, cargo search, cargo add y cargo build funcionan de forma nativa."}
         </p>
       </div>
 
@@ -83,14 +83,18 @@ export function CargoRegistryPanel({
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          2. Guarda un token de API
+          2. Guarda un token de API (solo para publicar o hacer yank)
         </p>
         <CopyableCodeBlock
           code={`[registry-tokens]\nferrobox = "fb_…"  # créalo en Seguridad`}
         />
         <p className="text-xs text-muted-foreground">
-          Emite el token en <span className="font-medium">Seguridad</span> y
-          añádelo a <code className="font-mono">~/.cargo/credentials.toml</code>.
+          El índice y las descargas son públicos: <code className="font-mono">cargo add</code> y{" "}
+          <code className="font-mono">cargo build</code> no necesitan token. Emite uno en{" "}
+          <span className="font-medium">Seguridad</span> y añádelo a{" "}
+          <code className="font-mono">~/.cargo/credentials.toml</code> para{" "}
+          <code className="font-mono">cargo publish</code> y{" "}
+          <code className="font-mono">cargo yank</code>.
         </p>
       </div>
 
@@ -115,6 +119,13 @@ export function CargoRegistryPanel({
               4. Añádelo como dependencia
             </p>
             <CopyableCodeBlock code="cargo add mi-crate --registry ferrobox" />
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              5. Yank de una versión
+            </p>
+            <CopyableCodeBlock code="cargo yank --vers 0.1.0 --registry ferrobox" />
           </div>
         </>
       )}

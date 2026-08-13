@@ -108,9 +108,23 @@ async fn main() {
         http_client,
     ));
 
+    let app = build_router(state);
+
+    let addr: SocketAddr = config.bind_address.parse().expect("invalid bind address");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind to address");
+
+    println!("FerroBox escuchando en http://{addr}");
+
+    axum::serve(listener, app).await.expect("server error");
+}
+
+fn build_router(state: Arc<AppState>) -> axum::Router {
     let public = Router::new()
         .route("/health", get(health))
-        .route("/auth/login", post(auth::login));
+        .route("/auth/login", post(auth::login))
+        .merge(cargo_registry::public_router());
 
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
@@ -144,22 +158,13 @@ async fn main() {
             "/artifacts/{artifact_id}",
             get(artifacts::download_artifact),
         )
-        .merge(cargo_registry::router())
+        .merge(cargo_registry::write_router())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_extract::require_auth,
         ));
 
-    let app = public.merge(protected).with_state(state);
-
-    let addr: SocketAddr = config.bind_address.parse().expect("invalid bind address");
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind to address");
-
-    println!("FerroBox escuchando en http://{addr}");
-
-    axum::serve(listener, app).await.expect("server error");
+    public.merge(protected).with_state(state)
 }
 
 async fn health() -> &'static str {

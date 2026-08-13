@@ -172,6 +172,38 @@ impl PackageIndexStore for PostgresPackageIndexStore {
 
         Ok(())
     }
+
+    async fn entries_for_repository(
+        &self,
+        repository_id: RepositoryId,
+        ecosystem: PackageEcosystem,
+    ) -> Result<Vec<Bytes>, PackageIndexStoreError> {
+        let repository_id: Uuid = repository_id.into();
+        let ecosystem = ecosystem_column::to_column(ecosystem);
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT entry
+            FROM package_index_entries
+            WHERE repository_id = $1
+              AND ecosystem = $2
+            ORDER BY created_at
+            "#,
+            repository_id,
+            ecosystem,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| {
+                serde_json::to_vec(&row.entry)
+                    .map(Bytes::from)
+                    .map_err(|err| backend_error(err.to_string()))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

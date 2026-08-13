@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT entry\n            FROM package_index_entries\n            WHERE repository_id = $1\n              AND ecosystem = $2\n            ORDER BY created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c9601e5cb51a0564e1c980c8e8e96abc97af360f987a3bacebd4bc3cba007c18"
+}
