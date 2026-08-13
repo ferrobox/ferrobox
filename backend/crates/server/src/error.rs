@@ -11,7 +11,9 @@ use ferrobox_application::login::LoginError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
-use ferrobox_application::manage_users::{CreateUserError, DeleteUserError, ListUsersError};
+use ferrobox_application::manage_users::{
+    ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError,
+};
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
@@ -161,13 +163,13 @@ impl From<AuthenticateTokenError> for ApiError {
 impl From<CreateUserError> for ApiError {
     fn from(err: CreateUserError) -> Self {
         match &err {
-            CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_)) => {
-                Self::Conflict(err.to_string())
-            }
+            CreateUserError::Persistence(
+                ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_),
+            ) => Self::Conflict(err.to_string()),
             CreateUserError::PasswordHashing(_)
-            | CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::Backend(_)) => {
-                Self::Internal(err.to_string())
-            }
+            | CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::Backend(
+                _,
+            )) => Self::Internal(err.to_string()),
         }
     }
 }
@@ -186,6 +188,16 @@ impl From<DeleteUserError> for ApiError {
                 Self::Conflict(err.to_string())
             }
             DeleteUserError::Persistence(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<ChangeUserRoleError> for ApiError {
+    fn from(err: ChangeUserRoleError) -> Self {
+        match err {
+            ChangeUserRoleError::NotFound => Self::NotFound(err.to_string()),
+            ChangeUserRoleError::CannotDemoteLastAdmin => Self::Conflict(err.to_string()),
+            ChangeUserRoleError::Persistence(_) => Self::Internal(err.to_string()),
         }
     }
 }

@@ -150,6 +150,25 @@ impl UserStore for PostgresUserStore {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError> {
+        let id: Uuid = id.into();
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE users
+            SET role = $2
+            WHERE id = $1
+            "#,
+            id,
+            role.as_str(),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn count(&self) -> Result<u64, UserStoreError> {
         let row = sqlx::query!(
             r#"

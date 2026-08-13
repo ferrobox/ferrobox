@@ -4,13 +4,12 @@ import { Navigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useCreateUser, useDeleteUser, useUsers } from "@/api/queries";
+import { useCreateUser, useDeleteUser, useUpdateUserRole, useUsers } from "@/api/queries";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,10 +33,11 @@ import {
 const ROLE_OPTIONS: readonly RoleDto[] = ["admin", "developer", "reader"];
 
 export function UsersPage() {
-  const { user } = useAuth();
+  const { user, updateCurrentUser } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } = useUsers();
   const createUser = useCreateUser();
   const deleteUser = useDeleteUser();
+  const updateUserRole = useUpdateUserRole();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -64,6 +64,18 @@ export function UsersPage() {
     }
   }
 
+  async function onChangeRole(userId: string, name: string, nextRole: RoleDto) {
+    try {
+      const updated = await updateUserRole.mutateAsync({ userId, role: nextRole });
+      if (updated.id === user?.id) {
+        updateCurrentUser(updated);
+      }
+      toast.success(`Rol de «${name}» actualizado`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo cambiar el rol");
+    }
+  }
+
   async function onDelete(userId: string, name: string) {
     try {
       await deleteUser.mutateAsync(userId);
@@ -77,7 +89,7 @@ export function UsersPage() {
     <div>
       <PageHeader
         title="Usuarios"
-        description="Crea cuentas y asigna roles (admin, developer, reader)."
+        description="Crea cuentas y asigna o cambia roles (admin, developer, reader)."
       />
 
       <form
@@ -166,7 +178,31 @@ export function UsersPage() {
                 <TableRow key={entry.id}>
                   <TableCell className="font-medium">{entry.username}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{roleLabel(entry.role)}</Badge>
+                    <Select
+                      value={entry.role}
+                      disabled={updateUserRole.isPending}
+                      onValueChange={(value) => {
+                        const nextRole = value as RoleDto;
+                        if (nextRole === entry.role) {
+                          return;
+                        }
+                        void onChangeRole(entry.id, entry.username, nextRole);
+                      }}
+                    >
+                      <SelectTrigger
+                        aria-label={`Rol de ${entry.username}`}
+                        className="h-8 w-[140px]"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ROLE_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {roleLabel(option)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

@@ -40,7 +40,7 @@ pub mod login;
 /// Casos de uso: crear, listar y revocar tokens de API.
 pub mod manage_api_tokens;
 
-/// Casos de uso: crear, listar y eliminar usuarios.
+/// Casos de uso: crear, listar, cambiar el rol y eliminar usuarios.
 pub mod manage_users;
 
 /// Caso de uso: resolver un secreto Bearer a un principal autenticado.

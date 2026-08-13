@@ -232,6 +232,13 @@ pub(crate) struct CreateUserRequest {
     pub(crate) role: RoleDto,
 }
 
+/// Cuerpo de la petición para cambiar el rol de un usuario.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct UpdateUserRoleRequest {
+    pub(crate) role: RoleDto,
+}
+
 /// Respuesta al iniciar sesión correctamente.
 #[derive(Serialize, TS)]
 #[ts(export)]

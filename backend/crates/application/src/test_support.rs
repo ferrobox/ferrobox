@@ -3,8 +3,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::api_token::ApiToken;
+use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::{ApiTokenId, ArtifactId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
@@ -61,7 +61,13 @@ impl RepositoryStore for InMemoryRepositoryStore {
     }
 
     async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError> {
-        Ok(self.repositories.lock().unwrap().values().cloned().collect())
+        Ok(self
+            .repositories
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect())
     }
 
     async fn delete(&self, id: RepositoryId) -> Result<(), RepositoryStoreError> {
@@ -283,6 +289,15 @@ impl UserStore for InMemoryUserStore {
 
     async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
         Ok(self.users.lock().unwrap().remove(&id).is_some())
+    }
+
+    async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError> {
+        let mut users = self.users.lock().unwrap();
+        let Some((user, hash)) = users.remove(&id) else {
+            return Ok(false);
+        };
+        users.insert(id, (user.with_role(role), hash));
+        Ok(true)
     }
 
     async fn count(&self) -> Result<u64, UserStoreError> {
