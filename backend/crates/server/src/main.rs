@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
+use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, post};
-use axum::Router;
 use config::Config;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
@@ -30,6 +30,8 @@ use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
 use ferrobox_application::create_repository::CreateRepositoryUseCase;
+use ferrobox_application::delete_artifact::DeleteArtifactUseCase;
+use ferrobox_application::delete_repository::DeleteRepositoryUseCase;
 use ferrobox_application::download_artifact::DownloadArtifactUseCase;
 use ferrobox_application::get_repository::GetRepositoryUseCase;
 use ferrobox_application::list_repositories::ListRepositoriesUseCase;
@@ -53,6 +55,8 @@ struct AppState {
     publish_artifact: PublishArtifactUseCase,
     download_artifact: DownloadArtifactUseCase,
     list_repository_artifacts: ListRepositoryArtifactsUseCase,
+    delete_repository: DeleteRepositoryUseCase,
+    delete_artifact: DeleteArtifactUseCase,
     packaging: PackagingRegistry,
     public_base_url: String,
     login: LoginUseCase,
@@ -90,7 +94,7 @@ async fn main() {
 
     let packaging = PackagingRegistry::new().register(Arc::new(CargoPackagingStrategy::new(
         artifact_store.clone(),
-        package_index_store,
+        package_index_store.clone(),
         storage.clone(),
     )));
 
@@ -99,12 +103,24 @@ async fn main() {
         list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
         get_repository: GetRepositoryUseCase::new(repository_store.clone()),
         publish_artifact: PublishArtifactUseCase::new(
-            repository_store,
+            repository_store.clone(),
             artifact_store.clone(),
             storage.clone(),
         ),
-        download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage),
-        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store),
+        download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store.clone()),
+        delete_repository: DeleteRepositoryUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            package_index_store.clone(),
+            storage.clone(),
+        ),
+        delete_artifact: DeleteArtifactUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            package_index_store,
+            storage,
+        ),
         packaging,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
@@ -137,12 +153,22 @@ async fn main() {
             "/repositories",
             post(repositories::create_repository).get(repositories::list_repositories),
         )
-        .route("/repositories/{repository_id}", get(repositories::get_repository))
+        .route(
+            "/repositories/{repository_id}",
+            get(repositories::get_repository).delete(repositories::delete_repository),
+        )
         .route(
             "/repositories/{repository_id}/artifacts",
             post(artifacts::publish_artifact).get(artifacts::list_repository_artifacts),
         )
-        .route("/artifacts/{artifact_id}", get(artifacts::download_artifact))
+        .route(
+            "/repositories/{repository_id}/artifacts/{artifact_id}",
+            delete(artifacts::delete_artifact),
+        )
+        .route(
+            "/artifacts/{artifact_id}",
+            get(artifacts::download_artifact),
+        )
         .merge(cargo_registry::router())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

@@ -6,11 +6,20 @@
 /// Deriva claves de almacenamiento para artefactos.
 mod storage_key;
 
+/// Calcula checksums SHA-256 de contenidos binarios.
+mod content_hash;
+
 /// Caso de uso: crear un nuevo repositorio.
 pub mod create_repository;
 
 /// Caso de uso: publicar un artefacto en un repositorio existente.
 pub mod publish_artifact;
+
+/// Caso de uso: eliminar un repositorio y todo su contenido.
+pub mod delete_repository;
+
+/// Caso de uso: eliminar un artefacto (y su entrada de índice, si la hay).
+pub mod delete_artifact;
 
 /// Caso de uso: descargar un artefacto ya publicado.
 pub mod download_artifact;

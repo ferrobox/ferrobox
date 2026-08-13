@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{FromRequestParts, Request, State};
 use axum::http::request::Parts;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::user::User;
 
@@ -36,13 +36,18 @@ impl IntoResponse for AuthError {
             Self::Invalid => "invalid or revoked API token",
         };
 
-        (
+        let mut response = (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
                 error: message.to_string(),
             }),
         )
-            .into_response()
+            .into_response();
+        response.headers_mut().insert(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static(r#"Bearer realm="ferrobox""#),
+        );
+        response
     }
 }
 

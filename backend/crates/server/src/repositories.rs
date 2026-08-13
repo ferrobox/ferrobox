@@ -1,4 +1,5 @@
-//! Rutas HTTP para gestionar repositorios: creación, listado y detalle.
+//! Rutas HTTP para gestionar repositorios: creación, listado, detalle y
+//! eliminación.
 
 use std::sync::Arc;
 
@@ -56,4 +57,19 @@ pub(crate) async fn get_repository(
         .await?;
 
     Ok(Json(RepositoryResponse::from(&repository)))
+}
+
+pub(crate) async fn delete_repository(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    require_write_artifacts(&user)?;
+
+    state
+        .delete_repository
+        .execute(RepositoryId::from(repository_id))
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

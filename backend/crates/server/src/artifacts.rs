@@ -62,3 +62,21 @@ pub(crate) async fn list_repository_artifacts(
         artifacts.into_iter().map(ArtifactResponse::from).collect(),
     ))
 }
+
+pub(crate) async fn delete_artifact(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path((repository_id, artifact_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    require_write_artifacts(&user)?;
+
+    state
+        .delete_artifact
+        .execute(
+            RepositoryId::from(repository_id),
+            ArtifactId::from(artifact_id),
+        )
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}

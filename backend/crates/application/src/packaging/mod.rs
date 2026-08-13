@@ -76,6 +76,16 @@ pub enum PackagingError {
     /// Fallo al leer o escribir el índice de paquetes.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
+
+    /// El contenido binario almacenado no coincide con el checksum SHA-256
+    /// persistido al publicar.
+    #[error("stored artifact checksum mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        /// Checksum persistido al publicar.
+        expected: String,
+        /// Checksum recalculado sobre el objeto almacenado.
+        actual: String,
+    },
 }
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.

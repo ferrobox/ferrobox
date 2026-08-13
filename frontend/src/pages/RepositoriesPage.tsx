@@ -1,9 +1,12 @@
-import { AlertCircle, Boxes, RefreshCw } from "lucide-react";
+import { AlertCircle, Boxes, RefreshCw, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
-import { useRepositories } from "@/api/queries";
+import { ApiError } from "@/api/client";
+import { useDeleteRepository, useRepositories } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
+import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { CreateRepositoryDialog } from "@/components/repository/CreateRepositoryDialog";
 import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
 import { RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
@@ -23,7 +26,18 @@ import {
 export function RepositoriesPage() {
   const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } = useRepositories();
+  const deleteRepository = useDeleteRepository();
   const canWrite = canWriteArtifacts(user?.role);
+
+  async function onDelete(repositoryId: string, name: string) {
+    try {
+      await deleteRepository.mutateAsync(repositoryId);
+      toast.success(`Repositorio «${name}» eliminado`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el repositorio");
+      throw err;
+    }
+  }
 
   return (
     <div>
@@ -60,6 +74,7 @@ export function RepositoriesPage() {
                 <TableHead>Ecosistema</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead className="text-right">Identificador</TableHead>
+                {canWrite ? <TableHead className="text-right">Acciones</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -82,6 +97,26 @@ export function RepositoriesPage() {
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
                     {repository.id}
                   </TableCell>
+                  {canWrite ? (
+                    <TableCell className="text-right">
+                      <ConfirmDeleteDialog
+                        title={`Eliminar «${repository.name}»`}
+                        description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
+                        pending={deleteRepository.isPending}
+                        onConfirm={() => onDelete(repository.id, repository.name)}
+                        trigger={
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Trash2 />
+                            Eliminar
+                          </Button>
+                        }
+                      />
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))}
             </TableBody>

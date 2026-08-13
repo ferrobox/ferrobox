@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::checksum::Sha256Checksum;
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StoragePort};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
 /// Motivos por los que publicar un artefacto puede fallar.
@@ -66,12 +65,6 @@ impl PublishArtifactUseCase {
     /// cualquiera de las demás variantes si falla el puerto
     /// correspondiente.
     ///
-    /// # Panics
-    ///
-    /// En la práctica, nunca entra en pánico: SHA-256 siempre produce
-    /// exactamente 32 bytes, cuya codificación hexadecimal son siempre
-    /// 64 caracteres válidos -- la condición que `Sha256Checksum::parse`
-    /// podría rechazar nunca ocurre con esta entrada.
     pub async fn execute(
         &self,
         repository_id: RepositoryId,
@@ -86,9 +79,7 @@ impl PublishArtifactUseCase {
             return Err(PublishArtifactError::RepositoryNotFound(repository_id));
         }
 
-        let checksum = Sha256Checksum::parse(format!("{:x}", Sha256::digest(&content)))
-            .expect("a hex-encoded SHA-256 digest is always a valid Sha256Checksum");
-
+        let checksum = sha256_checksum(&content);
         let artifact = Artifact::new(repository_id, checksum, content.len() as u64);
 
         self.storage
@@ -131,12 +122,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            artifact_store
-                .find_by_id(artifact_id)
-                .await
-                .unwrap()
-                .is_some()
+        let stored = artifact_store
+            .find_by_id(artifact_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.checksum().as_str(),
+            crate::content_hash::sha256_checksum(b"hello, ferrobox").as_str()
         );
     }
 

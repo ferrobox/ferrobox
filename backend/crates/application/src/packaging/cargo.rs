@@ -23,9 +23,9 @@ use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::{PackagingError, PackagingStrategy, PublishOutcome};
+use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
 /// Estrategia de empaquetado para el ecosistema Cargo.
@@ -74,11 +74,11 @@ impl PackagingStrategy for CargoPackagingStrategy {
     ) -> Result<PublishOutcome, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
 
-        let (metadata, crate_bytes) = parse_publish_payload(payload)?;
+        let parsed = parse_publish_payload(payload)?;
 
-        let name = PackageName::parse(metadata.name.clone())
+        let name = PackageName::parse(parsed.metadata.name.clone())
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-        let version = PackageVersion::parse(metadata.vers.clone())
+        let version = PackageVersion::parse(parsed.metadata.vers.clone())
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
         let coordinate = PackageCoordinate::new(PackageEcosystem::Cargo, name, version);
 
@@ -91,17 +91,18 @@ impl PackagingStrategy for CargoPackagingStrategy {
             return Err(PackagingError::AlreadyPublished(coordinate));
         }
 
-        let cksum = format!("{:x}", Sha256::digest(&crate_bytes));
-        let checksum = Sha256Checksum::parse(cksum.clone())
-            .expect("a hex-encoded SHA-256 digest is always a valid Sha256Checksum");
-        let artifact = Artifact::new(repository.id(), checksum, crate_bytes.len() as u64);
+        let artifact = Artifact::new(
+            repository.id(),
+            parsed.checksum.clone(),
+            parsed.crate_bytes.len() as u64,
+        );
 
         self.storage
-            .put(&storage_key_for(artifact.id()), crate_bytes)
+            .put(&storage_key_for(artifact.id()), parsed.crate_bytes)
             .await?;
         self.artifact_store.save(&artifact).await?;
 
-        let entry = IndexEntry::from_publish_metadata(&metadata, &cksum);
+        let entry = IndexEntry::from_publish_metadata(&parsed.metadata, parsed.checksum.as_str());
         let entry_bytes = Bytes::from(
             serde_json::to_vec(&entry).expect("an IndexEntry always serializes to valid JSON"),
         );
@@ -151,7 +152,21 @@ impl PackagingStrategy for CargoPackagingStrategy {
             .await?
             .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
 
+        let artifact = self
+            .artifact_store
+            .find_by_id(artifact_id)
+            .await?
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+
         let content = self.storage.get(&storage_key_for(artifact_id)).await?;
+        let actual = sha256_checksum(&content);
+        if actual != *artifact.checksum() {
+            return Err(PackagingError::ChecksumMismatch {
+                expected: artifact.checksum().to_string(),
+                actual: actual.to_string(),
+            });
+        }
+
         Ok(content)
     }
 }
@@ -286,17 +301,27 @@ impl From<&PublishDependency> for IndexDependency {
     }
 }
 
+/// Resultado de descomponer una petición `cargo publish`: metadatos,
+/// contenido del `.crate` y el SHA-256 de ese contenido, ya listo para
+/// persistirse tanto en el artefacto como en la entrada de índice.
+struct ParsedPublishPayload {
+    metadata: PublishMetadata,
+    crate_bytes: Bytes,
+    checksum: Sha256Checksum,
+}
+
 /// Descompone el cuerpo binario de una petición `cargo publish` en sus
 /// dos partes: los metadatos JSON y el contenido del archivo `.crate`.
+/// El checksum SHA-256 se calcula aquí, sobre los bytes del `.crate`,
+/// para que la entrada de índice (`cksum`) y los metadatos del artefacto
+/// compartan exactamente el mismo valor.
 ///
 /// Formato (todos los enteros en *little-endian*):
 /// `[u32 longitud de metadatos][metadatos JSON][u32 longitud del
 /// `.crate`][contenido del `.crate`]`. Cualquier dato adicional a
 /// continuación (extensiones de versiones recientes de `cargo`, como el
 /// archivo `.crate` firmado) se ignora.
-fn parse_publish_payload(
-    mut payload: Bytes,
-) -> Result<(PublishMetadata, Bytes), PackagingError> {
+fn parse_publish_payload(mut payload: Bytes) -> Result<ParsedPublishPayload, PackagingError> {
     let metadata_len = read_u32_le(&mut payload, "metadata length prefix")?;
     let metadata_bytes = split_prefix(&mut payload, metadata_len, "metadata")?;
     let metadata: PublishMetadata = serde_json::from_slice(&metadata_bytes)
@@ -304,8 +329,13 @@ fn parse_publish_payload(
 
     let crate_len = read_u32_le(&mut payload, "crate file length prefix")?;
     let crate_bytes = split_prefix(&mut payload, crate_len, "crate file")?;
+    let checksum = sha256_checksum(&crate_bytes);
 
-    Ok((metadata, crate_bytes))
+    Ok(ParsedPublishPayload {
+        metadata,
+        crate_bytes,
+        checksum,
+    })
 }
 
 fn read_u32_le(payload: &mut Bytes, what: &str) -> Result<usize, PackagingError> {
@@ -371,7 +401,8 @@ mod tests {
     async fn publishes_a_crate_with_no_dependencies() {
         let strategy = strategy();
         let repository = cargo_repository("crates-releases");
-        let payload = encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"fake tarball");
+        let payload =
+            encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"fake tarball");
 
         let coordinate = strategy.publish(&repository, payload).await.unwrap();
 
@@ -402,7 +433,8 @@ mod tests {
     async fn rejects_publishing_the_same_version_twice() {
         let strategy = strategy();
         let repository = cargo_repository("crates-releases");
-        let payload = || encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"tarball");
+        let payload =
+            || encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"tarball");
 
         strategy.publish(&repository, payload()).await.unwrap();
         let result = strategy.publish(&repository, payload()).await;
@@ -415,7 +447,9 @@ mod tests {
         let strategy = strategy();
         let repository = cargo_repository("crates-releases");
 
-        let result = strategy.publish(&repository, Bytes::from_static(b"\x05\x00")).await;
+        let result = strategy
+            .publish(&repository, Bytes::from_static(b"\x05\x00"))
+            .await;
 
         assert!(matches!(result, Err(PackagingError::InvalidPayload(_))));
     }
@@ -444,14 +478,12 @@ mod tests {
             .await
             .unwrap();
 
-        let lines: Vec<&str> = std::str::from_utf8(&index)
-            .unwrap()
-            .lines()
-            .collect();
+        let lines: Vec<&str> = std::str::from_utf8(&index).unwrap().lines().collect();
         assert_eq!(lines.len(), 2);
         let first: IndexEntry = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(first.vers, "0.1.0");
         assert!(!first.yanked);
+        assert_eq!(first.cksum, sha256_checksum(b"v1").as_str());
     }
 
     #[tokio::test]
@@ -467,13 +499,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn publish_stores_sha256_of_the_crate_file_in_the_index_entry() {
+        let strategy = strategy();
+        let repository = cargo_repository("crates-releases");
+        let crate_bytes = b"tarball-for-checksum";
+        strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), crate_bytes),
+            )
+            .await
+            .unwrap();
+
+        let index = strategy
+            .index(&repository, &PackageName::parse("ferrobox-cli").unwrap())
+            .await
+            .unwrap();
+        let entry: IndexEntry =
+            serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
+
+        assert_eq!(entry.cksum, sha256_checksum(crate_bytes).as_str());
+        assert_eq!(entry.cksum.len(), 64);
+    }
+
+    #[tokio::test]
     async fn downloads_a_previously_published_crate() {
         let strategy = strategy();
         let repository = cargo_repository("crates-releases");
         let coordinate = strategy
             .publish(
                 &repository,
-                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"tarball bytes"),
+                encode_publish_payload(
+                    &minimal_metadata("ferrobox-cli", "0.1.0"),
+                    b"tarball bytes",
+                ),
             )
             .await
             .unwrap();
@@ -528,7 +587,8 @@ mod tests {
             .index(&repository, &PackageName::parse("ferrobox-cli").unwrap())
             .await
             .unwrap();
-        let entry: IndexEntry = serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
+        let entry: IndexEntry =
+            serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
 
         assert_eq!(entry.deps[0].name, "json");
         assert_eq!(entry.deps[0].package.as_deref(), Some("serde_json"));
