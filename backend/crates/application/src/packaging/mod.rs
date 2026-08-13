@@ -23,6 +23,7 @@ use ferrobox_domain::repository::Repository;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::http_client::HttpClientError;
 use ferrobox_ports::package_index_store::PackageIndexStoreError;
+use ferrobox_ports::repository_store::RepositoryStoreError;
 use ferrobox_ports::storage::StorageError;
 use thiserror::Error;
 
@@ -88,10 +89,15 @@ pub enum PackagingError {
         actual: String,
     },
 
-    /// El repositorio es de solo lectura (por ejemplo, un `Mirror`) y
+    /// El repositorio es de solo lectura (un `Mirror` o un `Alloy`) y
     /// no acepta publicaciones.
     #[error("repository is read-only and does not accept publishes")]
     ReadOnlyRepository,
+
+    /// Fallo al consultar el almacén de repositorios (p. ej. al
+    /// resolver los miembros de un `Alloy`).
+    #[error(transparent)]
+    RepositoryPersistence(#[from] RepositoryStoreError),
 
     /// Fallo al consultar el *upstream* de un repositorio `Mirror`.
     #[error(transparent)]
@@ -181,9 +187,9 @@ pub trait PackagingStrategy: Send + Sync {
     ///
     /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
     /// pertenece a este ecosistema, [`PackagingError::ReadOnlyRepository`]
-    /// si es un `Mirror`, [`PackagingError::VersionNotFound`] si esa
-    /// coordenada no existe, o cualquier otro error si falla el puerto
-    /// correspondiente.
+    /// si es un `Mirror` o un `Alloy`, [`PackagingError::VersionNotFound`]
+    /// si esa coordenada no existe, o cualquier otro error si falla el
+    /// puerto correspondiente.
     async fn set_yanked(
         &self,
         repository: &Repository,
@@ -254,7 +260,8 @@ mod tests {
     use super::cargo::CargoPackagingStrategy;
     use super::*;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryRepositoryStore, InMemoryStorage,
     };
 
     fn cargo_strategy() -> Arc<dyn PackagingStrategy> {
@@ -263,6 +270,7 @@ mod tests {
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
         ))
     }
 

@@ -145,6 +145,12 @@ pub(crate) enum CreateRepositoryKindDto {
         /// URL base del índice disperso remoto (p. ej. `https://index.crates.io/`).
         upstream: String,
     },
+    /// Agregación de otros repositorios `Forge` o `Mirror`.
+    Alloy {
+        /// Identificadores de los repositorios miembro, en orden de
+        /// resolución.
+        members: Vec<String>,
+    },
 }
 
 /// Respuesta al crear un repositorio correctamente.

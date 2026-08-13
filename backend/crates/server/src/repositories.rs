@@ -32,6 +32,16 @@ pub(crate) async fn create_repository(
     let kind = match payload.kind.unwrap_or_default() {
         CreateRepositoryKindDto::Forge => CreateRepositoryKind::Forge,
         CreateRepositoryKindDto::Mirror { upstream } => CreateRepositoryKind::Mirror { upstream },
+        CreateRepositoryKindDto::Alloy { members } => {
+            let mut parsed = Vec::with_capacity(members.len());
+            for member in members {
+                let uuid = Uuid::parse_str(&member).map_err(|_| {
+                    ApiError::BadRequest("invalid alloy member repository id".to_string())
+                })?;
+                parsed.push(RepositoryId::from(uuid));
+            }
+            CreateRepositoryKind::Alloy { members: parsed }
+        }
     };
 
     let id = state

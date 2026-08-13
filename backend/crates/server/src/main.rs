@@ -212,6 +212,7 @@ fn build_app_state(
         package_index_store.clone(),
         storage.clone(),
         http_client,
+        repository_store.clone(),
     )));
 
     AppState {
@@ -225,6 +226,7 @@ fn build_app_state(
         ),
         download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
         list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
+            repository_store.clone(),
             artifact_store.clone(),
             package_index_store.clone(),
         ),

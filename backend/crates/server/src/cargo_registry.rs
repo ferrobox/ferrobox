@@ -414,6 +414,7 @@ mod tests {
             package_index_store.clone(),
             storage.clone(),
             http_client,
+            repository_store.clone(),
         )));
 
         let state = Arc::new(AppState {
@@ -430,6 +431,7 @@ mod tests {
                 storage.clone(),
             ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
+                repository_store.clone(),
                 artifact_store.clone(),
                 package_index_store.clone(),
             ),
