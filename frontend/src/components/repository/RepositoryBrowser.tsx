@@ -101,6 +101,7 @@ export function RepositoryBrowser({
               active={kindFilter === kind}
               onClick={() => setKindFilter(kind)}
               label={KIND_META[kind].label}
+              title={KIND_META[kind].description}
             />
           ))}
         </div>
@@ -165,7 +166,7 @@ export function RepositoryBrowser({
                                 {repository.name}
                               </span>
                               <span className="block text-[11px] text-muted-foreground">
-                                {kind.label} · {kind.domain}
+                                {kind.label}
                               </span>
                             </span>
                           </NavLink>
@@ -186,10 +187,12 @@ export function RepositoryBrowser({
 function FilterChip({
   active,
   label,
+  title,
   onClick,
 }: {
   active: boolean;
   label: string;
+  title?: string;
   onClick: () => void;
 }) {
   return (
@@ -197,6 +200,7 @@ function FilterChip({
       type="button"
       size="xs"
       variant={active ? "default" : "outline"}
+      title={title}
       onClick={onClick}
     >
       {label}

@@ -17,8 +17,7 @@ export function RepositoriesPage() {
         <h1 className="text-xl font-semibold text-foreground">Repositorios</h1>
         <p className="text-sm text-muted-foreground">
           Elige un repositorio en el árbol de la izquierda. Están agrupados por
-          ecosistema (Cargo, npm…) y etiquetados como Local, Remoto o Virtual,
-          igual que en Artifactory.
+          ecosistema (Cargo, npm…) y por tipo: Forge, Mirror o Alloy.
         </p>
       </div>
       {canWrite ? <CreateRepositoryDialog /> : null}
