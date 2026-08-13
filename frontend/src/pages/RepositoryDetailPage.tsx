@@ -1,12 +1,14 @@
-import { AlertCircle, ChevronRight, RefreshCw } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { AlertCircle, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useRepository } from "@/api/queries";
+import { useDeleteRepository, useRepository } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
+import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
 import { RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
@@ -28,9 +30,22 @@ export function RepositoryDetailPage() {
 
 function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { data: repository, isPending, isError, error, refetch, isFetching } =
     useRepository(repositoryId);
+  const deleteRepository = useDeleteRepository();
   const canWrite = canWriteArtifacts(user?.role);
+
+  async function onDeleteRepository() {
+    try {
+      await deleteRepository.mutateAsync(repositoryId);
+      toast.success(`Repositorio «${repository?.name ?? repositoryId}» eliminado`);
+      navigate("/repositories", { replace: true });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el repositorio");
+      throw err;
+    }
+  }
 
   if (isPending) {
     return (
@@ -75,8 +90,24 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         }
         title={repository.name}
         actions={
-          canWrite && repository.kind.type !== "mirror" ? (
-            <UploadArtifactButton repositoryId={repositoryId} />
+          canWrite ? (
+            <div className="flex items-center gap-2">
+              {repository.kind.type !== "mirror" ? (
+                <UploadArtifactButton repositoryId={repositoryId} />
+              ) : null}
+              <ConfirmDeleteDialog
+                title={`Eliminar «${repository.name}»`}
+                description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
+                pending={deleteRepository.isPending}
+                onConfirm={onDeleteRepository}
+                trigger={
+                  <Button variant="outline">
+                    <Trash2 />
+                    Eliminar
+                  </Button>
+                }
+              />
+            </div>
           ) : undefined
         }
       />

@@ -1,8 +1,11 @@
-import { AlertCircle, Download, FileBox, RefreshCw } from "lucide-react";
+import { AlertCircle, Download, FileBox, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ApiError, downloadArtifact } from "@/api/client";
-import { useRepositoryArtifacts } from "@/api/queries";
+import { useDeleteArtifact, useRepositoryArtifacts } from "@/api/queries";
+import { useAuth } from "@/auth/AuthProvider";
+import { canWriteArtifacts } from "@/auth/roles";
+import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,8 +20,21 @@ import {
 import { formatBytes, truncateMiddle } from "@/lib/format";
 
 export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
+  const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
+  const deleteArtifact = useDeleteArtifact(repositoryId);
+  const canWrite = canWriteArtifacts(user?.role);
+
+  async function onDelete(artifactId: string) {
+    try {
+      await deleteArtifact.mutateAsync(artifactId);
+      toast.success("Artefacto eliminado");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el artefacto");
+      throw err;
+    }
+  }
 
   if (isPending) {
     return (
@@ -82,22 +98,38 @@ export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
                 {formatBytes(artifact.size_bytes)}
               </TableCell>
               <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void downloadArtifact(artifact.id).catch((err: unknown) => {
-                      toast.error(
-                        err instanceof ApiError
-                          ? err.message
-                          : "No se pudo descargar el artefacto",
-                      );
-                    });
-                  }}
-                >
-                  <Download />
-                  Descargar
-                </Button>
+                <div className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void downloadArtifact(artifact.id).catch((err: unknown) => {
+                        toast.error(
+                          err instanceof ApiError
+                            ? err.message
+                            : "No se pudo descargar el artefacto",
+                        );
+                      });
+                    }}
+                  >
+                    <Download />
+                    Descargar
+                  </Button>
+                  {canWrite ? (
+                    <ConfirmDeleteDialog
+                      title="Eliminar artefacto"
+                      description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
+                      pending={deleteArtifact.isPending}
+                      onConfirm={() => onDelete(artifact.id)}
+                      trigger={
+                        <Button variant="ghost" size="sm">
+                          <Trash2 />
+                          Eliminar
+                        </Button>
+                      }
+                    />
+                  ) : null}
+                </div>
               </TableCell>
             </TableRow>
           ))}

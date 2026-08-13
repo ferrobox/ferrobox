@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM package_index_entries\n            WHERE artifact_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13d7ef48c26c2a8da6f84795fd5522018ad9ce6059023ade7329bc86ae3c8f14"
+}

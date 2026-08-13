@@ -62,11 +62,39 @@ export function useCreateRepository() {
   });
 }
 
+export function useDeleteRepository() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (repositoryId: string) => api.deleteRepository(repositoryId),
+    onSuccess: (_data, repositoryId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.removeQueries({ queryKey: queryKeys.repository(repositoryId) });
+      void queryClient.removeQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
 export function usePublishArtifact(repositoryId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (file: File) => api.publishArtifact(repositoryId, file),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function useDeleteArtifact(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (artifactId: string) => api.deleteArtifact(repositoryId, artifactId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),

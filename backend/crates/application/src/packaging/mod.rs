@@ -78,6 +78,16 @@ pub enum PackagingError {
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
 
+    /// El contenido binario almacenado no coincide con el checksum SHA-256
+    /// persistido al publicar.
+    #[error("stored artifact checksum mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        /// Checksum persistido al publicar.
+        expected: String,
+        /// Checksum recalculado sobre el objeto almacenado.
+        actual: String,
+    },
+
     /// El repositorio es de solo lectura (por ejemplo, un `Mirror`) y
     /// no acepta publicaciones.
     #[error("repository is read-only and does not accept publishes")]

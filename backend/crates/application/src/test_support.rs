@@ -221,6 +221,28 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
             })
             .and_then(|(_, _, artifact_id, _)| *artifact_id))
     }
+
+    async fn delete_by_artifact(
+        &self,
+        artifact_id: ArtifactId,
+    ) -> Result<(), PackageIndexStoreError> {
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|(_, _, existing, _)| *existing != Some(artifact_id));
+        Ok(())
+    }
+
+    async fn delete_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<(), PackageIndexStoreError> {
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|(existing, ..)| *existing != repository_id);
+        Ok(())
+    }
 }
 
 pub(crate) fn forge(name: &str) -> Repository {
@@ -392,13 +414,13 @@ pub(crate) struct InMemoryHttpClient {
 
 impl InMemoryHttpClient {
     pub(crate) fn stub(&self, url: &str, status: u16, body: impl Into<Bytes>) {
-        self.responses.lock().unwrap().insert(
-            url.to_string(),
-            HttpResponse {
+        self.responses
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), HttpResponse {
                 status,
                 body: body.into(),
-            },
-        );
+            });
     }
 }
 

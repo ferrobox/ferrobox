@@ -159,8 +159,18 @@ export function createRepository(
   });
 }
 
+export function deleteRepository(repositoryId: string): Promise<void> {
+  return request<void>(`/repositories/${repositoryId}`, { method: "DELETE" });
+}
+
 export function listRepositoryArtifacts(repositoryId: string): Promise<ArtifactResponse[]> {
   return request<ArtifactResponse[]>(`/repositories/${repositoryId}/artifacts`);
+}
+
+export function deleteArtifact(repositoryId: string, artifactId: string): Promise<void> {
+  return request<void>(`/repositories/${repositoryId}/artifacts/${artifactId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function publishArtifact(

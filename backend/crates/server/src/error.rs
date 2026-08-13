@@ -5,6 +5,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use ferrobox_application::authenticate_token::AuthenticateTokenError;
 use ferrobox_application::create_repository::CreateRepositoryError;
+use ferrobox_application::delete_artifact::DeleteArtifactError;
+use ferrobox_application::delete_repository::DeleteRepositoryError;
 use ferrobox_application::download_artifact::DownloadArtifactError;
 use ferrobox_application::get_repository::GetRepositoryError;
 use ferrobox_application::login::LoginError;
@@ -121,6 +123,7 @@ impl From<PackagingError> for ApiError {
             PackagingError::Storage(_)
             | PackagingError::ArtifactPersistence(_)
             | PackagingError::IndexPersistence(_)
+            | PackagingError::ChecksumMismatch { .. }
             | PackagingError::Upstream(_) => Self::Internal(err.to_string()),
         }
     }
@@ -196,6 +199,31 @@ impl From<DeleteUserError> for ApiError {
                 Self::Conflict(err.to_string())
             }
             DeleteUserError::Persistence(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<DeleteRepositoryError> for ApiError {
+    fn from(err: DeleteRepositoryError) -> Self {
+        match err {
+            DeleteRepositoryError::NotFound(_) => Self::NotFound(err.to_string()),
+            DeleteRepositoryError::RepositoryPersistence(_)
+            | DeleteRepositoryError::ArtifactPersistence(_)
+            | DeleteRepositoryError::IndexPersistence(_)
+            | DeleteRepositoryError::Storage(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<DeleteArtifactError> for ApiError {
+    fn from(err: DeleteArtifactError) -> Self {
+        match err {
+            DeleteArtifactError::RepositoryNotFound(_)
+            | DeleteArtifactError::ArtifactNotFound(_, _) => Self::NotFound(err.to_string()),
+            DeleteArtifactError::RepositoryPersistence(_)
+            | DeleteArtifactError::ArtifactPersistence(_)
+            | DeleteArtifactError::IndexPersistence(_)
+            | DeleteArtifactError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
 }

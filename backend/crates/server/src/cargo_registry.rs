@@ -9,11 +9,15 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::routing::{get, put};
 use axum::{Json, Router};
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
+use ferrobox_application::packaging::cargo::cargo_index_shard_path;
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName, PackageVersion};
+use ferrobox_domain::package_coordinate::{
+    PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -32,25 +36,39 @@ use crate::error::ApiError;
 /// como `index` de su registro (`sparse+http://.../cargo/{repository_id}/`).
 /// Las rutas de publicación y descarga, en cambio, sí pueden vivir en
 /// cualquier otra ruta -- `config.json` les indica al cliente dónde
-/// encontrarlas mediante los campos `dl` y `api`, así que aquí se
-/// anidan bajo `.../api/v1/crates/...` únicamente por claridad. `axum`
-/// resuelve los conflictos aparentes entre estas rutas literales y el
-/// comodín de índice dando prioridad a la coincidencia más específica.
+/// encontrarlas mediante los campos `dl` y `api`.
+///
+/// El índice disperso se expone con las cuatro plantillas de
+/// fragmentación oficiales (`1/{name}`, `2/{name}`, `3/{p}/{name}`,
+/// `{ab}/{cd}/{name}`) y con el mismo conjunto bajo el prefijo
+/// `/index/…`, para que `cargo build` / `cargo add` resuelvan
+/// dependencias tanto contra la raíz del índice como contra una
+/// ubicación `index/` explícita.
 pub(crate) fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/cargo/{repository_id}/config.json",
-            axum::routing::get(config_json),
-        )
-        .route(
-            "/cargo/{repository_id}/api/v1/crates/new",
-            axum::routing::put(publish),
-        )
+        .route("/cargo/{repository_id}/config.json", get(config_json))
+        .route("/cargo/{repository_id}/api/v1/crates/new", put(publish))
         .route(
             "/cargo/{repository_id}/api/v1/crates/{name}/{version}/download",
-            axum::routing::get(download),
+            get(download),
         )
-        .route("/cargo/{repository_id}/{*rest}", axum::routing::get(index))
+        .route("/cargo/{repository_id}/1/{name}", get(index_len1))
+        .route("/cargo/{repository_id}/2/{name}", get(index_len2))
+        .route("/cargo/{repository_id}/3/{prefix}/{name}", get(index_len3))
+        .route(
+            "/cargo/{repository_id}/{prefix}/{suffix}/{name}",
+            get(index_len4),
+        )
+        .route("/cargo/{repository_id}/index/1/{name}", get(index_len1))
+        .route("/cargo/{repository_id}/index/2/{name}", get(index_len2))
+        .route(
+            "/cargo/{repository_id}/index/3/{prefix}/{name}",
+            get(index_len3),
+        )
+        .route(
+            "/cargo/{repository_id}/index/{prefix}/{suffix}/{name}",
+            get(index_len4),
+        )
 }
 
 fn cargo_strategy(state: &AppState) -> Result<Arc<dyn PackagingStrategy>, ApiError> {
@@ -91,37 +109,63 @@ async fn config_json(
     }))
 }
 
-/// `GET /cargo/{repository_id}/{*rest}`: responde al protocolo de
-/// índice disperso para cualquier ruta que no coincida con ninguna otra
-/// ruta más específica de este router (`config.json`, `api/v1/crates/...`).
-/// `cargo` siempre calcula `rest` por sí mismo aplicando las reglas de
-/// fragmentación oficiales (ver
-/// [`ferrobox_application::packaging::cargo::cargo_index_shard_path`]);
-/// a este manejador solo le importa el último segmento de la ruta, que
-/// siempre es el nombre del paquete.
-async fn index(
+async fn index_len1(
     State(state): State<Arc<AppState>>,
-    Path((repository_id, rest)): Path<(Uuid, String)>,
+    Path((repository_id, name)): Path<(Uuid, String)>,
 ) -> Result<(HeaderMap, Bytes), ApiError> {
+    let expected = format!("1/{name}");
+    serve_index(&state, repository_id, name, &expected).await
+}
+
+async fn index_len2(
+    State(state): State<Arc<AppState>>,
+    Path((repository_id, name)): Path<(Uuid, String)>,
+) -> Result<(HeaderMap, Bytes), ApiError> {
+    let expected = format!("2/{name}");
+    serve_index(&state, repository_id, name, &expected).await
+}
+
+async fn index_len3(
+    State(state): State<Arc<AppState>>,
+    Path((repository_id, prefix, name)): Path<(Uuid, String, String)>,
+) -> Result<(HeaderMap, Bytes), ApiError> {
+    let expected = format!("3/{prefix}/{name}");
+    serve_index(&state, repository_id, name, &expected).await
+}
+
+async fn index_len4(
+    State(state): State<Arc<AppState>>,
+    Path((repository_id, prefix, suffix, name)): Path<(Uuid, String, String, String)>,
+) -> Result<(HeaderMap, Bytes), ApiError> {
+    let expected = format!("{prefix}/{suffix}/{name}");
+    serve_index(&state, repository_id, name, &expected).await
+}
+
+/// Sirve el índice disperso de un crate. `expected_shard` es la ruta de
+/// fragmentación que `cargo` debería haber pedido para `name`; si no
+/// coincide, se responde 404 para no filtrar paquetes por rutas
+/// incorrectas.
+async fn serve_index(
+    state: &AppState,
+    repository_id: Uuid,
+    package_name: String,
+    expected_shard: &str,
+) -> Result<(HeaderMap, Bytes), ApiError> {
+    let name =
+        PackageName::parse(package_name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    if cargo_index_shard_path(&name) != expected_shard {
+        return Err(ApiError::NotFound(format!(
+            "sparse-index path '{expected_shard}' does not match crate '{name}'"
+        )));
+    }
+
     let repository = state
         .get_repository
         .execute(RepositoryId::from(repository_id))
         .await?;
-    let strategy = cargo_strategy(&state)?;
-
-    let package_name = rest.rsplit('/').next().unwrap_or(rest.as_str());
-    let name =
-        PackageName::parse(package_name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
-
+    let strategy = cargo_strategy(state)?;
     let body = strategy.index(&repository, &name).await?;
 
-    // El índice disperso es dinámico -- cada publicación lo cambia --
-    // así que se desactiva explícitamente cualquier caché intermedia
-    // (proxy del cliente, CDN...) en vez de depender del comportamiento
-    // heurístico por defecto del cliente HTTP. Sin esto, `cargo publish`
-    // podría, en teoría, seguir sirviendo una respuesta 404 cacheada
-    // justo después de publicar una versión nueva de un paquete que
-    // antes no existía.
     let mut headers = HeaderMap::new();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
 
@@ -146,9 +190,8 @@ struct PublishResponse {
 }
 
 /// `PUT /cargo/{repository_id}/api/v1/crates/new`: el endpoint que
-/// `cargo publish` invoca con los metadatos y el contenido del `.crate`
-/// codificados según su formato binario propio (ver
-/// [`ferrobox_application::packaging::cargo`]).
+/// `cargo publish` invoca. Exige `Authorization: Bearer <token>`
+/// (también se acepta el esquema `Token` que envía `cargo` por defecto).
 async fn publish(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
@@ -168,11 +211,11 @@ async fn publish(
     Ok((StatusCode::OK, Json(PublishResponse::default())))
 }
 
-/// `GET /cargo/{repository_id}/api/v1/crates/{name}/{version}/download`:
-/// el endpoint al que resuelve la plantilla `dl` de `config.json`
-/// cuando `cargo` necesita el contenido binario de una versión concreta.
+/// `GET /cargo/{repository_id}/api/v1/crates/{name}/{version}/download`.
+/// Exige `Authorization: Bearer <token>` (también se acepta `Token`).
 async fn download(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { .. }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<Bytes, ApiError> {
     let repository = state

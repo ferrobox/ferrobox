@@ -132,6 +132,46 @@ impl PackageIndexStore for PostgresPackageIndexStore {
 
         Ok(row.and_then(|r| r.artifact_id.map(ArtifactId::from)))
     }
+
+    async fn delete_by_artifact(
+        &self,
+        artifact_id: ArtifactId,
+    ) -> Result<(), PackageIndexStoreError> {
+        let artifact_id: Uuid = artifact_id.into();
+
+        sqlx::query!(
+            r#"
+            DELETE FROM package_index_entries
+            WHERE artifact_id = $1
+            "#,
+            artifact_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn delete_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<(), PackageIndexStoreError> {
+        let repository_id: Uuid = repository_id.into();
+
+        sqlx::query!(
+            r#"
+            DELETE FROM package_index_entries
+            WHERE repository_id = $1
+            "#,
+            repository_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

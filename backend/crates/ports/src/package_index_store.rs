@@ -72,6 +72,30 @@ pub trait PackageIndexStore: Send + Sync {
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
     ) -> Result<Option<ArtifactId>, PackageIndexStoreError>;
+
+    /// Elimina las entradas de índice asociadas a un artefacto. No es un
+    /// error si no hay ninguna.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn delete_by_artifact(
+        &self,
+        artifact_id: ArtifactId,
+    ) -> Result<(), PackageIndexStoreError>;
+
+    /// Elimina todas las entradas de índice de un repositorio. No es un
+    /// error si el repositorio no tiene ninguna.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn delete_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<(), PackageIndexStoreError>;
 }
 
 #[cfg(test)]
@@ -140,6 +164,28 @@ mod tests {
                 .unwrap()
                 .get(&(repository_id, coordinate.clone()))
                 .and_then(|(artifact_id, _)| *artifact_id))
+        }
+
+        async fn delete_by_artifact(
+            &self,
+            artifact_id: ArtifactId,
+        ) -> Result<(), PackageIndexStoreError> {
+            self.entries
+                .lock()
+                .unwrap()
+                .retain(|_, (existing, _)| *existing != Some(artifact_id));
+            Ok(())
+        }
+
+        async fn delete_by_repository(
+            &self,
+            repository_id: RepositoryId,
+        ) -> Result<(), PackageIndexStoreError> {
+            self.entries
+                .lock()
+                .unwrap()
+                .retain(|(existing, _), _| *existing != repository_id);
+            Ok(())
         }
     }
 
@@ -221,5 +267,76 @@ mod tests {
             .unwrap();
 
         assert_eq!(entries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delete_by_artifact_removes_only_that_artifact_entries() {
+        let store = InMemoryPackageIndexStore::default();
+        let repository_id = RepositoryId::new();
+        let first = ArtifactId::new();
+        let second = ArtifactId::new();
+
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.0.0"),
+                Some(first),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.1.0"),
+                Some(second),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+
+        store.delete_by_artifact(first).await.unwrap();
+
+        assert_eq!(
+            store
+                .artifact_for(repository_id, &coordinate("1.0.0"))
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .artifact_for(repository_id, &coordinate("1.1.0"))
+                .await
+                .unwrap(),
+            Some(second)
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_by_repository_clears_every_entry() {
+        let store = InMemoryPackageIndexStore::default();
+        let repository_id = RepositoryId::new();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.0.0"),
+                Some(ArtifactId::new()),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+
+        store.delete_by_repository(repository_id).await.unwrap();
+
+        let entries = store
+            .entries_for_package(
+                repository_id,
+                PackageEcosystem::Cargo,
+                &PackageName::parse("ferrobox-cli").unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(entries.is_empty());
     }
 }
