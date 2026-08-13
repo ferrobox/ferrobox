@@ -35,9 +35,11 @@ function CopyableCodeBlock({ code }: { code: string }) {
 export function CargoRegistryPanel({
   repositoryId,
   isMirror = false,
+  framed = true,
 }: {
   repositoryId: string;
   isMirror?: boolean;
+  framed?: boolean;
 }) {
   const { data, isPending, isError } = useCargoRegistryConfig(repositoryId, true);
 
@@ -55,8 +57,8 @@ export function CargoRegistryPanel({
 
   const indexUrl = `sparse+${data.api}/`;
 
-  return (
-    <div className="space-y-5 rounded-lg border border-border p-5">
+  const body = (
+    <div className="space-y-5">
       <div>
         <h3 className="text-sm font-semibold text-foreground">
           {isMirror ? "Mirror de índice disperso" : "Índice disperso"}
@@ -133,4 +135,10 @@ export function CargoRegistryPanel({
       )}
     </div>
   );
+
+  if (!framed) {
+    return body;
+  }
+
+  return <div className="rounded-lg border border-border p-5">{body}</div>;
 }

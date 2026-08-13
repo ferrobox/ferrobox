@@ -3,4 +3,12 @@
 /**
  * Representación de un artefacto en las respuestas de la API.
  */
-export type ArtifactResponse = { id: string, checksum: string, size_bytes: number, };
+export type ArtifactResponse = { id: string, 
+/**
+ * Nombre del paquete (crate, etc.) si el índice lo conoce.
+ */
+name: string | null, 
+/**
+ * Versión del paquete si el índice la conoce.
+ */
+version: string | null, checksum: string, size_bytes: number, };

@@ -428,7 +428,10 @@ mod tests {
                 artifact_store.clone(),
                 storage.clone(),
             ),
-            list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store.clone()),
+            list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+            ),
             delete_repository: DeleteRepositoryUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),

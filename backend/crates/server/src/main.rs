@@ -224,7 +224,10 @@ fn build_app_state(
             storage.clone(),
         ),
         download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
-        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store.clone()),
+        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
+            artifact_store.clone(),
+            package_index_store.clone(),
+        ),
         delete_repository: DeleteRepositoryUseCase::new(
             repository_store.clone(),
             artifact_store.clone(),

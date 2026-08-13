@@ -15,7 +15,9 @@ use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
-use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
+use ferrobox_ports::package_index_store::{
+    IndexedArtifact, PackageIndexStore, PackageIndexStoreError,
+};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
@@ -261,6 +263,27 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
                 *repo_id == repository_id && coordinate.ecosystem() == ecosystem
             })
             .map(|(.., entry)| entry.clone())
+            .collect())
+    }
+
+    async fn find_indexed_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(repo_id, coordinate, artifact_id, _)| {
+                if *repo_id != repository_id {
+                    return None;
+                }
+                artifact_id.map(|artifact_id| IndexedArtifact {
+                    artifact_id,
+                    coordinate: coordinate.clone(),
+                })
+            })
             .collect())
     }
 }
