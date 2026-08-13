@@ -92,49 +92,15 @@ async fn main() {
 
     bootstrap_admin(&config, user_store.clone()).await;
 
-    let packaging = PackagingRegistry::new().register(Arc::new(CargoPackagingStrategy::new(
-        artifact_store.clone(),
-        package_index_store.clone(),
-        storage.clone(),
-    )));
-
-    let state = Arc::new(AppState {
-        create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
-        list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
-        get_repository: GetRepositoryUseCase::new(repository_store.clone()),
-        publish_artifact: PublishArtifactUseCase::new(
-            repository_store.clone(),
-            artifact_store.clone(),
-            storage.clone(),
-        ),
-        download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
-        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store.clone()),
-        delete_repository: DeleteRepositoryUseCase::new(
-            repository_store.clone(),
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-        ),
-        delete_artifact: DeleteArtifactUseCase::new(
-            repository_store.clone(),
-            artifact_store.clone(),
-            package_index_store,
-            storage,
-        ),
-        packaging,
-        public_base_url: config.public_base_url.clone(),
-        login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
-        authenticate_token: AuthenticateTokenUseCase::new(
-            user_store.clone(),
-            api_token_store.clone(),
-        ),
-        create_api_token: CreateApiTokenUseCase::new(api_token_store.clone()),
-        list_api_tokens: ListApiTokensUseCase::new(api_token_store.clone()),
-        revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
-        create_user: CreateUserUseCase::new(user_store.clone()),
-        list_users: ListUsersUseCase::new(user_store.clone()),
-        delete_user: DeleteUserUseCase::new(user_store),
-    });
+    let state = Arc::new(build_app_state(
+        &config,
+        repository_store,
+        artifact_store,
+        package_index_store,
+        user_store,
+        api_token_store,
+        storage,
+    ));
 
     let public = Router::new()
         .route("/health", get(health))
@@ -213,6 +179,60 @@ async fn bootstrap_admin(config: &Config, user_store: Arc<PostgresUserStore>) {
             );
         }
         BootstrapAdminOutcome::AlreadyInitialized => {}
+    }
+}
+
+fn build_app_state(
+    config: &Config,
+    repository_store: Arc<PostgresRepositoryStore>,
+    artifact_store: Arc<PostgresArtifactStore>,
+    package_index_store: Arc<PostgresPackageIndexStore>,
+    user_store: Arc<PostgresUserStore>,
+    api_token_store: Arc<PostgresApiTokenStore>,
+    storage: Arc<S3StorageAdapter>,
+) -> AppState {
+    let packaging = PackagingRegistry::new().register(Arc::new(CargoPackagingStrategy::new(
+        artifact_store.clone(),
+        package_index_store.clone(),
+        storage.clone(),
+    )));
+
+    AppState {
+        create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
+        list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
+        get_repository: GetRepositoryUseCase::new(repository_store.clone()),
+        publish_artifact: PublishArtifactUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            storage.clone(),
+        ),
+        download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(artifact_store.clone()),
+        delete_repository: DeleteRepositoryUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            package_index_store.clone(),
+            storage.clone(),
+        ),
+        delete_artifact: DeleteArtifactUseCase::new(
+            repository_store,
+            artifact_store,
+            package_index_store,
+            storage,
+        ),
+        packaging,
+        public_base_url: config.public_base_url.clone(),
+        login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
+        authenticate_token: AuthenticateTokenUseCase::new(
+            user_store.clone(),
+            api_token_store.clone(),
+        ),
+        create_api_token: CreateApiTokenUseCase::new(api_token_store.clone()),
+        list_api_tokens: ListApiTokensUseCase::new(api_token_store.clone()),
+        revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
+        create_user: CreateUserUseCase::new(user_store.clone()),
+        list_users: ListUsersUseCase::new(user_store.clone()),
+        delete_user: DeleteUserUseCase::new(user_store),
     }
 }
 
