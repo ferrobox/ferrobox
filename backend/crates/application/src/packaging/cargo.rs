@@ -25,7 +25,7 @@ use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
-use super::{PackagingError, PackagingStrategy, PublishOutcome};
+use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -331,6 +331,87 @@ impl PackagingStrategy for CargoPackagingStrategy {
         }
 
         Err(PackagingError::VersionNotFound(coordinate.clone()))
+    }
+
+    async fn set_yanked(
+        &self,
+        repository: &Repository,
+        coordinate: &PackageCoordinate,
+        yanked: bool,
+    ) -> Result<(), PackagingError> {
+        Self::ensure_cargo_repository(repository)?;
+        if Self::mirror_upstream(repository).is_some() {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
+
+        let Some(mut entry) = self.find_local_index_entry(repository, coordinate).await? else {
+            return Err(PackagingError::VersionNotFound(coordinate.clone()));
+        };
+
+        if entry.yanked == yanked {
+            return Ok(());
+        }
+
+        entry.yanked = yanked;
+        let artifact_id = self
+            .package_index_store
+            .artifact_for(repository.id(), coordinate)
+            .await?;
+        let entry_bytes = Bytes::from(
+            serde_json::to_vec(&entry).expect("an IndexEntry always serializes to valid JSON"),
+        );
+        self.package_index_store
+            .upsert_entry(repository.id(), coordinate, artifact_id, entry_bytes)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn search(
+        &self,
+        repository: &Repository,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<PackageSearchHit>, PackagingError> {
+        Self::ensure_cargo_repository(repository)?;
+
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let entries = self
+            .package_index_store
+            .entries_for_repository(repository.id(), PackageEcosystem::Cargo)
+            .await?;
+
+        let needle = query.to_ascii_lowercase();
+        let mut by_name: BTreeMap<String, Vec<IndexEntry>> = BTreeMap::new();
+        for entry_bytes in entries {
+            let entry: IndexEntry = serde_json::from_slice(&entry_bytes)
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            if !entry.name.to_ascii_lowercase().contains(&needle) {
+                continue;
+            }
+            by_name.entry(entry.name.clone()).or_default().push(entry);
+        }
+
+        let mut hits = Vec::new();
+        for (name, versions) in by_name {
+            let max_version = versions
+                .iter()
+                .rev()
+                .find(|entry| !entry.yanked)
+                .or_else(|| versions.last())
+                .expect("grouped versions are never empty")
+                .vers
+                .clone();
+            hits.push(PackageSearchHit { name, max_version });
+            if hits.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(hits)
     }
 }
 
@@ -783,6 +864,135 @@ mod tests {
         let result = strategy.download(&repository, &coordinate).await;
 
         assert!(matches!(result, Err(PackagingError::VersionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn yank_marks_the_index_entry_and_unyank_clears_it() {
+        let strategy = strategy();
+        let repository = cargo_repository("crates-releases");
+        let coordinate = strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"tarball"),
+            )
+            .await
+            .unwrap();
+
+        strategy
+            .set_yanked(&repository, &coordinate, true)
+            .await
+            .unwrap();
+
+        let index = strategy
+            .index(&repository, &PackageName::parse("ferrobox-cli").unwrap())
+            .await
+            .unwrap();
+        let entry: IndexEntry =
+            serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
+        assert!(entry.yanked);
+
+        strategy
+            .set_yanked(&repository, &coordinate, false)
+            .await
+            .unwrap();
+        let index = strategy
+            .index(&repository, &PackageName::parse("ferrobox-cli").unwrap())
+            .await
+            .unwrap();
+        let entry: IndexEntry =
+            serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
+        assert!(!entry.yanked);
+    }
+
+    #[tokio::test]
+    async fn yanking_an_unpublished_version_is_not_found() {
+        let strategy = strategy();
+        let repository = cargo_repository("crates-releases");
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("ferrobox-cli").unwrap(),
+            PackageVersion::parse("9.9.9").unwrap(),
+        );
+
+        let result = strategy.set_yanked(&repository, &coordinate, true).await;
+
+        assert!(matches!(result, Err(PackagingError::VersionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn yanking_on_a_mirror_is_rejected() {
+        let strategy = strategy();
+        let repository = Repository::new(
+            RepositoryName::parse("crates-io-mirror").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://index.crates.io/").unwrap(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("1.0.0").unwrap(),
+        );
+
+        let result = strategy.set_yanked(&repository, &coordinate, true).await;
+
+        assert!(matches!(result, Err(PackagingError::ReadOnlyRepository)));
+    }
+
+    #[tokio::test]
+    async fn search_matches_package_names_case_insensitively() {
+        let strategy = strategy();
+        let repository = cargo_repository("crates-releases");
+        strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"v1"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("other-crate", "1.0.0"), b"v2"),
+            )
+            .await
+            .unwrap();
+
+        let hits = strategy.search(&repository, "FERRO", 10).await.unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "ferrobox-cli");
+        assert_eq!(hits[0].max_version, "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn search_prefers_a_non_yanked_version_as_max_version() {
+        let strategy = strategy();
+        let repository = cargo_repository("crates-releases");
+        let first = strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"v1"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &repository,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.2.0"), b"v2"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .set_yanked(&repository, &first, true)
+            .await
+            .unwrap();
+
+        let hits = strategy.search(&repository, "ferrobox", 10).await.unwrap();
+
+        assert_eq!(hits[0].max_version, "0.2.0");
     }
 
     #[tokio::test]

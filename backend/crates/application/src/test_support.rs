@@ -1,3 +1,6 @@
+//! Dobles en memoria de los puertos, para tests de aplicación y HTTP.
+#![allow(missing_docs, clippy::missing_panics_doc, clippy::must_use_candidate)]
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -18,7 +21,7 @@ use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 
 #[derive(Default)]
-pub(crate) struct InMemoryRepositoryStore {
+pub struct InMemoryRepositoryStore {
     repositories: Mutex<HashMap<RepositoryId, Repository>>,
 }
 
@@ -78,7 +81,7 @@ impl RepositoryStore for InMemoryRepositoryStore {
 }
 
 #[derive(Default)]
-pub(crate) struct InMemoryArtifactStore {
+pub struct InMemoryArtifactStore {
     artifacts: Mutex<HashMap<ArtifactId, Artifact>>,
 }
 
@@ -117,7 +120,7 @@ impl ArtifactStore for InMemoryArtifactStore {
 }
 
 #[derive(Default)]
-pub(crate) struct InMemoryStorage {
+pub struct InMemoryStorage {
     objects: Mutex<HashMap<StorageKey, Bytes>>,
 }
 
@@ -152,7 +155,7 @@ impl StoragePort for InMemoryStorage {
 /// como exige el contrato del puerto y tal y como lo garantiza el
 /// adaptador real (`ORDER BY created_at`).
 #[derive(Default)]
-pub(crate) struct InMemoryPackageIndexStore {
+pub struct InMemoryPackageIndexStore {
     entries: Mutex<Vec<IndexRow>>,
 }
 
@@ -243,9 +246,26 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
             .retain(|(existing, ..)| *existing != repository_id);
         Ok(())
     }
+
+    async fn entries_for_repository(
+        &self,
+        repository_id: RepositoryId,
+        ecosystem: PackageEcosystem,
+    ) -> Result<Vec<Bytes>, PackageIndexStoreError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(repo_id, coordinate, ..)| {
+                *repo_id == repository_id && coordinate.ecosystem() == ecosystem
+            })
+            .map(|(.., entry)| entry.clone())
+            .collect())
+    }
 }
 
-pub(crate) fn forge(name: &str) -> Repository {
+pub fn forge(name: &str) -> Repository {
     Repository::new(
         RepositoryName::parse(name).unwrap(),
         RepositoryKind::Forge,
@@ -255,7 +275,7 @@ pub(crate) fn forge(name: &str) -> Repository {
 }
 
 #[derive(Default)]
-pub(crate) struct InMemoryUserStore {
+pub struct InMemoryUserStore {
     users: Mutex<HashMap<UserId, (User, String)>>,
 }
 
@@ -343,7 +363,7 @@ impl UserStore for InMemoryUserStore {
 }
 
 #[derive(Default)]
-pub(crate) struct InMemoryApiTokenStore {
+pub struct InMemoryApiTokenStore {
     tokens: Mutex<HashMap<ApiTokenId, (ApiToken, String, String)>>,
 }
 
@@ -408,19 +428,19 @@ impl ApiTokenStore for InMemoryApiTokenStore {
 }
 
 #[derive(Default)]
-pub(crate) struct InMemoryHttpClient {
+pub struct InMemoryHttpClient {
     responses: Mutex<HashMap<String, HttpResponse>>,
 }
 
 impl InMemoryHttpClient {
-    pub(crate) fn stub(&self, url: &str, status: u16, body: impl Into<Bytes>) {
-        self.responses
-            .lock()
-            .unwrap()
-            .insert(url.to_string(), HttpResponse {
+    pub fn stub(&self, url: &str, status: u16, body: impl Into<Bytes>) {
+        self.responses.lock().unwrap().insert(
+            url.to_string(),
+            HttpResponse {
                 status,
                 body: body.into(),
-            });
+            },
+        );
     }
 }
 

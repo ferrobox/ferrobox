@@ -55,5 +55,5 @@ pub mod manage_users;
 /// Caso de uso: resolver un secreto Bearer a un principal autenticado.
 pub mod authenticate_token;
 
-#[cfg(test)]
-mod test_support;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_support;

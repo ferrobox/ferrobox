@@ -1015,9 +1015,11 @@ dependencies = [
  "ferrobox-domain",
  "ferrobox-ports",
  "serde",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
+ "tower",
  "ts-rs",
  "uuid",
 ]

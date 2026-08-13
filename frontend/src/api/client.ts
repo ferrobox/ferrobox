@@ -221,6 +221,7 @@ export async function downloadArtifact(artifactId: string, filename?: string): P
 export interface CargoRegistryConfig {
   dl: string;
   api: string;
+  "auth-required"?: boolean;
 }
 
 export function getCargoRegistryConfig(repositoryId: string): Promise<CargoRegistryConfig> {

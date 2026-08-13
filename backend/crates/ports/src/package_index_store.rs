@@ -96,6 +96,19 @@ pub trait PackageIndexStore: Send + Sync {
         &self,
         repository_id: RepositoryId,
     ) -> Result<(), PackageIndexStoreError>;
+
+    /// Lista las entradas de índice de todos los paquetes de un
+    /// repositorio, en el orden en que se publicaron.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn entries_for_repository(
+        &self,
+        repository_id: RepositoryId,
+        ecosystem: PackageEcosystem,
+    ) -> Result<Vec<Bytes>, PackageIndexStoreError>;
 }
 
 #[cfg(test)]
@@ -186,6 +199,23 @@ mod tests {
                 .unwrap()
                 .retain(|(existing, _), _| *existing != repository_id);
             Ok(())
+        }
+
+        async fn entries_for_repository(
+            &self,
+            repository_id: RepositoryId,
+            ecosystem: PackageEcosystem,
+        ) -> Result<Vec<Bytes>, PackageIndexStoreError> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|((repo_id, coordinate), _)| {
+                    *repo_id == repository_id && coordinate.ecosystem() == ecosystem
+                })
+                .map(|(_, (_, entry))| entry.clone())
+                .collect())
         }
     }
 
@@ -338,5 +368,40 @@ mod tests {
             .await
             .unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn entries_for_repository_lists_every_package() {
+        let store = InMemoryPackageIndexStore::default();
+        let repository_id = RepositoryId::new();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.0.0"),
+                Some(ArtifactId::new()),
+                Bytes::from_static(b"{\"vers\":\"1.0.0\"}"),
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Cargo,
+                    PackageName::parse("other").unwrap(),
+                    PackageVersion::parse("2.0.0").unwrap(),
+                ),
+                Some(ArtifactId::new()),
+                Bytes::from_static(b"{\"vers\":\"2.0.0\"}"),
+            )
+            .await
+            .unwrap();
+
+        let entries = store
+            .entries_for_repository(repository_id, PackageEcosystem::Cargo)
+            .await
+            .unwrap();
+
+        assert_eq!(entries.len(), 2);
     }
 }
