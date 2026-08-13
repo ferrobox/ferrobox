@@ -10,6 +10,7 @@ import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
 import type { UserResponse } from "@/api/generated/UserResponse";
 
 /**
@@ -129,6 +130,16 @@ export function createUser(payload: CreateUserRequest): Promise<UserResponse> {
 
 export function deleteUser(userId: string): Promise<void> {
   return request<void>(`/users/${userId}`, { method: "DELETE" });
+}
+
+export function updateUserRole(
+  userId: string,
+  payload: UpdateUserRoleRequest,
+): Promise<UserResponse> {
+  return request<UserResponse>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function listRepositories(): Promise<RepositoryResponse[]> {

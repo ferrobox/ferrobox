@@ -5,7 +5,7 @@ use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use thiserror::Error;
 
-use crate::auth_crypto::{hash_password, PasswordHashError};
+use crate::auth_crypto::{PasswordHashError, hash_password};
 
 /// Motivos por los que crear un usuario puede fallar.
 #[derive(Debug, Error)]
@@ -146,6 +146,67 @@ impl DeleteUserUseCase {
     }
 }
 
+/// Motivos por los que cambiar el rol de un usuario puede fallar.
+#[derive(Debug, Error)]
+pub enum ChangeUserRoleError {
+    /// El usuario no existe.
+    #[error("user not found")]
+    NotFound,
+
+    /// No se puede degradar el último administrador del sistema.
+    #[error("cannot demote the last admin user")]
+    CannotDemoteLastAdmin,
+
+    /// Fallo al consultar / actualizar el almacén.
+    #[error(transparent)]
+    Persistence(#[from] UserStoreError),
+}
+
+/// Caso de uso: cambiar el rol de un usuario.
+pub struct ChangeUserRoleUseCase {
+    user_store: Arc<dyn UserStore>,
+}
+
+impl ChangeUserRoleUseCase {
+    /// Construye el caso de uso a partir de su puerto.
+    #[must_use]
+    pub fn new(user_store: Arc<dyn UserStore>) -> Self {
+        Self { user_store }
+    }
+
+    /// Cambia el rol del usuario indicado. Degradar al último
+    /// administrador se rechaza para no dejar el sistema sin gestión.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`ChangeUserRoleError`] si el usuario no existe, es el
+    /// último admin y se intenta degradarlo, o si falla la persistencia.
+    pub async fn execute(
+        &self,
+        target_id: UserId,
+        new_role: Role,
+    ) -> Result<User, ChangeUserRoleError> {
+        let Some(target) = self.user_store.find_by_id(target_id).await? else {
+            return Err(ChangeUserRoleError::NotFound);
+        };
+
+        if target.role() == new_role {
+            return Ok(target);
+        }
+
+        if target.role() == Role::Admin && self.user_store.count_admins().await? <= 1 {
+            return Err(ChangeUserRoleError::CannotDemoteLastAdmin);
+        }
+
+        let updated = target.with_role(new_role);
+        if self.user_store.update_role(target_id, new_role).await? {
+            Ok(updated)
+        } else {
+            Err(ChangeUserRoleError::NotFound)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -158,11 +219,7 @@ mod tests {
     async fn create_and_list_users() {
         let store = Arc::new(InMemoryUserStore::default());
         let created = CreateUserUseCase::new(store.clone())
-            .execute(
-                Username::parse("dev").unwrap(),
-                "secret",
-                Role::Developer,
-            )
+            .execute(Username::parse("dev").unwrap(), "secret", Role::Developer)
             .await
             .unwrap();
 
@@ -230,5 +287,103 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.count().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn change_role_updates_user() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let created = CreateUserUseCase::new(store.clone())
+            .execute(Username::parse("dev").unwrap(), "secret", Role::Developer)
+            .await
+            .unwrap();
+
+        let updated = ChangeUserRoleUseCase::new(store.clone())
+            .execute(created.id(), Role::Reader)
+            .await
+            .unwrap();
+
+        assert_eq!(updated.role(), Role::Reader);
+        assert_eq!(
+            store
+                .find_by_id(created.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .role(),
+            Role::Reader
+        );
+    }
+
+    #[tokio::test]
+    async fn change_role_same_role_is_a_noop() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let created = CreateUserUseCase::new(store.clone())
+            .execute(Username::parse("dev").unwrap(), "secret", Role::Developer)
+            .await
+            .unwrap();
+
+        let updated = ChangeUserRoleUseCase::new(store)
+            .execute(created.id(), Role::Developer)
+            .await
+            .unwrap();
+
+        assert_eq!(updated.role(), Role::Developer);
+    }
+
+    #[tokio::test]
+    async fn cannot_demote_last_admin() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let created = CreateUserUseCase::new(store.clone())
+            .execute(Username::parse("only-admin").unwrap(), "a", Role::Admin)
+            .await
+            .unwrap();
+
+        let err = ChangeUserRoleUseCase::new(store.clone())
+            .execute(created.id(), Role::Reader)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ChangeUserRoleError::CannotDemoteLastAdmin));
+        assert_eq!(
+            store
+                .find_by_id(created.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .role(),
+            Role::Admin
+        );
+    }
+
+    #[tokio::test]
+    async fn can_demote_admin_when_another_remains() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let create = CreateUserUseCase::new(store.clone());
+        let first = create
+            .execute(Username::parse("admin-one").unwrap(), "a", Role::Admin)
+            .await
+            .unwrap();
+        create
+            .execute(Username::parse("admin-two").unwrap(), "b", Role::Admin)
+            .await
+            .unwrap();
+
+        let updated = ChangeUserRoleUseCase::new(store)
+            .execute(first.id(), Role::Developer)
+            .await
+            .unwrap();
+
+        assert_eq!(updated.role(), Role::Developer);
+    }
+
+    #[tokio::test]
+    async fn change_role_missing_user_is_not_found() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let err = ChangeUserRoleUseCase::new(store)
+            .execute(UserId::new(), Role::Reader)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ChangeUserRoleError::NotFound));
     }
 }

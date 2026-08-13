@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_manage_users;
-use crate::dto::{CreateUserRequest, UserResponse};
+use crate::dto::{CreateUserRequest, UpdateUserRoleRequest, UserResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn list_users(
@@ -35,9 +35,7 @@ pub(crate) async fn create_user(
         Username::parse(payload.username).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
     if payload.password.is_empty() {
-        return Err(ApiError::BadRequest(
-            "password cannot be empty".to_string(),
-        ));
+        return Err(ApiError::BadRequest("password cannot be empty".to_string()));
     }
 
     let created = state
@@ -61,4 +59,20 @@ pub(crate) async fn delete_user(
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) async fn update_user_role(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(user_id): Path<Uuid>,
+    Json(payload): Json<UpdateUserRoleRequest>,
+) -> Result<Json<UserResponse>, ApiError> {
+    require_manage_users(&user)?;
+
+    let updated = state
+        .change_user_role
+        .execute(UserId::from(user_id), payload.role.into())
+        .await?;
+
+    Ok(Json(UserResponse::from(&updated)))
 }
