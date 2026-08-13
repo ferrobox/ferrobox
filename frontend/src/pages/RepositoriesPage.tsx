@@ -1,155 +1,27 @@
-import { AlertCircle, Boxes, RefreshCw, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
-import { toast } from "sonner";
+import { Boxes } from "lucide-react";
 
-import { ApiError } from "@/api/client";
-import { useDeleteRepository, useRepositories } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
-import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { CreateRepositoryDialog } from "@/components/repository/CreateRepositoryDialog";
-import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
-import { RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 export function RepositoriesPage() {
   const { user } = useAuth();
-  const { data, isPending, isError, error, refetch, isFetching } = useRepositories();
-  const deleteRepository = useDeleteRepository();
   const canWrite = canWriteArtifacts(user?.role);
 
-  async function onDelete(repositoryId: string, name: string) {
-    try {
-      await deleteRepository.mutateAsync(repositoryId);
-      toast.success(`Repositorio «${name}» eliminado`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el repositorio");
-      throw err;
-    }
-  }
-
   return (
-    <div>
-      <PageHeader
-        title="Repositorios"
-        description="Gestiona los repositorios de artefactos de tu organización."
-        actions={canWrite ? <CreateRepositoryDialog /> : undefined}
-      />
-
-      {isPending ? <RepositoriesTableSkeleton /> : null}
-
-      {isError ? (
-        <Alert variant="destructive">
-          <AlertCircle />
-          <AlertTitle>No se pudieron cargar los repositorios</AlertTitle>
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>{error.message}</span>
-            <Button size="sm" variant="outline" onClick={() => void refetch()}>
-              <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {data && data.length === 0 ? (
-        <EmptyState />
-      ) : data && data.length > 0 ? (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Ecosistema</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead className="text-right">Identificador</TableHead>
-                {canWrite ? <TableHead className="text-right">Acciones</TableHead> : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((repository) => (
-                <TableRow key={repository.id} className="cursor-pointer">
-                  <TableCell className="p-0">
-                    <Link
-                      to={`/repositories/${repository.id}`}
-                      className="block px-4 py-3 font-medium text-foreground hover:underline"
-                    >
-                      {repository.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <EcosystemBadge ecosystem={repository.ecosystem} />
-                  </TableCell>
-                  <TableCell>
-                    <RepositoryKindBadge kind={repository.kind} />
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {repository.id}
-                  </TableCell>
-                  {canWrite ? (
-                    <TableCell className="text-right">
-                      <ConfirmDeleteDialog
-                        title={`Eliminar «${repository.name}»`}
-                        description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
-                        pending={deleteRepository.isPending}
-                        onConfirm={() => onDelete(repository.id, repository.name)}
-                        trigger={
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <Trash2 />
-                            Eliminar
-                          </Button>
-                        }
-                      />
-                    </TableCell>
-                  ) : null}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RepositoriesTableSkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 5 }, (_, index) => (
-        <Skeleton key={index} className="h-12 w-full rounded-lg" />
-      ))}
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-20 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
       <div className="flex size-12 items-center justify-center rounded-full bg-muted">
         <Boxes className="size-6 text-muted-foreground" />
       </div>
-      <div className="space-y-1">
-        <p className="font-medium text-foreground">Todavía no hay repositorios</p>
+      <div className="max-w-md space-y-1">
+        <h1 className="text-xl font-semibold text-foreground">Repositorios</h1>
         <p className="text-sm text-muted-foreground">
-          Crea tu primer repositorio para empezar a publicar artefactos.
+          Elige un repositorio en el árbol de la izquierda. Están agrupados por
+          ecosistema (Cargo, npm…) y etiquetados como Local, Remoto o Virtual,
+          igual que en Artifactory.
         </p>
       </div>
-      <CreateRepositoryDialog />
+      {canWrite ? <CreateRepositoryDialog /> : null}
     </div>
   );
 }

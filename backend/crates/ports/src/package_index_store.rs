@@ -13,6 +13,16 @@ pub enum PackageIndexStoreError {
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// Relación entre un artefacto almacenado y la coordenada de paquete
+/// (ecosistema, nombre y versión) que lo publicó.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedArtifact {
+    /// Identificador del binario persistido.
+    pub artifact_id: ArtifactId,
+    /// Coordenada de paquete asociada.
+    pub coordinate: PackageCoordinate,
+}
+
 /// Puerto de persistencia del índice de paquetes: la lista, por
 /// repositorio y coordenada, de las entradas que cada estrategia de
 /// empaquetado (`PackagingStrategy`) necesita para responder al
@@ -109,6 +119,18 @@ pub trait PackageIndexStore: Send + Sync {
         repository_id: RepositoryId,
         ecosystem: PackageEcosystem,
     ) -> Result<Vec<Bytes>, PackageIndexStoreError>;
+
+    /// Lista las coordenadas de paquete de un repositorio que ya tienen
+    /// un artefacto binario asociado (nombre, versión e identificador).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn find_indexed_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError>;
 }
 
 #[cfg(test)]
@@ -215,6 +237,27 @@ mod tests {
                     *repo_id == repository_id && coordinate.ecosystem() == ecosystem
                 })
                 .map(|(_, (_, entry))| entry.clone())
+                .collect())
+        }
+
+        async fn find_indexed_by_repository(
+            &self,
+            repository_id: RepositoryId,
+        ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|((repo_id, coordinate), (artifact_id, _))| {
+                    if *repo_id != repository_id {
+                        return None;
+                    }
+                    artifact_id.map(|artifact_id| IndexedArtifact {
+                        artifact_id,
+                        coordinate: coordinate.clone(),
+                    })
+                })
                 .collect())
         }
     }
@@ -403,5 +446,40 @@ mod tests {
             .unwrap();
 
         assert_eq!(entries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_indexed_by_repository_skips_entries_without_artifact() {
+        let store = InMemoryPackageIndexStore::default();
+        let repository_id = RepositoryId::new();
+        let artifact_id = ArtifactId::new();
+
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.0.0"),
+                Some(artifact_id),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("2.0.0"),
+                None,
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+
+        let indexed = store
+            .find_indexed_by_repository(repository_id)
+            .await
+            .unwrap();
+
+        assert_eq!(indexed.len(), 1);
+        assert_eq!(indexed[0].artifact_id, artifact_id);
+        assert_eq!(indexed[0].coordinate.version().as_str(), "1.0.0");
     }
 }

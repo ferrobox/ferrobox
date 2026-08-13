@@ -1,9 +1,13 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
-use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
-use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
-use sqlx::PgPool;
+use ferrobox_domain::package_coordinate::{
+    PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+};
+use ferrobox_ports::package_index_store::{
+    IndexedArtifact, PackageIndexStore, PackageIndexStoreError,
+};
+use sqlx::{PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -201,6 +205,58 @@ impl PackageIndexStore for PostgresPackageIndexStore {
                 serde_json::to_vec(&row.entry)
                     .map(Bytes::from)
                     .map_err(|err| backend_error(err.to_string()))
+            })
+            .collect()
+    }
+
+    async fn find_indexed_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError> {
+        let repository_id: Uuid = repository_id.into();
+
+        let rows = sqlx::query(
+            r"
+            SELECT artifact_id, ecosystem, package_name, package_version
+            FROM package_index_entries
+            WHERE repository_id = $1
+              AND artifact_id IS NOT NULL
+            ORDER BY package_name, package_version
+            ",
+        )
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| {
+                let artifact_id: Option<Uuid> = row
+                    .try_get("artifact_id")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let artifact_id =
+                    artifact_id.ok_or_else(|| backend_error("indexed row missing artifact_id"))?;
+                let ecosystem: String = row
+                    .try_get("ecosystem")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let package_name: String = row
+                    .try_get("package_name")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let package_version: String = row
+                    .try_get("package_version")
+                    .map_err(|err| backend_error(err.to_string()))?;
+
+                let ecosystem =
+                    ecosystem_column::from_column(&ecosystem).map_err(backend_error)?;
+                let name =
+                    PackageName::parse(package_name).map_err(|err| backend_error(err.to_string()))?;
+                let version = PackageVersion::parse(package_version)
+                    .map_err(|err| backend_error(err.to_string()))?;
+
+                Ok(IndexedArtifact {
+                    artifact_id: ArtifactId::from(artifact_id),
+                    coordinate: PackageCoordinate::new(ecosystem, name, version),
+                })
             })
             .collect()
     }

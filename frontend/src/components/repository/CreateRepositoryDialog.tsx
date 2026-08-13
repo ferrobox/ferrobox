@@ -32,7 +32,7 @@ const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 type KindChoice = "forge" | "mirror";
 
-export function CreateRepositoryDialog() {
+export function CreateRepositoryDialog({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [ecosystem, setEcosystem] = useState<PackageEcosystemDto>("generic");
@@ -113,9 +113,13 @@ export function CreateRepositoryDialog() {
       }}
     >
       <DialogTrigger asChild>
-        <Button>
+        <Button
+          size={compact ? "icon-sm" : "default"}
+          aria-label={compact ? "Nuevo repositorio" : undefined}
+          title={compact ? "Nuevo repositorio" : undefined}
+        >
           <Plus />
-          Nuevo repositorio
+          {compact ? null : "Nuevo repositorio"}
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -123,8 +127,9 @@ export function CreateRepositoryDialog() {
           <DialogHeader>
             <DialogTitle>Crear repositorio</DialogTitle>
             <DialogDescription>
-              Elige Forge (publicas tú el contenido) o Mirror Cargo (caché de un
-              índice remoto como crates.io).
+              Local (Forge) guarda artefactos que publicas tú. Remoto (Mirror)
+              cachea un índice Cargo externo como crates.io. Virtual (Alloy)
+              llegará más adelante.
             </DialogDescription>
           </DialogHeader>
 
@@ -156,8 +161,8 @@ export function CreateRepositoryDialog() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="forge">Forge</SelectItem>
-                  <SelectItem value="mirror">Mirror (Cargo)</SelectItem>
+                  <SelectItem value="forge">Local (Forge)</SelectItem>
+                  <SelectItem value="mirror">Remoto (Mirror Cargo)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

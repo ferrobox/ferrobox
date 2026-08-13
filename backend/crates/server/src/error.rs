@@ -9,6 +9,7 @@ use ferrobox_application::delete_artifact::DeleteArtifactError;
 use ferrobox_application::delete_repository::DeleteRepositoryError;
 use ferrobox_application::download_artifact::DownloadArtifactError;
 use ferrobox_application::get_repository::GetRepositoryError;
+use ferrobox_application::list_repository_artifacts::ListRepositoryArtifactsError;
 use ferrobox_application::login::LoginError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
@@ -83,6 +84,12 @@ impl From<DownloadArtifactError> for ApiError {
 
 impl From<ArtifactStoreError> for ApiError {
     fn from(err: ArtifactStoreError) -> Self {
+        Self::Internal(err.to_string())
+    }
+}
+
+impl From<ListRepositoryArtifactsError> for ApiError {
+    fn from(err: ListRepositoryArtifactsError) -> Self {
         Self::Internal(err.to_string())
     }
 }

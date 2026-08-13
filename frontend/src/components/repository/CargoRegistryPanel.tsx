@@ -35,9 +35,11 @@ function CopyableCodeBlock({ code }: { code: string }) {
 export function CargoRegistryPanel({
   repositoryId,
   isMirror = false,
+  framed = true,
 }: {
   repositoryId: string;
   isMirror?: boolean;
+  framed?: boolean;
 }) {
   const { data, isPending, isError } = useCargoRegistryConfig(repositoryId, true);
 
@@ -55,8 +57,8 @@ export function CargoRegistryPanel({
 
   const indexUrl = `sparse+${data.api}/`;
 
-  return (
-    <div className="space-y-5 rounded-lg border border-border p-5">
+  const body = (
+    <div className="space-y-5">
       <div>
         <h3 className="text-sm font-semibold text-foreground">
           {isMirror ? "Mirror de índice disperso" : "Índice disperso"}
@@ -76,8 +78,9 @@ export function CargoRegistryPanel({
           code={`[registries.ferrobox]\nindex = "${indexUrl}"`}
         />
         <p className="text-xs text-muted-foreground">
-          Añádelo a <code className="font-mono">~/.cargo/config.toml</code> o a{" "}
-          <code className="font-mono">.cargo/config.toml</code> dentro de tu proyecto.
+          Puedes ponerlo en <code className="font-mono">~/.cargo/config.toml</code> o en{" "}
+          <code className="font-mono">.cargo/config.toml</code> del crate (por ejemplo{" "}
+          <code className="font-mono">demo-ferrobox/.cargo/config.toml</code>).
         </p>
       </div>
 
@@ -95,7 +98,8 @@ export function CargoRegistryPanel({
           <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
           <code className="font-mono">.cargo/credentials.toml</code> del proyecto). Alternativa:{" "}
           <code className="font-mono">cargo login --registry ferrobox</code> o{" "}
-          <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>.
+          <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>. No
+          subas el token al repositorio.
         </p>
       </div>
 
@@ -132,4 +136,10 @@ export function CargoRegistryPanel({
       )}
     </div>
   );
+
+  if (!framed) {
+    return body;
+  }
+
+  return <div className="rounded-lg border border-border p-5">{body}</div>;
 }

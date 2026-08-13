@@ -1,5 +1,6 @@
-import { AlertCircle, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
+import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -7,12 +8,11 @@ import { useDeleteRepository, useRepository } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
-import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
-import { EcosystemBadge } from "@/components/repository/EcosystemBadge";
-import { RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
+import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
+import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
+import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,6 +35,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
     useRepository(repositoryId);
   const deleteRepository = useDeleteRepository();
   const canWrite = canWriteArtifacts(user?.role);
+  const [copiedPath, setCopiedPath] = useState(false);
 
   async function onDeleteRepository() {
     try {
@@ -50,8 +51,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   if (isPending) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-20 w-full rounded-lg" />
-        <Skeleton className="h-64 w-full rounded-lg" />
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     );
   }
@@ -76,25 +77,58 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
     );
   }
 
+  const kind = KIND_META[repository.kind.type];
+  const eco = ecosystemMeta(repository.ecosystem);
+  const EcoIcon = eco.icon;
+  const path = `${repository.ecosystem}://${repository.name}/`;
+
+  async function copyPath() {
+    await navigator.clipboard.writeText(path);
+    setCopiedPath(true);
+    window.setTimeout(() => setCopiedPath(false), 1500);
+  }
+
   return (
-    <div>
-      <PageHeader
-        breadcrumb={
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Link to="/repositories" className="hover:text-foreground hover:underline">
-              Repositorios
-            </Link>
-            <ChevronRight className="size-3.5" />
-            <span className="text-foreground">{repository.name}</span>
+    <div className="space-y-8">
+      <header className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-start gap-4 p-6">
+          <span
+            className={`flex size-12 shrink-0 items-center justify-center rounded-xl ${eco.className}`}
+          >
+            <EcoIcon className="size-6" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold tracking-[0.2em] text-muted-foreground uppercase">
+              {kind.label} · {kind.domain}
+            </p>
+            <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight text-foreground">
+              {repository.name}
+            </h1>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <EcosystemBadge ecosystem={repository.ecosystem} />
+              <RepositoryKindBadge kind={repository.kind} />
+              <button
+                type="button"
+                onClick={() => void copyPath()}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                title="Copiar ruta"
+              >
+                {copiedPath ? <Check className="size-3" /> : <Copy className="size-3" />}
+                {path}
+              </button>
+            </div>
           </div>
-        }
-        title={repository.name}
-        actions={
-          canWrite ? (
-            <div className="flex items-center gap-2">
-              {repository.kind.type !== "mirror" ? (
-                <UploadArtifactButton repositoryId={repositoryId} />
-              ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {repository.ecosystem === "cargo" ? (
+              <SetMeUpDialog
+                repositoryId={repositoryId}
+                isMirror={repository.kind.type === "mirror"}
+              />
+            ) : null}
+            {canWrite && repository.kind.type !== "mirror" ? (
+              <UploadArtifactButton repositoryId={repositoryId} />
+            ) : null}
+            {canWrite ? (
               <ConfirmDeleteDialog
                 title={`Eliminar «${repository.name}»`}
                 description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
@@ -107,33 +141,20 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
                   </Button>
                 }
               />
-            </div>
-          ) : undefined
-        }
-      />
-
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <EcosystemBadge ecosystem={repository.ecosystem} />
-        <RepositoryKindBadge kind={repository.kind} />
-        <span className="font-mono text-xs text-muted-foreground">{repository.id}</span>
-      </div>
-
-      {repository.ecosystem === "cargo" ? (
-        <section className="mb-8">
-          <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground uppercase">
-            Registro de Cargo
-          </h2>
-          <CargoRegistryPanel
-            repositoryId={repositoryId}
-            isMirror={repository.kind.type === "mirror"}
-          />
-        </section>
-      ) : null}
+            ) : null}
+          </div>
+        </div>
+      </header>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground uppercase">
-          Artefactos
-        </h2>
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-semibold tracking-wide text-foreground uppercase">
+            Paquetes
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Agrupados por nombre, con cada versión debajo.
+          </p>
+        </div>
         <ArtifactsTable repositoryId={repositoryId} />
       </section>
     </div>

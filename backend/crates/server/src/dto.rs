@@ -4,7 +4,6 @@
 //! ferrobox-server` regenera automáticamente los tipos de TypeScript
 //! equivalentes en `frontend/src/api/generated/`.
 
-use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_domain::user::{Role, User};
@@ -160,17 +159,23 @@ pub(crate) struct CreateRepositoryResponse {
 #[ts(export)]
 pub(crate) struct ArtifactResponse {
     pub(crate) id: String,
+    /// Nombre del paquete (crate, etc.) si el índice lo conoce.
+    pub(crate) name: Option<String>,
+    /// Versión del paquete si el índice la conoce.
+    pub(crate) version: Option<String>,
     pub(crate) checksum: String,
     #[ts(type = "number")]
     pub(crate) size_bytes: u64,
 }
 
-impl From<Artifact> for ArtifactResponse {
-    fn from(artifact: Artifact) -> Self {
+impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for ArtifactResponse {
+    fn from(listed: ferrobox_application::list_repository_artifacts::ListedArtifact) -> Self {
         Self {
-            id: artifact.id().to_string(),
-            checksum: artifact.checksum().to_string(),
-            size_bytes: artifact.size_bytes(),
+            id: listed.artifact().id().to_string(),
+            name: listed.package_name().map(ToOwned::to_owned),
+            version: listed.package_version().map(ToOwned::to_owned),
+            checksum: listed.artifact().checksum().to_string(),
+            size_bytes: listed.artifact().size_bytes(),
         }
     }
 }
