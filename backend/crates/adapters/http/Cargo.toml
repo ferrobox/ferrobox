@@ -1,0 +1,15 @@
+[package]
+name = "ferrobox-adapter-http"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+ferrobox-ports = { path = "../../ports" }
+async-trait.workspace = true
+bytes.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

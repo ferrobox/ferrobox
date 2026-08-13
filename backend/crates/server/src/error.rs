@@ -47,6 +47,8 @@ impl IntoResponse for ApiError {
 impl From<CreateRepositoryError> for ApiError {
     fn from(err: CreateRepositoryError) -> Self {
         match &err {
+            CreateRepositoryError::UnsupportedMirrorEcosystem
+            | CreateRepositoryError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             CreateRepositoryError::Persistence(RepositoryStoreError::DuplicateName(_)) => {
                 Self::Conflict(err.to_string())
             }
@@ -102,16 +104,22 @@ impl From<GetRepositoryError> for ApiError {
 impl From<PackagingError> for ApiError {
     fn from(err: PackagingError) -> Self {
         match err {
-            PackagingError::EcosystemMismatch { .. } | PackagingError::InvalidPayload(_) => {
-                Self::BadRequest(err.to_string())
-            }
+            PackagingError::EcosystemMismatch { .. }
+            | PackagingError::InvalidPayload(_)
+            | PackagingError::ReadOnlyRepository
+            | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
             PackagingError::PackageNotFound(_) | PackagingError::VersionNotFound(_) => {
                 Self::NotFound(err.to_string())
             }
+            PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
+                status: 404,
+                ..
+            }) => Self::NotFound(err.to_string()),
             PackagingError::Storage(_)
             | PackagingError::ArtifactPersistence(_)
-            | PackagingError::IndexPersistence(_) => Self::Internal(err.to_string()),
+            | PackagingError::IndexPersistence(_)
+            | PackagingError::Upstream(_) => Self::Internal(err.to_string()),
         }
     }
 }

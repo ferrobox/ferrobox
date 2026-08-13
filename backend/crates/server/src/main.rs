@@ -21,6 +21,7 @@ use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use config::Config;
+use ferrobox_adapter_http::ReqwestHttpClient;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
@@ -85,6 +86,7 @@ async fn main() {
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
+    let http_client = Arc::new(ReqwestHttpClient::new());
 
     bootstrap_admin(&config, user_store.clone()).await;
 
@@ -92,6 +94,7 @@ async fn main() {
         artifact_store.clone(),
         package_index_store,
         storage.clone(),
+        http_client,
     )));
 
     let state = Arc::new(AppState {

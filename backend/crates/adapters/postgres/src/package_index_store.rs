@@ -37,11 +37,11 @@ impl PackageIndexStore for PostgresPackageIndexStore {
         &self,
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
-        artifact_id: ArtifactId,
+        artifact_id: Option<ArtifactId>,
         entry: Bytes,
     ) -> Result<(), PackageIndexStoreError> {
         let repository_id: Uuid = repository_id.into();
-        let artifact_id: Uuid = artifact_id.into();
+        let artifact_id: Option<Uuid> = artifact_id.map(Into::into);
         let ecosystem = ecosystem_column::to_column(coordinate.ecosystem());
         let entry: serde_json::Value =
             serde_json::from_slice(&entry).map_err(|err| backend_error(err.to_string()))?;
@@ -52,7 +52,7 @@ impl PackageIndexStore for PostgresPackageIndexStore {
                 (repository_id, ecosystem, package_name, package_version, artifact_id, entry)
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (repository_id, ecosystem, package_name, package_version) DO UPDATE
-            SET artifact_id = EXCLUDED.artifact_id,
+            SET artifact_id = COALESCE(package_index_entries.artifact_id, EXCLUDED.artifact_id),
                 entry = EXCLUDED.entry
             "#,
             repository_id,
@@ -130,7 +130,7 @@ impl PackageIndexStore for PostgresPackageIndexStore {
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        Ok(row.map(|r| ArtifactId::from(r.artifact_id)))
+        Ok(row.and_then(|r| r.artifact_id.map(ArtifactId::from)))
     }
 }
 
@@ -193,7 +193,7 @@ mod tests {
             .upsert_entry(
                 repository.id(),
                 &coordinate,
-                artifact.id(),
+                Some(artifact.id()),
                 Bytes::from_static(br#"{"name":"integration-test-crate","vers":"1.0.0"}"#),
             )
             .await

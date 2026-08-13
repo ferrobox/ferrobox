@@ -127,6 +127,25 @@ impl From<&Repository> for RepositoryResponse {
 pub(crate) struct CreateRepositoryRequest {
     pub(crate) name: String,
     pub(crate) ecosystem: PackageEcosystemDto,
+    /// Tipo de repositorio. Si se omite, se crea un `Forge`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) kind: Option<CreateRepositoryKindDto>,
+}
+
+/// Tipo de repositorio solicitado al crearlo.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub(crate) enum CreateRepositoryKindDto {
+    /// Almacenamiento propio.
+    #[default]
+    Forge,
+    /// Réplica cacheada de un *upstream*.
+    Mirror {
+        /// URL base del índice disperso remoto (p. ej. `https://index.crates.io/`).
+        upstream: String,
+    },
 }
 
 /// Respuesta al crear un repositorio correctamente.

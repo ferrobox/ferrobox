@@ -22,3 +22,6 @@ pub mod user_store;
 
 /// El puerto de persistencia de la entidad `ApiToken`.
 pub mod api_token_store;
+
+/// El puerto de cliente HTTP saliente.
+pub mod http_client;

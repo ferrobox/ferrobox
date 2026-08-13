@@ -18,8 +18,9 @@ use ferrobox_domain::checksum::Sha256Checksum;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
 };
-use ferrobox_domain::repository::Repository;
+use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
+use ferrobox_ports::http_client::HttpClient;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ pub struct CargoPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
+    http_client: Arc<dyn HttpClient>,
 }
 
 impl CargoPackagingStrategy {
@@ -42,11 +44,13 @@ impl CargoPackagingStrategy {
         artifact_store: Arc<dyn ArtifactStore>,
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
+        http_client: Arc<dyn HttpClient>,
     ) -> Self {
         Self {
             artifact_store,
             package_index_store,
             storage,
+            http_client,
         }
     }
 
@@ -58,6 +62,154 @@ impl CargoPackagingStrategy {
             });
         }
         Ok(())
+    }
+
+    fn mirror_upstream(repository: &Repository) -> Option<&url::Url> {
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => Some(upstream),
+            RepositoryKind::Forge | RepositoryKind::Alloy { .. } => None,
+        }
+    }
+
+    async fn refresh_index_from_upstream(
+        &self,
+        repository: &Repository,
+        upstream: &url::Url,
+        name: &PackageName,
+    ) -> Result<Bytes, PackagingError> {
+        let index_url = join_upstream(upstream, &cargo_index_shard_path(name));
+        let response = self.http_client.get(&index_url).await?;
+        let body = response.body;
+
+        for line in body.split(|&byte| byte == b'\n') {
+            let line = trim_ascii_whitespace(line);
+            if line.is_empty() {
+                continue;
+            }
+
+            let entry: IndexEntry = serde_json::from_slice(line)
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            let version = PackageVersion::parse(entry.vers.clone())
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            let package_name = PackageName::parse(entry.name.clone())
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            let coordinate =
+                PackageCoordinate::new(PackageEcosystem::Cargo, package_name, version);
+
+            self.package_index_store
+                .upsert_entry(
+                    repository.id(),
+                    &coordinate,
+                    None,
+                    Bytes::copy_from_slice(line),
+                )
+                .await?;
+        }
+
+        Ok(body)
+    }
+
+    async fn upstream_download_url(
+        &self,
+        upstream: &url::Url,
+        coordinate: &PackageCoordinate,
+    ) -> Result<String, PackagingError> {
+        let config_url = join_upstream(upstream, "config.json");
+        let response = self.http_client.get(&config_url).await?;
+        let config: UpstreamRegistryConfig = serde_json::from_slice(&response.body)
+            .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+
+        Ok(expand_dl_template(
+            &config.dl,
+            coordinate.name().as_str(),
+            coordinate.version().as_str(),
+        ))
+    }
+
+    async fn cache_crate_from_upstream(
+        &self,
+        repository: &Repository,
+        upstream: &url::Url,
+        coordinate: &PackageCoordinate,
+    ) -> Result<Bytes, PackagingError> {
+        let entries = self
+            .package_index_store
+            .entries_for_package(
+                repository.id(),
+                PackageEcosystem::Cargo,
+                coordinate.name(),
+            )
+            .await?;
+
+        if entries.is_empty() {
+            self.refresh_index_from_upstream(repository, upstream, coordinate.name())
+                .await?;
+        }
+
+        let entry = self
+            .find_local_index_entry(repository, coordinate)
+            .await?
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+
+        let download_url = self.upstream_download_url(upstream, coordinate).await?;
+        let response = self.http_client.get(&download_url).await?;
+        let crate_bytes = response.body;
+
+        let actual_cksum = format!("{:x}", Sha256::digest(&crate_bytes));
+        if actual_cksum != entry.cksum {
+            return Err(PackagingError::InvalidUpstream(format!(
+                "checksum mismatch for {coordinate}: expected {}, got {actual_cksum}",
+                entry.cksum
+            )));
+        }
+
+        let checksum = Sha256Checksum::parse(actual_cksum.clone())
+            .expect("a hex-encoded SHA-256 digest is always a valid Sha256Checksum");
+        let artifact = Artifact::new(repository.id(), checksum, crate_bytes.len() as u64);
+
+        self.storage
+            .put(&storage_key_for(artifact.id()), crate_bytes.clone())
+            .await?;
+        self.artifact_store.save(&artifact).await?;
+
+        let entry_bytes = Bytes::from(
+            serde_json::to_vec(&entry).expect("an IndexEntry always serializes to valid JSON"),
+        );
+        self.package_index_store
+            .upsert_entry(
+                repository.id(),
+                coordinate,
+                Some(artifact.id()),
+                entry_bytes,
+            )
+            .await?;
+
+        Ok(crate_bytes)
+    }
+
+    async fn find_local_index_entry(
+        &self,
+        repository: &Repository,
+        coordinate: &PackageCoordinate,
+    ) -> Result<Option<IndexEntry>, PackagingError> {
+        let entries = self
+            .package_index_store
+            .entries_for_package(
+                repository.id(),
+                PackageEcosystem::Cargo,
+                coordinate.name(),
+            )
+            .await?;
+
+        for entry_bytes in entries {
+            let entry: IndexEntry = serde_json::from_slice(&entry_bytes)
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            if entry.vers == coordinate.version().as_str() {
+                return Ok(Some(entry));
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -73,6 +225,9 @@ impl PackagingStrategy for CargoPackagingStrategy {
         payload: Bytes,
     ) -> Result<PublishOutcome, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
+        if Self::mirror_upstream(repository).is_some() {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
 
         let (metadata, crate_bytes) = parse_publish_payload(payload)?;
 
@@ -107,7 +262,12 @@ impl PackagingStrategy for CargoPackagingStrategy {
         );
 
         self.package_index_store
-            .upsert_entry(repository.id(), &coordinate, artifact.id(), entry_bytes)
+            .upsert_entry(
+                repository.id(),
+                &coordinate,
+                Some(artifact.id()),
+                entry_bytes,
+            )
             .await?;
 
         Ok(coordinate)
@@ -119,6 +279,12 @@ impl PackagingStrategy for CargoPackagingStrategy {
         name: &PackageName,
     ) -> Result<Bytes, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
+
+        if let Some(upstream) = Self::mirror_upstream(repository) {
+            return self
+                .refresh_index_from_upstream(repository, upstream, name)
+                .await;
+        }
 
         let entries = self
             .package_index_store
@@ -145,14 +311,21 @@ impl PackagingStrategy for CargoPackagingStrategy {
     ) -> Result<Bytes, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
 
-        let artifact_id = self
+        if let Some(artifact_id) = self
             .package_index_store
             .artifact_for(repository.id(), coordinate)
             .await?
-            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        {
+            return Ok(self.storage.get(&storage_key_for(artifact_id)).await?);
+        }
 
-        let content = self.storage.get(&storage_key_for(artifact_id)).await?;
-        Ok(content)
+        if let Some(upstream) = Self::mirror_upstream(repository) {
+            return self
+                .cache_crate_from_upstream(repository, upstream, coordinate)
+                .await;
+        }
+
+        Err(PackagingError::VersionNotFound(coordinate.clone()))
     }
 }
 
@@ -173,6 +346,44 @@ pub fn cargo_index_shard_path(name: &PackageName) -> String {
         3 => format!("3/{}/{lower}", &lower[0..1]),
         _ => format!("{}/{}/{lower}", &lower[0..2], &lower[2..4]),
     }
+}
+
+fn join_upstream(upstream: &url::Url, relative: &str) -> String {
+    let base = upstream.as_str().trim_end_matches('/');
+    let relative = relative.trim_start_matches('/');
+    format!("{base}/{relative}")
+}
+
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())
+        .map_or(start, |index| index + 1);
+    &bytes[start..end]
+}
+
+fn expand_dl_template(template: &str, crate_name: &str, version: &str) -> String {
+    let lower = crate_name.to_ascii_lowercase();
+    let prefix = match lower.len() {
+        0 => String::new(),
+        1..=2 => lower.clone(),
+        3 => lower[0..1].to_string(),
+        _ => format!("{}/{}", &lower[0..2], &lower[2..4]),
+    };
+
+    template
+        .replace("{crate}", crate_name)
+        .replace("{version}", version)
+        .replace("{prefix}", &prefix)
+}
+
+#[derive(Debug, Deserialize)]
+struct UpstreamRegistryConfig {
+    dl: String,
 }
 
 /// Cuerpo JSON que `cargo publish` envía como primer bloque de la
@@ -219,25 +430,49 @@ struct PublishDependency {
 pub struct IndexEntry {
     name: String,
     vers: String,
+    #[serde(default)]
     deps: Vec<IndexDependency>,
     cksum: String,
+    #[serde(default)]
     features: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     yanked: bool,
+    #[serde(default)]
     links: Option<String>,
+    #[serde(default = "default_index_schema_version")]
     v: u32,
+}
+
+fn default_index_schema_version() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct IndexDependency {
     name: String,
     req: String,
+    #[serde(default)]
     features: Vec<String>,
+    #[serde(default)]
     optional: bool,
+    #[serde(default = "default_true")]
     default_features: bool,
+    #[serde(default)]
     target: Option<String>,
+    #[serde(default = "default_normal_kind")]
     kind: String,
+    #[serde(default)]
     registry: Option<String>,
+    #[serde(default)]
     package: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_normal_kind() -> String {
+    "normal".to_string()
 }
 
 impl IndexEntry {
@@ -332,7 +567,9 @@ mod tests {
 
     use ferrobox_domain::repository::{RepositoryKind, RepositoryName};
 
-    use crate::test_support::{InMemoryArtifactStore, InMemoryPackageIndexStore, InMemoryStorage};
+    use crate::test_support::{
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryStorage,
+    };
 
     use super::*;
 
@@ -350,6 +587,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
         )
     }
 
@@ -572,5 +810,92 @@ mod tests {
             cargo_index_shard_path(&PackageName::parse("Ferrobox").unwrap()),
             "fe/rr/ferrobox"
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_publishing_to_a_mirror_repository() {
+        let strategy = strategy();
+        let repository = Repository::new(
+            RepositoryName::parse("crates-io-mirror").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://index.crates.io/").unwrap(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let payload =
+            encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"fake tarball");
+
+        let result = strategy.publish(&repository, payload).await;
+
+        assert!(matches!(result, Err(PackagingError::ReadOnlyRepository)));
+    }
+
+    #[tokio::test]
+    async fn mirror_indexes_and_caches_a_crate_from_upstream() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let strategy = CargoPackagingStrategy::new(
+            artifact_store,
+            package_index_store,
+            storage,
+            http.clone(),
+        );
+
+        let upstream = url::Url::parse("https://index.example/").unwrap();
+        let repository = Repository::new(
+            RepositoryName::parse("example-mirror").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: upstream.clone(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+
+        let crate_bytes = Bytes::from_static(b"cached-crate-bytes");
+        let cksum = format!("{:x}", Sha256::digest(&crate_bytes));
+        let index_line = format!(
+            r#"{{"name":"demo","vers":"1.2.3","deps":[],"cksum":"{cksum}","features":{{}},"yanked":false}}"#
+        );
+
+        http.stub(
+            "https://index.example/de/mo/demo",
+            200,
+            Bytes::from(format!("{index_line}\n")),
+        );
+        http.stub(
+            "https://index.example/config.json",
+            200,
+            Bytes::from_static(
+                br#"{"dl":"https://static.example/crates/{crate}/{crate}-{version}.crate","api":"https://index.example"}"#,
+            ),
+        );
+        http.stub(
+            "https://static.example/crates/demo/demo-1.2.3.crate",
+            200,
+            crate_bytes.clone(),
+        );
+
+        let index = strategy
+            .index(&repository, &PackageName::parse("demo").unwrap())
+            .await
+            .unwrap();
+        assert!(index.as_ref().windows(cksum.len()).any(|window| window == cksum.as_bytes()));
+
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("1.2.3").unwrap(),
+        );
+        let downloaded = strategy.download(&repository, &coordinate).await.unwrap();
+        assert_eq!(downloaded, crate_bytes);
+
+        // Segunda descarga: debe servirse desde la caché local sin
+        // volver a pedir el `.crate` al upstream (el stub sigue ahí,
+        // pero el artefacto ya está asociado en el índice).
+        let downloaded_again = strategy.download(&repository, &coordinate).await.unwrap();
+        assert_eq!(downloaded_again, crate_bytes);
     }
 }

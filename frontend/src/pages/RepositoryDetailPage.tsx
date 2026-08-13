@@ -74,7 +74,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           </div>
         }
         title={repository.name}
-        actions={canWrite ? <UploadArtifactButton repositoryId={repositoryId} /> : undefined}
+        actions={
+          canWrite && repository.kind.type !== "mirror" ? (
+            <UploadArtifactButton repositoryId={repositoryId} />
+          ) : undefined
+        }
       />
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
@@ -88,7 +92,10 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground uppercase">
             Registro de Cargo
           </h2>
-          <CargoRegistryPanel repositoryId={repositoryId} />
+          <CargoRegistryPanel
+            repositoryId={repositoryId}
+            isMirror={repository.kind.type === "mirror"}
+          />
         </section>
       ) : null}
 
