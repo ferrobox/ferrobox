@@ -4,8 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useCreateRepository } from "@/api/queries";
+import type { CreateRepositoryKindDto } from "@/api/generated/CreateRepositoryKindDto";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
+import { useCreateRepository } from "@/api/queries";
 import { ECOSYSTEM_OPTIONS } from "@/components/repository/EcosystemBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,10 +30,14 @@ import {
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+type KindChoice = "forge" | "mirror";
+
 export function CreateRepositoryDialog() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [ecosystem, setEcosystem] = useState<PackageEcosystemDto>("generic");
+  const [kind, setKind] = useState<KindChoice>("forge");
+  const [upstream, setUpstream] = useState("https://index.crates.io/");
   const [validationError, setValidationError] = useState<string | null>(null);
   const navigate = useNavigate();
   const mutation = useCreateRepository();
@@ -41,6 +46,8 @@ export function CreateRepositoryDialog() {
     setOpen(false);
     setName("");
     setEcosystem("generic");
+    setKind("forge");
+    setUpstream("https://index.crates.io/");
     setValidationError(null);
     mutation.reset();
   }
@@ -61,8 +68,26 @@ export function CreateRepositoryDialog() {
       return;
     }
 
+    if (kind === "mirror") {
+      if (ecosystem !== "cargo") {
+        setValidationError("Los Mirror solo están disponibles para el ecosistema Cargo.");
+        return;
+      }
+      try {
+        void new URL(upstream.trim());
+      } catch {
+        setValidationError("La URL upstream no es válida.");
+        return;
+      }
+    }
+
+    const kindPayload: CreateRepositoryKindDto =
+      kind === "mirror"
+        ? { type: "mirror", upstream: upstream.trim() }
+        : { type: "forge" };
+
     mutation.mutate(
-      { name: trimmed, ecosystem },
+      { name: trimmed, ecosystem, kind: kindPayload },
       {
         onSuccess: (response) => {
           toast.success(`Repositorio «${trimmed}» creado correctamente.`);
@@ -98,8 +123,8 @@ export function CreateRepositoryDialog() {
           <DialogHeader>
             <DialogTitle>Crear repositorio</DialogTitle>
             <DialogDescription>
-              Se creará como un repositorio Forge: FerroBox será la fuente de verdad del
-              contenido publicado directamente en él.
+              Elige Forge (publicas tú el contenido) o Mirror Cargo (caché de un
+              índice remoto como crates.io).
             </DialogDescription>
           </DialogHeader>
 
@@ -116,10 +141,33 @@ export function CreateRepositoryDialog() {
             </div>
 
             <div className="grid gap-2">
+              <Label htmlFor="repository-kind">Tipo</Label>
+              <Select
+                value={kind}
+                onValueChange={(value) => {
+                  const next = value as KindChoice;
+                  setKind(next);
+                  if (next === "mirror") {
+                    setEcosystem("cargo");
+                  }
+                }}
+              >
+                <SelectTrigger id="repository-kind" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="forge">Forge</SelectItem>
+                  <SelectItem value="mirror">Mirror (Cargo)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
               <Label htmlFor="repository-ecosystem">Ecosistema de paquetes</Label>
               <Select
                 value={ecosystem}
                 onValueChange={(value) => setEcosystem(value as PackageEcosystemDto)}
+                disabled={kind === "mirror"}
               >
                 <SelectTrigger id="repository-ecosystem" className="w-full">
                   <SelectValue />
@@ -133,6 +181,21 @@ export function CreateRepositoryDialog() {
                 </SelectContent>
               </Select>
             </div>
+
+            {kind === "mirror" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="repository-upstream">Upstream (índice disperso)</Label>
+                <Input
+                  id="repository-upstream"
+                  placeholder="https://index.crates.io/"
+                  value={upstream}
+                  onChange={(event) => setUpstream(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  URL base del índice sparse (sin el prefijo <code>sparse+</code>).
+                </p>
+              </div>
+            ) : null}
 
             {(validationError ?? serverError) ? (
               <p className="text-sm text-destructive">{validationError ?? serverError}</p>

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::UserId;
-use ferrobox_domain::user::{User, Username};
+use ferrobox_domain::user::{Role, User, Username};
 use thiserror::Error;
 
 /// Motivos por los que una operación de persistencia de usuarios puede
@@ -72,6 +72,15 @@ pub trait UserStore: Send + Sync {
     /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
     /// falla.
     async fn delete(&self, id: UserId) -> Result<bool, UserStoreError>;
+
+    /// Sustituye el rol de un usuario existente. Devuelve `false` si el
+    /// identificador no existe.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError>;
 
     /// Cuenta cuántos usuarios existen. Se usa al arrancar para decidir
     /// si hay que crear el administrador inicial.
@@ -162,6 +171,15 @@ mod tests {
 
         async fn delete(&self, id: UserId) -> Result<bool, UserStoreError> {
             Ok(self.users.lock().unwrap().remove(&id).is_some())
+        }
+
+        async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError> {
+            let mut users = self.users.lock().unwrap();
+            let Some((user, hash)) = users.remove(&id) else {
+                return Ok(false);
+            };
+            users.insert(id, (user.with_role(role), hash));
+            Ok(true)
         }
 
         async fn count(&self) -> Result<u64, UserStoreError> {
@@ -266,5 +284,33 @@ mod tests {
         let all = store.find_all().await.unwrap();
         assert_eq!(all[0].username().as_str(), "ada");
         assert_eq!(all[1].username().as_str(), "zoe");
+    }
+
+    #[tokio::test]
+    async fn update_role_replaces_authorization_and_preserves_password_hash() {
+        let store = InMemoryUserStore::default();
+        let user = User::new(Username::parse("dev").unwrap(), Role::Developer);
+        store
+            .save_with_password_hash(&user, "hash-dev")
+            .await
+            .unwrap();
+
+        assert!(store.update_role(user.id(), Role::Reader).await.unwrap());
+
+        let found = store.find_by_id(user.id()).await.unwrap().unwrap();
+        assert_eq!(found.role(), Role::Reader);
+
+        let with_hash = store
+            .find_by_username_with_password_hash(user.username())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(with_hash.1, "hash-dev");
+    }
+
+    #[tokio::test]
+    async fn update_role_missing_user_returns_false() {
+        let store = InMemoryUserStore::default();
+        assert!(!store.update_role(UserId::new(), Role::Admin).await.unwrap());
     }
 }

@@ -22,6 +22,7 @@ interface AuthContextValue {
   readonly isLoading: boolean;
   readonly login: (username: string, password: string) => Promise<void>;
   readonly logout: () => void;
+  readonly updateCurrentUser: (user: UserResponse) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -80,6 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  const updateCurrentUser = useCallback((user: UserResponse) => {
+    setSession((current) => (current ? { ...current, user } : current));
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user: session?.user ?? null,
@@ -87,8 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       login,
       logout,
+      updateCurrentUser,
     }),
-    [session, token, isLoading, login, logout],
+    [session, token, isLoading, login, logout, updateCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

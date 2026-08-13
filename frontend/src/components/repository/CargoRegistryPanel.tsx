@@ -32,7 +32,13 @@ function CopyableCodeBlock({ code }: { code: string }) {
   );
 }
 
-export function CargoRegistryPanel({ repositoryId }: { repositoryId: string }) {
+export function CargoRegistryPanel({
+  repositoryId,
+  isMirror = false,
+}: {
+  repositoryId: string;
+  isMirror?: boolean;
+}) {
   const { data, isPending, isError } = useCargoRegistryConfig(repositoryId, true);
 
   if (isPending) {
@@ -52,12 +58,13 @@ export function CargoRegistryPanel({ repositoryId }: { repositoryId: string }) {
   return (
     <div className="space-y-5 rounded-lg border border-border p-5">
       <div>
-        <h3 className="text-sm font-semibold text-foreground">Índice disperso</h3>
+        <h3 className="text-sm font-semibold text-foreground">
+          {isMirror ? "Mirror de índice disperso" : "Índice disperso"}
+        </h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Este repositorio implementa el protocolo de índice disperso de Cargo, así que
-          funciona con <code className="font-mono text-xs">cargo publish</code>,{" "}
-          <code className="font-mono text-xs">cargo add</code> y{" "}
-          <code className="font-mono text-xs">cargo build</code> de forma nativa.
+          {isMirror
+            ? "Este Mirror cachea paquetes del upstream la primera vez que se resuelven o descargan. No acepta cargo publish."
+            : "Este repositorio implementa el protocolo de índice disperso de Cargo, así que funciona con cargo publish, cargo add y cargo build de forma nativa."}
         </p>
       </div>
 
@@ -87,19 +94,30 @@ export function CargoRegistryPanel({ repositoryId }: { repositoryId: string }) {
         </p>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          3. Publica tu crate
-        </p>
-        <CopyableCodeBlock code="cargo publish --registry ferrobox" />
-      </div>
+      {isMirror ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            3. Usa crates desde el Mirror
+          </p>
+          <CopyableCodeBlock code="cargo add serde --registry ferrobox" />
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              3. Publica tu crate
+            </p>
+            <CopyableCodeBlock code="cargo publish --registry ferrobox" />
+          </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          4. Añádelo como dependencia
-        </p>
-        <CopyableCodeBlock code="cargo add mi-crate --registry ferrobox" />
-      </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              4. Añádelo como dependencia
+            </p>
+            <CopyableCodeBlock code="cargo add mi-crate --registry ferrobox" />
+          </div>
+        </>
+      )}
     </div>
   );
 }

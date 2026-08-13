@@ -156,7 +156,7 @@ mod tests {
             .upsert_entry(
                 repository.id(),
                 &coordinate,
-                artifact.id(),
+                Some(artifact.id()),
                 Bytes::from_static(b"{}"),
             )
             .await

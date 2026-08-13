@@ -13,8 +13,11 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_write_artifacts;
-use crate::dto::{CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse};
+use crate::dto::{
+    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse,
+};
 use crate::error::ApiError;
+use ferrobox_application::create_repository::CreateRepositoryKind;
 
 pub(crate) async fn create_repository(
     State(state): State<Arc<AppState>>,
@@ -26,9 +29,14 @@ pub(crate) async fn create_repository(
     let name =
         RepositoryName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
+    let kind = match payload.kind.unwrap_or_default() {
+        CreateRepositoryKindDto::Forge => CreateRepositoryKind::Forge,
+        CreateRepositoryKindDto::Mirror { upstream } => CreateRepositoryKind::Mirror { upstream },
+    };
+
     let id = state
         .create_repository
-        .execute(name, payload.ecosystem.into())
+        .execute(name, payload.ecosystem.into(), kind)
         .await?;
 
     Ok((

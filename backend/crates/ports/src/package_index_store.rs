@@ -29,8 +29,9 @@ pub enum PackageIndexStoreError {
 #[async_trait]
 pub trait PackageIndexStore: Send + Sync {
     /// Inserta o reemplaza la entrada de índice de una coordenada de
-    /// paquete concreta, asociándola al artefacto binario que contiene
-    /// su contenido.
+    /// paquete concreta. `artifact_id` puede ser `None` cuando la
+    /// entrada proviene del *upstream* de un `Mirror` y el binario
+    /// todavía no se ha cacheado localmente.
     ///
     /// # Errors
     ///
@@ -40,7 +41,7 @@ pub trait PackageIndexStore: Send + Sync {
         &self,
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
-        artifact_id: ArtifactId,
+        artifact_id: Option<ArtifactId>,
         entry: Bytes,
     ) -> Result<(), PackageIndexStoreError>;
 
@@ -106,9 +107,11 @@ mod tests {
 
     use super::*;
 
+    type EntryMap = HashMap<(RepositoryId, PackageCoordinate), (Option<ArtifactId>, Bytes)>;
+
     #[derive(Default)]
     struct InMemoryPackageIndexStore {
-        entries: Mutex<HashMap<(RepositoryId, PackageCoordinate), (ArtifactId, Bytes)>>,
+        entries: Mutex<EntryMap>,
     }
 
     #[async_trait]
@@ -117,13 +120,16 @@ mod tests {
             &self,
             repository_id: RepositoryId,
             coordinate: &PackageCoordinate,
-            artifact_id: ArtifactId,
+            artifact_id: Option<ArtifactId>,
             entry: Bytes,
         ) -> Result<(), PackageIndexStoreError> {
-            self.entries
-                .lock()
-                .unwrap()
-                .insert((repository_id, coordinate.clone()), (artifact_id, entry));
+            let mut entries = self.entries.lock().unwrap();
+            let key = (repository_id, coordinate.clone());
+            let merged_artifact = match entries.get(&key) {
+                Some((existing, _)) => existing.or(artifact_id),
+                None => artifact_id,
+            };
+            entries.insert(key, (merged_artifact, entry));
             Ok(())
         }
 
@@ -157,7 +163,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .get(&(repository_id, coordinate.clone()))
-                .map(|(artifact_id, _)| *artifact_id))
+                .and_then(|(artifact_id, _)| *artifact_id))
         }
 
         async fn delete_by_artifact(
@@ -167,7 +173,7 @@ mod tests {
             self.entries
                 .lock()
                 .unwrap()
-                .retain(|_, (existing, _)| *existing != artifact_id);
+                .retain(|_, (existing, _)| *existing != Some(artifact_id));
             Ok(())
         }
 
@@ -201,7 +207,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.0.0"),
-                artifact_id,
+                Some(artifact_id),
                 Bytes::from_static(b"{}"),
             )
             .await
@@ -236,7 +242,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.0.0"),
-                ArtifactId::new(),
+                Some(ArtifactId::new()),
                 Bytes::from_static(b"{\"vers\":\"1.0.0\"}"),
             )
             .await
@@ -245,7 +251,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.1.0"),
-                ArtifactId::new(),
+                Some(ArtifactId::new()),
                 Bytes::from_static(b"{\"vers\":\"1.1.0\"}"),
             )
             .await
@@ -274,7 +280,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.0.0"),
-                first,
+                Some(first),
                 Bytes::from_static(b"{}"),
             )
             .await
@@ -283,7 +289,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.1.0"),
-                second,
+                Some(second),
                 Bytes::from_static(b"{}"),
             )
             .await
@@ -315,7 +321,7 @@ mod tests {
             .upsert_entry(
                 repository_id,
                 &coordinate("1.0.0"),
-                ArtifactId::new(),
+                Some(ArtifactId::new()),
                 Bytes::from_static(b"{}"),
             )
             .await

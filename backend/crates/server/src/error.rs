@@ -13,7 +13,9 @@ use ferrobox_application::login::LoginError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
-use ferrobox_application::manage_users::{CreateUserError, DeleteUserError, ListUsersError};
+use ferrobox_application::manage_users::{
+    ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError,
+};
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
@@ -49,6 +51,8 @@ impl IntoResponse for ApiError {
 impl From<CreateRepositoryError> for ApiError {
     fn from(err: CreateRepositoryError) -> Self {
         match &err {
+            CreateRepositoryError::UnsupportedMirrorEcosystem
+            | CreateRepositoryError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             CreateRepositoryError::Persistence(RepositoryStoreError::DuplicateName(_)) => {
                 Self::Conflict(err.to_string())
             }
@@ -104,17 +108,23 @@ impl From<GetRepositoryError> for ApiError {
 impl From<PackagingError> for ApiError {
     fn from(err: PackagingError) -> Self {
         match err {
-            PackagingError::EcosystemMismatch { .. } | PackagingError::InvalidPayload(_) => {
-                Self::BadRequest(err.to_string())
-            }
+            PackagingError::EcosystemMismatch { .. }
+            | PackagingError::InvalidPayload(_)
+            | PackagingError::ReadOnlyRepository
+            | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
             PackagingError::PackageNotFound(_) | PackagingError::VersionNotFound(_) => {
                 Self::NotFound(err.to_string())
             }
+            PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
+                status: 404,
+                ..
+            }) => Self::NotFound(err.to_string()),
             PackagingError::Storage(_)
             | PackagingError::ArtifactPersistence(_)
             | PackagingError::IndexPersistence(_)
-            | PackagingError::ChecksumMismatch { .. } => Self::Internal(err.to_string()),
+            | PackagingError::ChecksumMismatch { .. }
+            | PackagingError::Upstream(_) => Self::Internal(err.to_string()),
         }
     }
 }
@@ -214,6 +224,16 @@ impl From<DeleteArtifactError> for ApiError {
             | DeleteArtifactError::ArtifactPersistence(_)
             | DeleteArtifactError::IndexPersistence(_)
             | DeleteArtifactError::Storage(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<ChangeUserRoleError> for ApiError {
+    fn from(err: ChangeUserRoleError) -> Self {
+        match err {
+            ChangeUserRoleError::NotFound => Self::NotFound(err.to_string()),
+            ChangeUserRoleError::CannotDemoteLastAdmin => Self::Conflict(err.to_string()),
+            ChangeUserRoleError::Persistence(_) => Self::Internal(err.to_string()),
         }
     }
 }

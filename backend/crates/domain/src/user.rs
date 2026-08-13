@@ -186,11 +186,7 @@ impl User {
     /// persistencia).
     #[must_use]
     pub fn from_parts(id: UserId, username: Username, role: Role) -> Self {
-        Self {
-            id,
-            username,
-            role,
-        }
+        Self { id, username, role }
     }
 
     /// Identificador único de este usuario.
@@ -209,6 +205,12 @@ impl User {
     #[must_use]
     pub fn role(&self) -> Role {
         self.role
+    }
+
+    /// Devuelve este usuario con un rol distinto. La identidad no cambia.
+    #[must_use]
+    pub fn with_role(self, role: Role) -> Self {
+        Self { role, ..self }
     }
 }
 
@@ -255,6 +257,16 @@ mod tests {
         let second = User::from_parts(id, Username::parse("other").unwrap(), Role::Reader);
 
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn with_role_keeps_identity_and_changes_authorization() {
+        let user = User::new(Username::parse("ada").unwrap(), Role::Reader);
+        let updated = user.clone().with_role(Role::Admin);
+
+        assert_eq!(user, updated);
+        assert_eq!(user.role(), Role::Reader);
+        assert_eq!(updated.role(), Role::Admin);
     }
 
     #[test]

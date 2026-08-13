@@ -4,6 +4,7 @@ import * as api from "@/api/client";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
+import type { RoleDto } from "@/api/generated/RoleDto";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
@@ -147,6 +148,18 @@ export function useDeleteUser() {
 
   return useMutation({
     mutationFn: (userId: string) => api.deleteUser(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
+  });
+}
+
+export function useUpdateUserRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: RoleDto }) =>
+      api.updateUserRole(userId, { role }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.users });
     },

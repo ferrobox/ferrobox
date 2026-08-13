@@ -19,8 +19,9 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use axum::Router;
 use axum::middleware;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use config::Config;
+use ferrobox_adapter_http::ReqwestHttpClient;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
@@ -40,7 +41,9 @@ use ferrobox_application::login::LoginUseCase;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
 };
-use ferrobox_application::manage_users::{CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase};
+use ferrobox_application::manage_users::{
+    ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
+};
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
@@ -67,6 +70,7 @@ struct AppState {
     create_user: CreateUserUseCase,
     list_users: ListUsersUseCase,
     delete_user: DeleteUserUseCase,
+    change_user_role: ChangeUserRoleUseCase,
 }
 
 #[tokio::main]
@@ -89,6 +93,7 @@ async fn main() {
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
+    let http_client = Arc::new(ReqwestHttpClient::new());
 
     bootstrap_admin(&config, user_store.clone()).await;
 
@@ -100,6 +105,7 @@ async fn main() {
         user_store,
         api_token_store,
         storage,
+        http_client,
     ));
 
     let public = Router::new()
@@ -114,7 +120,10 @@ async fn main() {
         )
         .route("/auth/tokens/{token_id}", delete(auth::revoke_token))
         .route("/users", get(users::list_users).post(users::create_user))
-        .route("/users/{user_id}", delete(users::delete_user))
+        .route(
+            "/users/{user_id}",
+            patch(users::update_user_role).delete(users::delete_user),
+        )
         .route(
             "/repositories",
             post(repositories::create_repository).get(repositories::list_repositories),
@@ -182,6 +191,7 @@ async fn bootstrap_admin(config: &Config, user_store: Arc<PostgresUserStore>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_app_state(
     config: &Config,
     repository_store: Arc<PostgresRepositoryStore>,
@@ -190,11 +200,13 @@ fn build_app_state(
     user_store: Arc<PostgresUserStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     storage: Arc<S3StorageAdapter>,
+    http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
     let packaging = PackagingRegistry::new().register(Arc::new(CargoPackagingStrategy::new(
         artifact_store.clone(),
         package_index_store.clone(),
         storage.clone(),
+        http_client,
     )));
 
     AppState {
@@ -232,7 +244,8 @@ fn build_app_state(
         revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
         create_user: CreateUserUseCase::new(user_store.clone()),
         list_users: ListUsersUseCase::new(user_store.clone()),
-        delete_user: DeleteUserUseCase::new(user_store),
+        delete_user: DeleteUserUseCase::new(user_store.clone()),
+        change_user_role: ChangeUserRoleUseCase::new(user_store),
     }
 }
 

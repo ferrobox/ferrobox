@@ -10,6 +10,7 @@ ferrobox-ports = { path = "../ports" }
 ferrobox-application = { path = "../application" }
 ferrobox-adapter-postgres = { path = "../adapters/postgres" }
 ferrobox-adapter-s3-storage = { path = "../adapters/s3-storage" }
+ferrobox-adapter-http = { path = "../adapters/http" }
 axum.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
 sqlx.workspace = true

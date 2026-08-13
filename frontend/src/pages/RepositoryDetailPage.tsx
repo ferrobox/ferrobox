@@ -92,7 +92,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         actions={
           canWrite ? (
             <div className="flex items-center gap-2">
-              <UploadArtifactButton repositoryId={repositoryId} />
+              {repository.kind.type !== "mirror" ? (
+                <UploadArtifactButton repositoryId={repositoryId} />
+              ) : null}
               <ConfirmDeleteDialog
                 title={`Eliminar «${repository.name}»`}
                 description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
@@ -121,7 +123,10 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground uppercase">
             Registro de Cargo
           </h2>
-          <CargoRegistryPanel repositoryId={repositoryId} />
+          <CargoRegistryPanel
+            repositoryId={repositoryId}
+            isMirror={repository.kind.type === "mirror"}
+          />
         </section>
       ) : null}
 

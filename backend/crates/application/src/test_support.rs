@@ -11,6 +11,7 @@ use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
+use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
@@ -152,8 +153,10 @@ impl StoragePort for InMemoryStorage {
 /// adaptador real (`ORDER BY created_at`).
 #[derive(Default)]
 pub(crate) struct InMemoryPackageIndexStore {
-    entries: Mutex<Vec<(RepositoryId, PackageCoordinate, ArtifactId, Bytes)>>,
+    entries: Mutex<Vec<IndexRow>>,
 }
+
+type IndexRow = (RepositoryId, PackageCoordinate, Option<ArtifactId>, Bytes);
 
 #[async_trait]
 impl PackageIndexStore for InMemoryPackageIndexStore {
@@ -161,7 +164,7 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
         &self,
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
-        artifact_id: ArtifactId,
+        artifact_id: Option<ArtifactId>,
         entry: Bytes,
     ) -> Result<(), PackageIndexStoreError> {
         let mut entries = self.entries.lock().unwrap();
@@ -172,7 +175,9 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
                 *repo_id == repository_id && existing_coordinate == coordinate
             })
         {
-            existing.2 = artifact_id;
+            if artifact_id.is_some() {
+                existing.2 = artifact_id;
+            }
             existing.3 = entry;
         } else {
             entries.push((repository_id, coordinate.clone(), artifact_id, entry));
@@ -214,7 +219,7 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
             .find(|(repo_id, existing_coordinate, ..)| {
                 *repo_id == repository_id && existing_coordinate == coordinate
             })
-            .map(|(_, _, artifact_id, _)| *artifact_id))
+            .and_then(|(_, _, artifact_id, _)| *artifact_id))
     }
 
     async fn delete_by_artifact(
@@ -224,7 +229,7 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
         self.entries
             .lock()
             .unwrap()
-            .retain(|(_, _, existing, _)| *existing != artifact_id);
+            .retain(|(_, _, existing, _)| *existing != Some(artifact_id));
         Ok(())
     }
 
@@ -313,6 +318,15 @@ impl UserStore for InMemoryUserStore {
         Ok(self.users.lock().unwrap().remove(&id).is_some())
     }
 
+    async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError> {
+        let mut users = self.users.lock().unwrap();
+        let Some((user, hash)) = users.remove(&id) else {
+            return Ok(false);
+        };
+        users.insert(id, (user.with_role(role), hash));
+        Ok(true)
+    }
+
     async fn count(&self) -> Result<u64, UserStoreError> {
         Ok(self.users.lock().unwrap().len() as u64)
     }
@@ -390,5 +404,47 @@ impl ApiTokenStore for InMemoryApiTokenStore {
             }
             _ => Ok(false),
         }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct InMemoryHttpClient {
+    responses: Mutex<HashMap<String, HttpResponse>>,
+}
+
+impl InMemoryHttpClient {
+    pub(crate) fn stub(&self, url: &str, status: u16, body: impl Into<Bytes>) {
+        self.responses
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), HttpResponse {
+                status,
+                body: body.into(),
+            });
+    }
+}
+
+#[async_trait]
+impl HttpClient for InMemoryHttpClient {
+    async fn get(&self, url: &str) -> Result<HttpResponse, HttpClientError> {
+        self.responses
+            .lock()
+            .unwrap()
+            .get(url)
+            .cloned()
+            .ok_or_else(|| HttpClientError::Status {
+                status: 404,
+                url: url.to_string(),
+            })
+            .and_then(|response| {
+                if response.is_success() {
+                    Ok(response)
+                } else {
+                    Err(HttpClientError::Status {
+                        status: response.status,
+                        url: url.to_string(),
+                    })
+                }
+            })
     }
 }
