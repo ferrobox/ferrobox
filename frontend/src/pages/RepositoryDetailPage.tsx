@@ -1,5 +1,5 @@
-import { AlertCircle, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { AlertCircle, RefreshCw, Trash2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -79,16 +79,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   return (
     <div>
       <PageHeader
-        breadcrumb={
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Link to="/repositories" className="hover:text-foreground hover:underline">
-              Repositorios
-            </Link>
-            <ChevronRight className="size-3.5" />
-            <span className="text-foreground">{repository.name}</span>
-          </div>
-        }
         title={repository.name}
+        description={`${repository.kind.type === "mirror" ? "Remoto" : repository.kind.type === "alloy" ? "Virtual" : "Local"} · ${repository.id}`}
         actions={
           canWrite ? (
             <div className="flex items-center gap-2">
@@ -121,7 +113,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
       {repository.ecosystem === "cargo" ? (
         <section className="mb-8">
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-foreground uppercase">
-            Registro de Cargo
+            Configurar cliente
           </h2>
           <CargoRegistryPanel
             repositoryId={repositoryId}

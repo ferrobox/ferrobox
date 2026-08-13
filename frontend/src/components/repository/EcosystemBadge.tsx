@@ -40,6 +40,10 @@ const ECOSYSTEM_META: Record<
   },
 };
 
+export function ecosystemMeta(ecosystem: PackageEcosystemDto) {
+  return ECOSYSTEM_META[ecosystem];
+}
+
 export function EcosystemBadge({ ecosystem }: { ecosystem: PackageEcosystemDto }) {
   const meta = ECOSYSTEM_META[ecosystem];
   const Icon = meta.icon;

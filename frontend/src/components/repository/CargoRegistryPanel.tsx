@@ -76,8 +76,9 @@ export function CargoRegistryPanel({
           code={`[registries.ferrobox]\nindex = "${indexUrl}"`}
         />
         <p className="text-xs text-muted-foreground">
-          Añádelo a <code className="font-mono">~/.cargo/config.toml</code> o a{" "}
-          <code className="font-mono">.cargo/config.toml</code> dentro de tu proyecto.
+          Puedes ponerlo en <code className="font-mono">~/.cargo/config.toml</code> o en{" "}
+          <code className="font-mono">.cargo/config.toml</code> del crate (por ejemplo{" "}
+          <code className="font-mono">demo-ferrobox/.cargo/config.toml</code>).
         </p>
       </div>
 
@@ -91,10 +92,11 @@ export function CargoRegistryPanel({
         <p className="text-xs text-muted-foreground">
           El índice y las descargas son públicos: <code className="font-mono">cargo add</code> y{" "}
           <code className="font-mono">cargo build</code> no necesitan token. Emite uno en{" "}
-          <span className="font-medium">Seguridad</span> y añádelo a{" "}
-          <code className="font-mono">~/.cargo/credentials.toml</code> para{" "}
-          <code className="font-mono">cargo publish</code> y{" "}
-          <code className="font-mono">cargo yank</code>.
+          <span className="font-medium">Seguridad</span> y guárdalo en{" "}
+          <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
+          <code className="font-mono">.cargo/credentials.toml</code> del proyecto) o en{" "}
+          <code className="font-mono">CARGO_REGISTRIES_FERROBOX_TOKEN</code>. No subas el token al
+          repositorio.
         </p>
       </div>
 

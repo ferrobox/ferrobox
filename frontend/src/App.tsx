@@ -5,11 +5,13 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthProvider";
 import { RequireAuth } from "@/auth/RequireAuth";
 import { AppShell } from "@/components/layout/AppShell";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LoginPage } from "@/pages/LoginPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import { RepositoriesLayout } from "@/pages/RepositoriesLayout";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailPage } from "@/pages/RepositoryDetailPage";
 import { SecurityPage } from "@/pages/SecurityPage";
@@ -36,14 +38,15 @@ export default function App() {
                 <Route element={<RequireAuth />}>
                   <Route element={<AppShell />}>
                     <Route index element={<Navigate to="/repositories" replace />} />
-                    <Route path="repositories" element={<RepositoriesPage />} />
-                    <Route
-                      path="repositories/:repositoryId"
-                      element={<RepositoryDetailPage />}
-                    />
-                    <Route path="security" element={<SecurityPage />} />
-                    <Route path="users" element={<UsersPage />} />
-                    <Route path="*" element={<NotFoundPage />} />
+                    <Route path="repositories" element={<RepositoriesLayout />}>
+                      <Route index element={<RepositoriesPage />} />
+                      <Route path=":repositoryId" element={<RepositoryDetailPage />} />
+                    </Route>
+                    <Route element={<PageContainer />}>
+                      <Route path="security" element={<SecurityPage />} />
+                      <Route path="users" element={<UsersPage />} />
+                      <Route path="*" element={<NotFoundPage />} />
+                    </Route>
                   </Route>
                 </Route>
               </Routes>

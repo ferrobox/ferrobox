@@ -49,15 +49,27 @@ export function UsersPage() {
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const nextUsername = String(data.get("username") ?? "").trim();
+    const nextPassword = String(data.get("password") ?? "");
+    const nextRole = (String(data.get("role") ?? role) || "developer") as RoleDto;
+
+    if (nextUsername.length === 0 || nextPassword.length === 0) {
+      toast.error("Usuario y contraseña son obligatorios");
+      return;
+    }
+
     try {
       await createUser.mutateAsync({
-        username: username.trim(),
-        password,
-        role,
+        username: nextUsername,
+        password: nextPassword,
+        role: nextRole,
       });
       setUsername("");
       setPassword("");
       setRole("developer");
+      form.reset();
       toast.success("Usuario creado");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo crear el usuario");
@@ -100,6 +112,7 @@ export function UsersPage() {
           <Label htmlFor="new-username">Usuario</Label>
           <Input
             id="new-username"
+            name="username"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             required
@@ -110,6 +123,7 @@ export function UsersPage() {
           <Label htmlFor="new-password">Contraseña</Label>
           <Input
             id="new-password"
+            name="password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -119,6 +133,7 @@ export function UsersPage() {
         </div>
         <div className="space-y-2">
           <Label htmlFor="new-role">Rol</Label>
+          <input type="hidden" name="role" value={role} />
           <Select value={role} onValueChange={(value) => setRole(value as RoleDto)}>
             <SelectTrigger id="new-role" className="w-full">
               <SelectValue />
@@ -132,10 +147,7 @@ export function UsersPage() {
             </SelectContent>
           </Select>
         </div>
-        <Button
-          type="submit"
-          disabled={createUser.isPending || username.trim().length === 0 || password.length === 0}
-        >
+        <Button type="submit" disabled={createUser.isPending}>
           <UserPlus />
           {createUser.isPending ? "Creando…" : "Crear usuario"}
         </Button>
