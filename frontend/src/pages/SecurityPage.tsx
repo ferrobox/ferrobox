@@ -157,8 +157,10 @@ export function SecurityPage() {
           <DialogHeader>
             <DialogTitle>Copia el token ahora</DialogTitle>
             <DialogDescription>
-              Este secreto solo se muestra una vez. Úsalo como Bearer token o en
-              `~/.cargo/credentials.toml`.
+              Este secreto solo se muestra una vez. En{" "}
+              <code className="font-mono">~/.cargo/credentials.toml</code> usa{" "}
+              <code className="font-mono">[registries.ferrobox]</code> y{" "}
+              <code className="font-mono">token = "fb_…"</code>.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
