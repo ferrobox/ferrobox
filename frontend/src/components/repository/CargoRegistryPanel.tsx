@@ -86,15 +86,16 @@ export function CargoRegistryPanel({
           2. Guarda un token de API (solo para publicar o hacer yank)
         </p>
         <CopyableCodeBlock
-          code={`[registry-tokens]\nferrobox = "fb_…"  # créalo en Seguridad`}
+          code={`[registries.ferrobox]\ntoken = "fb_…"  # créalo en Seguridad`}
         />
         <p className="text-xs text-muted-foreground">
           El índice y las descargas son públicos: <code className="font-mono">cargo add</code> y{" "}
           <code className="font-mono">cargo build</code> no necesitan token. Emite uno en{" "}
-          <span className="font-medium">Seguridad</span> y añádelo a{" "}
-          <code className="font-mono">~/.cargo/credentials.toml</code> para{" "}
-          <code className="font-mono">cargo publish</code> y{" "}
-          <code className="font-mono">cargo yank</code>.
+          <span className="font-medium">Seguridad</span> y guárdalo en{" "}
+          <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
+          <code className="font-mono">.cargo/credentials.toml</code> del proyecto). Alternativa:{" "}
+          <code className="font-mono">cargo login --registry ferrobox</code> o{" "}
+          <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>.
         </p>
       </div>
 
