@@ -162,11 +162,15 @@ impl NpmPackagingStrategy {
             )));
         };
 
+        let dist_tags = parse_dist_tags(packument.get("dist-tags"));
+
         for (version_str, manifest) in versions {
             let Ok(version) = PackageVersion::parse(version_str.clone()) else {
                 continue;
             };
-            let entry = version_entry_from_upstream_manifest(name.as_str(), version_str, manifest)?;
+            let mut entry =
+                version_entry_from_upstream_manifest(name.as_str(), version_str, manifest)?;
+            entry.dist_tags.clone_from(&dist_tags);
             let coordinate =
                 PackageCoordinate::new(PackageEcosystem::Npm, name.clone(), version);
             let entry_bytes = Bytes::from(
@@ -350,14 +354,7 @@ impl NpmPackagingStrategy {
 
         let mut hits = Vec::new();
         for (name, versions) in by_name {
-            let max_version = versions
-                .iter()
-                .rev()
-                .find(|entry| !entry.yanked)
-                .or_else(|| versions.last())
-                .expect("grouped versions are never empty")
-                .version
-                .clone();
+            let max_version = advertised_version(&versions);
             hits.push(PackageSearchHit { name, max_version });
             if hits.len() >= limit {
                 break;
@@ -418,6 +415,7 @@ impl PackagingStrategy for NpmPackagingStrategy {
             shasum: sha1_hex(&parsed.tarball),
             integrity: sha512_integrity(&parsed.tarball),
             yanked: false,
+            dist_tags: parsed.dist_tags,
             manifest: parsed.manifest,
         };
         let entry_bytes = Bytes::from(
@@ -614,6 +612,7 @@ fn version_entry_from_upstream_manifest(
         shasum,
         integrity,
         yanked: manifest.get("deprecated").is_some(),
+        dist_tags: BTreeMap::new(),
         manifest: manifest.clone(),
     })
 }
@@ -626,6 +625,8 @@ struct VersionEntry {
     integrity: String,
     #[serde(default)]
     yanked: bool,
+    #[serde(default)]
+    dist_tags: BTreeMap<String, String>,
     #[serde(default)]
     manifest: Value,
 }
@@ -650,6 +651,7 @@ struct ParsedPublish {
     name: String,
     version: String,
     tarball: Bytes,
+    dist_tags: BTreeMap<String, String>,
     manifest: Value,
 }
 
@@ -695,6 +697,7 @@ fn parse_publish_payload(payload: &[u8]) -> Result<ParsedPublish, PackagingError
         name: body.name,
         version,
         tarball: Bytes::from(tarball),
+        dist_tags: body.dist_tags,
         manifest,
     })
 }
@@ -705,32 +708,21 @@ fn packument_from_entries(
     tarball_for: impl Fn(&str) -> String,
 ) -> Result<Bytes, PackagingError> {
     let mut versions = Map::new();
-    let mut latest_live: Option<String> = None;
-    let mut latest_any: Option<String> = None;
+    let mut parsed = Vec::new();
 
     for entry_bytes in entries {
         let entry: VersionEntry = serde_json::from_slice(entry_bytes)
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
         versions.insert(entry.version.clone(), version_document(&entry, &tarball_for));
-        latest_any = Some(entry.version.clone());
-        if !entry.yanked {
-            latest_live = Some(entry.version);
-        }
+        parsed.push(entry);
     }
 
-    let latest = latest_live
-        .or(latest_any)
-        .ok_or_else(|| PackagingError::PackageNotFound(name.to_string()))?;
-    let packument = serde_json::json!({
-        "_id": name,
-        "name": name,
-        "dist-tags": { "latest": latest },
-        "versions": versions,
-    });
+    if versions.is_empty() {
+        return Err(PackagingError::PackageNotFound(name.to_string()));
+    }
 
-    Ok(Bytes::from(
-        serde_json::to_vec(&packument).expect("a packument always serializes to valid JSON"),
-    ))
+    let dist_tags = resolve_dist_tags(&parsed, &versions);
+    Ok(packument_document(name, &dist_tags, &versions))
 }
 
 fn version_document(entry: &VersionEntry, tarball_for: &impl Fn(&str) -> String) -> Value {
@@ -762,6 +754,7 @@ fn version_document(entry: &VersionEntry, tarball_for: &impl Fn(&str) -> String)
 
 fn merge_packuments(documents: &[Bytes]) -> Result<Bytes, PackagingError> {
     let mut versions = Map::new();
+    let mut dist_tags = BTreeMap::new();
     let mut name = String::new();
 
     for document in documents {
@@ -771,6 +764,15 @@ fn merge_packuments(documents: &[Bytes]) -> Result<Bytes, PackagingError> {
             && let Some(found) = packument.get("name").and_then(Value::as_str)
         {
             name = found.to_string();
+        }
+        if let Some(Value::Object(tags)) = packument.get("dist-tags") {
+            for (tag, value) in tags {
+                if let Some(version) = value.as_str() {
+                    dist_tags
+                        .entry(tag.clone())
+                        .or_insert_with(|| version.to_string());
+                }
+            }
         }
         let Some(Value::Object(map)) = packument.get("versions") else {
             continue;
@@ -784,21 +786,125 @@ fn merge_packuments(documents: &[Bytes]) -> Result<Bytes, PackagingError> {
         return Err(PackagingError::PackageNotFound(name));
     }
 
-    let latest = versions
-        .keys()
-        .next_back()
-        .cloned()
-        .expect("versions is not empty");
+    dist_tags.retain(|_, version| versions.contains_key(version));
+    if !dist_tags.contains_key("latest")
+        && let Some(latest) = semver_latest(versions.keys().map(String::as_str), &HashSet::new())
+    {
+        dist_tags.insert("latest".to_string(), latest);
+    }
+
+    Ok(packument_document(&name, &dist_tags, &versions))
+}
+
+fn packument_document(
+    name: &str,
+    dist_tags: &BTreeMap<String, String>,
+    versions: &Map<String, Value>,
+) -> Bytes {
     let packument = serde_json::json!({
         "_id": name,
         "name": name,
-        "dist-tags": { "latest": latest },
+        "dist-tags": dist_tags,
         "versions": versions,
     });
+    Bytes::from(serde_json::to_vec(&packument).expect("a packument always serializes to valid JSON"))
+}
 
-    Ok(Bytes::from(
-        serde_json::to_vec(&packument).expect("a packument always serializes to valid JSON"),
-    ))
+fn parse_dist_tags(value: Option<&Value>) -> BTreeMap<String, String> {
+    let mut tags = BTreeMap::new();
+    let Some(Value::Object(map)) = value else {
+        return tags;
+    };
+    for (tag, version) in map {
+        if let Some(version) = version.as_str() {
+            tags.insert(tag.clone(), version.to_string());
+        }
+    }
+    tags
+}
+
+fn collect_dist_tags(entries: &[VersionEntry]) -> BTreeMap<String, String> {
+    let mut tags = BTreeMap::new();
+    for entry in entries {
+        tags.extend(entry.dist_tags.iter().map(|(tag, version)| (tag.clone(), version.clone())));
+    }
+    tags
+}
+
+fn advertised_version(entries: &[VersionEntry]) -> String {
+    let stored = collect_dist_tags(entries);
+    if let Some(latest) = stored.get("latest")
+        && entries.iter().any(|entry| entry.version == *latest)
+    {
+        return latest.clone();
+    }
+    let yanked = entries
+        .iter()
+        .filter(|entry| entry.yanked)
+        .map(|entry| entry.version.clone())
+        .collect();
+    semver_latest(entries.iter().map(|entry| entry.version.as_str()), &yanked)
+        .or_else(|| entries.last().map(|entry| entry.version.clone()))
+        .expect("grouped versions are never empty")
+}
+
+fn resolve_dist_tags(
+    entries: &[VersionEntry],
+    versions: &Map<String, Value>,
+) -> BTreeMap<String, String> {
+    let yanked = entries
+        .iter()
+        .filter(|entry| entry.yanked)
+        .map(|entry| entry.version.clone())
+        .collect();
+    let mut tags = collect_dist_tags(entries);
+    tags.retain(|_, version| versions.contains_key(version));
+    if !tags.contains_key("latest")
+        && let Some(latest) = semver_latest(versions.keys().map(String::as_str), &yanked)
+    {
+        tags.insert("latest".to_string(), latest);
+    }
+    tags
+}
+
+/// Compara versiones npm por `major.minor.patch`, no por orden
+/// lexicográfico (`"4.9.0"` > `"4.17.21"` como cadenas).
+fn parse_release_tuple(version: &str) -> Option<(u64, u64, u64, bool)> {
+    let version = version.split_once('+').map_or(version, |(core, _)| core);
+    let (core, prerelease) = version
+        .split_once('-')
+        .map_or((version, false), |(core, pre)| (core, !pre.is_empty()));
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch, prerelease))
+}
+
+fn semver_latest<'a>(
+    versions: impl IntoIterator<Item = &'a str>,
+    yanked: &HashSet<String>,
+) -> Option<String> {
+    let mut best_release: Option<((u64, u64, u64), &'a str)> = None;
+    let mut best_any: Option<((u64, u64, u64), &'a str)> = None;
+    for version in versions {
+        if yanked.contains(version) {
+            continue;
+        }
+        let Some((major, minor, patch, prerelease)) = parse_release_tuple(version) else {
+            continue;
+        };
+        let key = (major, minor, patch);
+        if best_any.is_none_or(|(current, _)| key > current) {
+            best_any = Some((key, version));
+        }
+        if !prerelease && best_release.is_none_or(|(current, _)| key > current) {
+            best_release = Some((key, version));
+        }
+    }
+    best_release
+        .or(best_any)
+        .map(|(_, version)| version.to_string())
 }
 
 fn sha1_hex(content: &[u8]) -> String {
@@ -813,6 +919,7 @@ fn sha512_integrity(content: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use ferrobox_domain::package_coordinate::{
@@ -1041,6 +1148,7 @@ mod tests {
         Bytes::from(
             serde_json::json!({
                 "name": name,
+                "dist-tags": { "latest": version },
                 "versions": {
                     version: {
                         "name": name,
@@ -1323,5 +1431,136 @@ mod tests {
             join_upstream(&upstream, &encode_npm_name("@types/node")),
             "https://registry.npmjs.org/%40types%2Fnode"
         );
+    }
+
+    #[test]
+    fn semver_latest_prefers_numeric_order_over_lexicographic() {
+        let none = HashSet::new();
+        assert_eq!(
+            semver_latest(["4.9.0", "4.17.21", "4.0.0"], &none).as_deref(),
+            Some("4.17.21")
+        );
+    }
+
+    #[test]
+    fn semver_latest_prefers_a_release_over_a_newer_prerelease() {
+        let none = HashSet::new();
+        assert_eq!(
+            semver_latest(["2.0.0-beta.1", "1.9.0"], &none).as_deref(),
+            Some("1.9.0")
+        );
+    }
+
+    fn version_dist(name: &str, version: &str, tarball_url: &str, tarball: &[u8]) -> Value {
+        serde_json::json!({
+            "name": name,
+            "version": version,
+            "dist": {
+                "tarball": tarball_url,
+                "shasum": sha1_hex(tarball),
+                "integrity": sha512_integrity(tarball)
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn mirror_packument_uses_upstream_dist_tags_latest() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+
+        let repository = npm_mirror("npm-proxy", "https://registry.example/");
+        let tarball = b"lodash-bytes";
+        http.stub(
+            "https://registry.example/lodash",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "name": "lodash",
+                    "dist-tags": { "latest": "4.17.21" },
+                    "versions": {
+                        "4.9.0": version_dist(
+                            "lodash",
+                            "4.9.0",
+                            "https://registry.example/lodash/-/lodash-4.9.0.tgz",
+                            tarball,
+                        ),
+                        "4.17.21": version_dist(
+                            "lodash",
+                            "4.17.21",
+                            "https://registry.example/lodash/-/lodash-4.17.21.tgz",
+                            tarball,
+                        )
+                    }
+                })
+                .to_string(),
+            ),
+        );
+
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, &PackageName::parse("lodash").unwrap())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(packument["dist-tags"]["latest"], "4.17.21");
+        assert!(packument["versions"].get("4.9.0").is_some());
+        assert!(packument["versions"].get("4.17.21").is_some());
+    }
+
+    #[tokio::test]
+    async fn mirror_packument_falls_back_to_semver_when_dist_tags_are_missing() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+
+        let repository = npm_mirror("npm-proxy", "https://registry.example/");
+        let tarball = b"lodash-bytes";
+        http.stub(
+            "https://registry.example/lodash",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "name": "lodash",
+                    "versions": {
+                        "4.9.0": version_dist(
+                            "lodash",
+                            "4.9.0",
+                            "https://registry.example/lodash/-/lodash-4.9.0.tgz",
+                            tarball,
+                        ),
+                        "4.17.21": version_dist(
+                            "lodash",
+                            "4.17.21",
+                            "https://registry.example/lodash/-/lodash-4.17.21.tgz",
+                            tarball,
+                        )
+                    }
+                })
+                .to_string(),
+            ),
+        );
+
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, &PackageName::parse("lodash").unwrap())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(packument["dist-tags"]["latest"], "4.17.21");
     }
 }
