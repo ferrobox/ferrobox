@@ -10,6 +10,7 @@ import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
 import type { UserResponse } from "@/api/generated/UserResponse";
 
@@ -161,6 +162,16 @@ export function createRepository(
 
 export function deleteRepository(repositoryId: string): Promise<void> {
   return request<void>(`/repositories/${repositoryId}`, { method: "DELETE" });
+}
+
+export function updateAlloyMembers(
+  repositoryId: string,
+  payload: UpdateAlloyMembersRequest,
+): Promise<RepositoryResponse> {
+  return request<RepositoryResponse>(`/repositories/${repositoryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function listRepositoryArtifacts(repositoryId: string): Promise<ArtifactResponse[]> {

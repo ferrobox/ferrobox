@@ -243,6 +243,17 @@ impl Repository {
     pub fn ecosystem(&self) -> PackageEcosystem {
         self.ecosystem
     }
+
+    /// Sustituye la estrategia de origen, conservando identidad, nombre
+    /// y ecosistema. Sirve para actualizar los miembros de un `Alloy`.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`RepositoryError`] si `kind` es un `Alloy` sin miembros.
+    pub fn with_kind(self, kind: RepositoryKind) -> Result<Self, RepositoryError> {
+        Self::validate(&kind)?;
+        Ok(Self { kind, ..self })
+    }
 }
 
 impl PartialEq for Repository {
@@ -337,5 +348,48 @@ mod tests {
             Repository::new(name, RepositoryKind::Forge, PackageEcosystem::Npm).unwrap();
 
         assert_eq!(repository.ecosystem(), PackageEcosystem::Npm);
+    }
+
+    #[test]
+    fn with_kind_replaces_alloy_members_and_keeps_identity() {
+        let first = RepositoryId::new();
+        let second = RepositoryId::new();
+        let original = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![first],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let id = original.id();
+
+        let updated = original
+            .with_kind(RepositoryKind::Alloy {
+                members: vec![second],
+            })
+            .unwrap();
+
+        assert_eq!(updated.id(), id);
+        assert_eq!(updated.name().as_str(), "crates-alloy");
+        match updated.kind() {
+            RepositoryKind::Alloy { members } => assert_eq!(members, &vec![second]),
+            other => panic!("expected alloy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn with_kind_rejects_an_empty_alloy() {
+        let original = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![RepositoryId::new()],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+
+        let result = original.with_kind(RepositoryKind::Alloy { members: vec![] });
+        assert_eq!(result.err(), Some(RepositoryError::EmptyAlloy));
     }
 }

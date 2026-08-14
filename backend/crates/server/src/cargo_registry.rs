@@ -382,6 +382,7 @@ mod tests {
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage, InMemoryUserStore,
     };
+    use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
     use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::RepositoryName;
@@ -421,6 +422,7 @@ mod tests {
             create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
             list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
             get_repository: GetRepositoryUseCase::new(repository_store.clone()),
+            update_alloy_members: UpdateAlloyMembersUseCase::new(repository_store.clone()),
             publish_artifact: PublishArtifactUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),

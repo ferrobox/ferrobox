@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { ApiError } from "@/api/client";
 import type { CreateRepositoryKindDto } from "@/api/generated/CreateRepositoryKindDto";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
-import { useCreateRepository, useRepositories } from "@/api/queries";
+import { useCreateRepository } from "@/api/queries";
+import { AlloyMemberPicker } from "@/components/repository/AlloyMemberPicker";
 import { ECOSYSTEM_OPTIONS } from "@/components/repository/EcosystemBadge";
-import { KIND_META } from "@/components/repository/RepositoryKindBadge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -43,15 +43,6 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
   const [validationError, setValidationError] = useState<string | null>(null);
   const navigate = useNavigate();
   const mutation = useCreateRepository();
-  const repositoriesQuery = useRepositories();
-
-  const eligibleMembers = useMemo(() => {
-    return (repositoriesQuery.data ?? []).filter(
-      (repository) =>
-        repository.ecosystem === ecosystem &&
-        (repository.kind.type === "forge" || repository.kind.type === "mirror"),
-    );
-  }, [repositoriesQuery.data, ecosystem]);
 
   function resetAndClose() {
     setOpen(false);
@@ -62,12 +53,6 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
     setMemberIds([]);
     setValidationError(null);
     mutation.reset();
-  }
-
-  function toggleMember(id: string) {
-    setMemberIds((current) =>
-      current.includes(id) ? current.filter((member) => member !== id) : [...current, id],
-    );
   }
 
   function handleSubmit(event: FormEvent) {
@@ -236,42 +221,11 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
             ) : null}
 
             {kind === "alloy" ? (
-              <div className="grid gap-2">
-                <Label>Miembros</Label>
-                {eligibleMembers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No hay repositorios Forge o Mirror de este ecosistema. Crea
-                    uno primero para poder agregarlo.
-                  </p>
-                ) : (
-                  <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                    {eligibleMembers.map((repository) => {
-                      const checked = memberIds.includes(repository.id);
-                      const kindLabel = KIND_META[repository.kind.type].label;
-                      return (
-                        <li key={repository.id}>
-                          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={checked}
-                              onChange={() => toggleMember(repository.id)}
-                            />
-                            <span className="min-w-0 flex-1 truncate font-medium">
-                              {repository.name}
-                            </span>
-                            <span className="text-xs text-muted-foreground">{kindLabel}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  El orden de selección es el de resolución: el primer miembro
-                  gana si hay la misma versión en varios.
-                </p>
-              </div>
+              <AlloyMemberPicker
+                ecosystem={ecosystem}
+                selectedIds={memberIds}
+                onChange={setMemberIds}
+              />
             ) : null}
 
             {(validationError ?? serverError) ? (

@@ -12,6 +12,12 @@ mod content_hash;
 /// Caso de uso: crear un nuevo repositorio.
 pub mod create_repository;
 
+/// Validación compartida de los miembros de un `Alloy`.
+pub mod alloy_members;
+
+/// Caso de uso: actualizar los miembros de un repositorio `Alloy`.
+pub mod update_alloy_members;
+
 /// Caso de uso: publicar un artefacto en un repositorio existente.
 pub mod publish_artifact;
 

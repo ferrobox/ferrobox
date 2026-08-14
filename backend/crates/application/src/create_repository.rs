@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use ferrobox_domain::ids::RepositoryId;
@@ -7,6 +6,8 @@ use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 use url::Url;
+
+use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 
 /// Motivos por los que crear un repositorio puede fallar.
 #[derive(Debug, Error)]
@@ -40,6 +41,18 @@ pub enum CreateRepositoryError {
     /// duplicado).
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
+}
+
+impl From<ResolveAlloyMembersError> for CreateRepositoryError {
+    fn from(err: ResolveAlloyMembersError) -> Self {
+        match err {
+            ResolveAlloyMembersError::EmptyAlloy => Self::EmptyAlloy,
+            ResolveAlloyMembersError::MemberNotFound => Self::MemberNotFound,
+            ResolveAlloyMembersError::MemberEcosystemMismatch => Self::MemberEcosystemMismatch,
+            ResolveAlloyMembersError::NestedAlloy => Self::NestedAlloy,
+            ResolveAlloyMembersError::Persistence(inner) => Self::Persistence(inner),
+        }
+    }
 }
 
 /// Descripción del tipo de repositorio a crear.
@@ -104,7 +117,13 @@ impl CreateRepositoryUseCase {
                 RepositoryKind::Mirror { upstream }
             }
             CreateRepositoryKind::Alloy { members } => {
-                self.resolve_alloy_members(ecosystem, members).await?
+                let members = resolve_alloy_members(
+                    self.repository_store.as_ref(),
+                    ecosystem,
+                    members,
+                )
+                .await?;
+                RepositoryKind::Alloy { members }
             }
         };
 
@@ -114,42 +133,6 @@ impl CreateRepositoryUseCase {
         self.repository_store.save(&repository).await?;
 
         Ok(repository.id())
-    }
-
-    async fn resolve_alloy_members(
-        &self,
-        ecosystem: PackageEcosystem,
-        members: Vec<RepositoryId>,
-    ) -> Result<RepositoryKind, CreateRepositoryError> {
-        if members.is_empty() {
-            return Err(CreateRepositoryError::EmptyAlloy);
-        }
-
-        let mut unique = HashSet::new();
-        let mut resolved = Vec::new();
-        for member_id in members {
-            if !unique.insert(member_id) {
-                continue;
-            }
-            let member = self
-                .repository_store
-                .find_by_id(member_id)
-                .await?
-                .ok_or(CreateRepositoryError::MemberNotFound)?;
-            if member.ecosystem() != ecosystem {
-                return Err(CreateRepositoryError::MemberEcosystemMismatch);
-            }
-            if matches!(member.kind(), RepositoryKind::Alloy { .. }) {
-                return Err(CreateRepositoryError::NestedAlloy);
-            }
-            resolved.push(member_id);
-        }
-
-        if resolved.is_empty() {
-            return Err(CreateRepositoryError::EmptyAlloy);
-        }
-
-        Ok(RepositoryKind::Alloy { members: resolved })
     }
 }
 

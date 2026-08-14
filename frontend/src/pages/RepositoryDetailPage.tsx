@@ -10,6 +10,7 @@ import { canWriteArtifacts } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
+import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
@@ -153,6 +154,13 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
                 kind={repository.kind.type}
               />
             ) : null}
+            {canWrite && repository.kind.type === "alloy" ? (
+              <EditAlloyMembersDialog
+                repositoryId={repositoryId}
+                ecosystem={repository.ecosystem}
+                members={repository.kind.members}
+              />
+            ) : null}
             {canWrite && !isReadOnly ? (
               <UploadArtifactButton repositoryId={repositoryId} />
             ) : null}
@@ -183,7 +191,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             Agrupados por nombre, con cada versión debajo.
           </p>
         </div>
-        <ArtifactsTable repositoryId={repositoryId} />
+        <ArtifactsTable repositoryId={repositoryId} kind={repository.kind.type} />
       </section>
     </div>
   );

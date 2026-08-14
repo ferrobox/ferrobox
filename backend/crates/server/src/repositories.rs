@@ -14,7 +14,8 @@ use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_write_artifacts;
 use crate::dto::{
-    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse,
+    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse,
+    RepositoryResponse, UpdateAlloyMembersRequest,
 };
 use crate::error::ApiError;
 use ferrobox_application::create_repository::CreateRepositoryKind;
@@ -32,16 +33,9 @@ pub(crate) async fn create_repository(
     let kind = match payload.kind.unwrap_or_default() {
         CreateRepositoryKindDto::Forge => CreateRepositoryKind::Forge,
         CreateRepositoryKindDto::Mirror { upstream } => CreateRepositoryKind::Mirror { upstream },
-        CreateRepositoryKindDto::Alloy { members } => {
-            let mut parsed = Vec::with_capacity(members.len());
-            for member in members {
-                let uuid = Uuid::parse_str(&member).map_err(|_| {
-                    ApiError::BadRequest("invalid alloy member repository id".to_string())
-                })?;
-                parsed.push(RepositoryId::from(uuid));
-            }
-            CreateRepositoryKind::Alloy { members: parsed }
-        }
+        CreateRepositoryKindDto::Alloy { members } => CreateRepositoryKind::Alloy {
+            members: parse_alloy_member_ids(members)?,
+        },
     };
 
     let id = state
@@ -77,6 +71,23 @@ pub(crate) async fn get_repository(
     Ok(Json(RepositoryResponse::from(&repository)))
 }
 
+pub(crate) async fn update_alloy_members(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<UpdateAlloyMembersRequest>,
+) -> Result<Json<RepositoryResponse>, ApiError> {
+    require_write_artifacts(&user)?;
+
+    let members = parse_alloy_member_ids(payload.members)?;
+    let repository = state
+        .update_alloy_members
+        .execute(RepositoryId::from(repository_id), members)
+        .await?;
+
+    Ok(Json(RepositoryResponse::from(&repository)))
+}
+
 pub(crate) async fn delete_repository(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
@@ -90,4 +101,15 @@ pub(crate) async fn delete_repository(
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn parse_alloy_member_ids(members: Vec<String>) -> Result<Vec<RepositoryId>, ApiError> {
+    let mut parsed = Vec::with_capacity(members.len());
+    for member in members {
+        let uuid = Uuid::parse_str(&member).map_err(|_| {
+            ApiError::BadRequest("invalid alloy member repository id".to_string())
+        })?;
+        parsed.push(RepositoryId::from(uuid));
+    }
+    Ok(parsed)
 }
