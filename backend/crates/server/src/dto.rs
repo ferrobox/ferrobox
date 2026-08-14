@@ -278,6 +278,30 @@ pub(crate) struct UpdateUserRoleRequest {
     pub(crate) role: RoleDto,
 }
 
+/// Cuerpo de la petición para cambiar la contraseña del usuario
+/// autenticado.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ChangePasswordRequest {
+    /// Contraseña actual, para comprobar que quien pide el cambio es
+    /// el titular de la cuenta.
+    pub(crate) current_password: String,
+    /// Nueva contraseña en claro. El servidor la hashea antes de
+    /// persistirla.
+    pub(crate) new_password: String,
+}
+
+/// Información de la instancia que consume la página de configuración.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SettingsResponse {
+    /// URL pública (esquema + host + puerto, sin barra final) con la
+    /// que los clientes deben hablar con esta instancia.
+    pub(crate) public_base_url: String,
+    /// Versión del servidor (`CARGO_PKG_VERSION`).
+    pub(crate) version: String,
+}
+
 /// Respuesta al iniciar sesión correctamente.
 #[derive(Serialize, TS)]
 #[ts(export)]

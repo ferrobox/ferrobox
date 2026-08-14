@@ -17,7 +17,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label: "Repositorios", to: "/repositories", icon: Boxes },
   { label: "Seguridad", to: "/security", icon: ShieldCheck },
   { label: "Usuarios", to: "/users", icon: Users, adminOnly: true },
-  { label: "Configuración", to: "/settings", icon: Settings2, disabled: true },
+  { label: "Configuración", to: "/settings", icon: Settings2 },
 ];
 
 export function Sidebar() {

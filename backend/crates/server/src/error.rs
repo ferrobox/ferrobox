@@ -4,6 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use ferrobox_application::authenticate_token::AuthenticateTokenError;
+use ferrobox_application::change_password::ChangePasswordError;
 use ferrobox_application::create_repository::CreateRepositoryError;
 use ferrobox_application::delete_artifact::DeleteArtifactError;
 use ferrobox_application::delete_repository::DeleteRepositoryError;
@@ -267,6 +268,20 @@ impl From<ChangeUserRoleError> for ApiError {
             ChangeUserRoleError::NotFound => Self::NotFound(err.to_string()),
             ChangeUserRoleError::CannotDemoteLastAdmin => Self::Conflict(err.to_string()),
             ChangeUserRoleError::Persistence(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<ChangePasswordError> for ApiError {
+    fn from(err: ChangePasswordError) -> Self {
+        match err {
+            ChangePasswordError::EmptyPassword | ChangePasswordError::InvalidCurrentPassword => {
+                Self::BadRequest(err.to_string())
+            }
+            ChangePasswordError::NotFound => Self::NotFound(err.to_string()),
+            ChangePasswordError::PasswordHashing(_) | ChangePasswordError::Persistence(_) => {
+                Self::Internal(err.to_string())
+            }
         }
     }
 }

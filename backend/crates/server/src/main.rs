@@ -10,6 +10,7 @@ mod config;
 mod dto;
 mod error;
 mod repositories;
+mod settings;
 mod users;
 
 use std::net::SocketAddr;
@@ -30,6 +31,7 @@ use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
+use ferrobox_application::change_password::ChangePasswordUseCase;
 use ferrobox_application::create_repository::CreateRepositoryUseCase;
 use ferrobox_application::delete_artifact::DeleteArtifactUseCase;
 use ferrobox_application::delete_repository::DeleteRepositoryUseCase;
@@ -65,6 +67,7 @@ struct AppState {
     packaging: PackagingRegistry,
     public_base_url: String,
     login: LoginUseCase,
+    change_password: ChangePasswordUseCase,
     authenticate_token: AuthenticateTokenUseCase,
     create_api_token: CreateApiTokenUseCase,
     list_api_tokens: ListApiTokensUseCase,
@@ -130,6 +133,8 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
 
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
+        .route("/auth/password", post(auth::change_password))
+        .route("/settings", get(settings::get_settings))
         .route(
             "/auth/tokens",
             get(auth::list_tokens).post(auth::create_token),
@@ -250,6 +255,7 @@ fn build_app_state(
         packaging,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
+        change_password: ChangePasswordUseCase::new(user_store.clone()),
         authenticate_token: AuthenticateTokenUseCase::new(
             user_store.clone(),
             api_token_store.clone(),

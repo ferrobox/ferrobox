@@ -1,6 +1,7 @@
 import type { ApiTokenCreatedResponse } from "@/api/generated/ApiTokenCreatedResponse";
 import type { ApiTokenResponse } from "@/api/generated/ApiTokenResponse";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
+import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateRepositoryResponse } from "@/api/generated/CreateRepositoryResponse";
@@ -10,6 +11,7 @@ import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { SettingsResponse } from "@/api/generated/SettingsResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
 import type { UserResponse } from "@/api/generated/UserResponse";
@@ -99,6 +101,17 @@ export function login(payload: LoginRequest): Promise<LoginResponse> {
 
 export function getMe(): Promise<UserResponse> {
   return request<UserResponse>("/auth/me");
+}
+
+export function changePassword(payload: ChangePasswordRequest): Promise<void> {
+  return request<void>("/auth/password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getSettings(): Promise<SettingsResponse> {
+  return request<SettingsResponse>("/settings");
 }
 
 export function listApiTokens(): Promise<ApiTokenResponse[]> {

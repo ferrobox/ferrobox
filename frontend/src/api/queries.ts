@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
+import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
@@ -13,6 +14,7 @@ export const queryKeys = {
   repositoryArtifacts: (id: string) => ["repositories", id, "artifacts"] as const,
   apiTokens: ["auth", "tokens"] as const,
   users: ["users"] as const,
+  settings: ["settings"] as const,
 };
 
 export function useRepositories() {
@@ -180,5 +182,18 @@ export function useUpdateUserRole() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.users });
     },
+  });
+}
+
+export function useSettings() {
+  return useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: api.getSettings,
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (payload: ChangePasswordRequest) => api.changePassword(payload),
   });
 }
