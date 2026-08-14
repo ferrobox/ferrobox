@@ -5,6 +5,7 @@ import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordReques
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
+import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 
@@ -130,14 +131,22 @@ export function useSetYanked(repositoryId: string) {
       name,
       version,
       yanked,
+      ecosystem,
     }: {
       name: string;
       version: string;
       yanked: boolean;
-    }) =>
-      yanked
+      ecosystem: PackageEcosystemDto;
+    }) => {
+      if (ecosystem === "npm") {
+        return yanked
+          ? api.yankNpm(repositoryId, name, version)
+          : api.unyankNpm(repositoryId, name, version);
+      }
+      return yanked
         ? api.yankCrate(repositoryId, name, version)
-        : api.unyankCrate(repositoryId, name, version),
+        : api.unyankCrate(repositoryId, name, version);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),

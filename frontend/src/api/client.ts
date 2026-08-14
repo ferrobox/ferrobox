@@ -219,6 +219,32 @@ export function unyankCrate(
   );
 }
 
+function npmPackagePath(name: string): string {
+  return name.replaceAll("@", "%40").replaceAll("/", "%2F");
+}
+
+export function yankNpm(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/npm/${repositoryId}/${npmPackagePath(name)}/${encodeURIComponent(version)}/yank`,
+    { method: "DELETE" },
+  );
+}
+
+export function unyankNpm(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/npm/${repositoryId}/${npmPackagePath(name)}/${encodeURIComponent(version)}/unyank`,
+    { method: "PUT" },
+  );
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,

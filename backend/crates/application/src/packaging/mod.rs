@@ -31,6 +31,10 @@ use thiserror::Error;
 /// patrón Strategy.
 pub mod cargo;
 
+/// La implementación de npm (registro compatible con `npm publish` /
+/// `npm install`) del patrón Strategy.
+pub mod npm;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -255,9 +259,12 @@ impl PackagingRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ferrobox_domain::package_coordinate::PackageEcosystem;
 
     use super::cargo::CargoPackagingStrategy;
+    use super::npm::NpmPackagingStrategy;
     use super::*;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
@@ -274,11 +281,24 @@ mod tests {
         ))
     }
 
+    fn npm_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
-        let registry = PackagingRegistry::new().register(cargo_strategy());
+        let registry = PackagingRegistry::new()
+            .register(cargo_strategy())
+            .register(npm_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
     }
 
     #[test]

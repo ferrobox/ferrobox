@@ -28,9 +28,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBytes, truncateMiddle } from "@/lib/format";
 
-function artifactFilename(artifact: ArtifactResponse): string {
+function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
   if (artifact.name && artifact.version) {
-    return `${artifact.name}-${artifact.version}.crate`;
+    const extension = ecosystem === "npm" ? "tgz" : "crate";
+    const base = artifact.name.includes("/")
+      ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
+      : artifact.name;
+    return `${base}-${artifact.version}.${extension}`;
   }
   return artifact.id;
 }
@@ -56,7 +60,8 @@ export function ArtifactsTable({
   const deleteArtifact = useDeleteArtifact(repositoryId);
   const setYanked = useSetYanked(repositoryId);
   const canWrite = canWriteArtifacts(user?.role);
-  const canYank = canWrite && kind === "forge" && ecosystem === "cargo";
+  const canYank =
+    canWrite && kind === "forge" && (ecosystem === "cargo" || ecosystem === "npm");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -101,6 +106,7 @@ export function ArtifactsTable({
         name: artifact.name,
         version: artifact.version,
         yanked,
+        ecosystem,
       });
       toast.success(
         yanked
@@ -162,6 +168,11 @@ export function ArtifactsTable({
             "Los paquetes aparecen cuando existen en los Forges o Mirrors miembros. Publica en un Forge miembro."
           ) : kind === "mirror" ? (
             "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+          ) : ecosystem === "npm" ? (
+            <>
+              Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
+              este registro.
+            </>
           ) : (
             <>
               Publica un crate con <code className="font-mono">cargo publish --registry ferrobox</code>{" "}
@@ -268,7 +279,10 @@ export function ArtifactsTable({
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            void downloadArtifact(artifact.id, artifactFilename(artifact)).catch(
+                            void downloadArtifact(
+                              artifact.id,
+                              artifactFilename(artifact, ecosystem),
+                            ).catch(
                               (err: unknown) => {
                                 toast.error(
                                   err instanceof ApiError
@@ -300,7 +314,7 @@ export function ArtifactsTable({
                         ) : null}
                         {canWrite && kind !== "alloy" ? (
                           <ConfirmDeleteDialog
-                            title={`Eliminar ${artifactFilename(artifact)}`}
+                            title={`Eliminar ${artifactFilename(artifact, ecosystem)}`}
                             description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
                             pending={deleteArtifact.isPending}
                             onConfirm={() => onDelete(artifact.id)}
