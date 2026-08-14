@@ -67,9 +67,9 @@ export function NpmRegistryPanel({
       ? "Mirror npm"
       : "Registro npm";
   const introBody = isAlloy
-    ? "Este Alloy agrega Forges npm en una sola URL. npm install resuelve contra los miembros, en orden. No acepta npm publish: publica en un Forge miembro."
+    ? "Este Alloy agrega Forges y/o Mirrors npm en una sola URL. npm install resuelve contra los miembros, en orden. No acepta npm publish: publica en un Forge miembro."
     : isMirror
-      ? "El Mirror npm todavía no está disponible. Usa un Forge para publicar e instalar."
+      ? "Este Mirror cachea paquetes del upstream la primera vez que npm install los resuelve o descarga. No acepta npm publish ni yank."
       : "Este repositorio implementa el protocolo de registro de npm: npm publish y npm install funcionan de forma nativa.";
 
   const body = (

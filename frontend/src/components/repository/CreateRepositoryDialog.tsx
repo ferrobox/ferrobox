@@ -30,8 +30,32 @@ import {
 } from "@/components/ui/select";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+const MIRROR_ECOSYSTEMS: readonly PackageEcosystemDto[] = ["cargo", "npm"];
+const DEFAULT_UPSTREAM = {
+  cargo: "https://index.crates.io/",
+  npm: "https://registry.npmjs.org/",
+} as const;
 
 type KindChoice = "forge" | "mirror" | "alloy";
+
+function isMirrorEcosystem(
+  ecosystem: PackageEcosystemDto,
+): ecosystem is "cargo" | "npm" {
+  return MIRROR_ECOSYSTEMS.includes(ecosystem);
+}
+
+function defaultUpstreamFor(ecosystem: PackageEcosystemDto): string {
+  return ecosystem === "npm" ? DEFAULT_UPSTREAM.npm : DEFAULT_UPSTREAM.cargo;
+}
+
+function isKnownDefaultUpstream(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.length === 0 ||
+    trimmed === DEFAULT_UPSTREAM.cargo ||
+    trimmed === DEFAULT_UPSTREAM.npm
+  );
+}
 
 export function CreateRepositoryDialog({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -72,8 +96,8 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
     }
 
     if (kind === "mirror") {
-      if (ecosystem !== "cargo") {
-        setValidationError("Los Mirror solo están disponibles para el ecosistema Cargo.");
+      if (!isMirrorEcosystem(ecosystem)) {
+        setValidationError("Los Mirror están disponibles para Cargo y npm.");
         return;
       }
       try {
@@ -138,8 +162,8 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
             <DialogTitle>Crear repositorio</DialogTitle>
             <DialogDescription>
               Un Forge guarda artefactos que publicas tú. Un Mirror cachea un
-              índice Cargo externo como crates.io. Un Alloy agrega Forges y/o
-              Mirrors del mismo ecosistema en una sola URL.
+              registro externo (crates.io o registry.npmjs.org). Un Alloy agrega
+              Forges y/o Mirrors del mismo ecosistema en una sola URL.
             </DialogDescription>
           </DialogHeader>
 
@@ -163,7 +187,11 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                   const next = value as KindChoice;
                   setKind(next);
                   if (next === "mirror") {
-                    setEcosystem("cargo");
+                    const nextEcosystem = isMirrorEcosystem(ecosystem) ? ecosystem : "cargo";
+                    setEcosystem(nextEcosystem);
+                    if (isKnownDefaultUpstream(upstream)) {
+                      setUpstream(defaultUpstreamFor(nextEcosystem));
+                    }
                     setMemberIds([]);
                   }
                   if (next !== "alloy") {
@@ -176,7 +204,7 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="forge">Forge</SelectItem>
-                  <SelectItem value="mirror">Mirror (Cargo)</SelectItem>
+                  <SelectItem value="mirror">Mirror</SelectItem>
                   <SelectItem value="alloy">Alloy</SelectItem>
                 </SelectContent>
               </Select>
@@ -187,16 +215,22 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
               <Select
                 value={ecosystem}
                 onValueChange={(value) => {
-                  setEcosystem(value as PackageEcosystemDto);
+                  const next = value as PackageEcosystemDto;
+                  setEcosystem(next);
                   setMemberIds([]);
+                  if (kind === "mirror" && isKnownDefaultUpstream(upstream)) {
+                    setUpstream(defaultUpstreamFor(next));
+                  }
                 }}
-                disabled={kind === "mirror"}
               >
                 <SelectTrigger id="repository-ecosystem" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ECOSYSTEM_OPTIONS.map((option) => (
+                  {(kind === "mirror"
+                    ? ECOSYSTEM_OPTIONS.filter((option) => isMirrorEcosystem(option.value))
+                    : ECOSYSTEM_OPTIONS
+                  ).map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -207,15 +241,26 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
 
             {kind === "mirror" ? (
               <div className="grid gap-2">
-                <Label htmlFor="repository-upstream">Upstream (índice disperso)</Label>
+                <Label htmlFor="repository-upstream">
+                  {ecosystem === "npm" ? "Upstream (registro npm)" : "Upstream (índice disperso)"}
+                </Label>
                 <Input
                   id="repository-upstream"
-                  placeholder="https://index.crates.io/"
+                  placeholder={defaultUpstreamFor(ecosystem)}
                   value={upstream}
                   onChange={(event) => setUpstream(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  URL base del índice sparse (sin el prefijo <code>sparse+</code>).
+                  {ecosystem === "npm" ? (
+                    <>
+                      URL base del registro npm (por ejemplo{" "}
+                      <code className="font-mono">https://registry.npmjs.org/</code>).
+                    </>
+                  ) : (
+                    <>
+                      URL base del índice sparse (sin el prefijo <code>sparse+</code>).
+                    </>
+                  )}
                 </p>
               </div>
             ) : null}

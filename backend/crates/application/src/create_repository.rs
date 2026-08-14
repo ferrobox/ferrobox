@@ -12,9 +12,8 @@ use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 /// Motivos por los que crear un repositorio puede fallar.
 #[derive(Debug, Error)]
 pub enum CreateRepositoryError {
-    /// Un `Mirror` solo está soportado para el ecosistema Cargo en esta
-    /// versión.
-    #[error("mirror repositories currently require the cargo ecosystem")]
+    /// Un `Mirror` solo está soportado para Cargo y npm en esta versión.
+    #[error("mirror repositories currently require the cargo or npm ecosystem")]
     UnsupportedMirrorEcosystem,
 
     /// La URL *upstream* de un `Mirror` no es válida.
@@ -62,7 +61,8 @@ pub enum CreateRepositoryKind {
     Forge,
     /// Réplica cacheada de un *upstream*.
     Mirror {
-        /// URL base del índice disperso remoto.
+        /// URL base del registro remoto (índice sparse de Cargo o
+        /// registro npm).
         upstream: String,
     },
     /// Agregación de otros repositorios `Forge` o `Mirror`.
@@ -108,7 +108,10 @@ impl CreateRepositoryUseCase {
         let repository_kind = match kind {
             CreateRepositoryKind::Forge => RepositoryKind::Forge,
             CreateRepositoryKind::Mirror { upstream } => {
-                if ecosystem != PackageEcosystem::Cargo {
+                if !matches!(
+                    ecosystem,
+                    PackageEcosystem::Cargo | PackageEcosystem::Npm
+                ) {
                     return Err(CreateRepositoryError::UnsupportedMirrorEcosystem);
                 }
                 let upstream = Url::parse(upstream.trim()).map_err(|err| {
@@ -188,15 +191,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_a_non_cargo_mirror() {
+    async fn creates_an_npm_mirror_with_upstream() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("npm-proxy").unwrap(),
+                PackageEcosystem::Npm,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://registry.npmjs.org/".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(upstream.as_str(), "https://registry.npmjs.org/");
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Npm);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_generic_ecosystem_mirror() {
         let use_case = CreateRepositoryUseCase::new(Arc::new(InMemoryRepositoryStore::default()));
 
         let result = use_case
             .execute(
-                RepositoryName::parse("npm-mirror").unwrap(),
-                PackageEcosystem::Npm,
+                RepositoryName::parse("generic-mirror").unwrap(),
+                PackageEcosystem::Generic,
                 CreateRepositoryKind::Mirror {
-                    upstream: "https://registry.npmjs.org/".to_string(),
+                    upstream: "https://example.invalid/".to_string(),
                 },
             )
             .await;

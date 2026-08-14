@@ -167,7 +167,9 @@ export function ArtifactsTable({
           {kind === "alloy" ? (
             "Los paquetes aparecen cuando existen en los Forges o Mirrors miembros. Publica en un Forge miembro."
           ) : kind === "mirror" ? (
-            "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+            ecosystem === "npm"
+              ? "Los paquetes se cachean la primera vez que npm install los resuelve contra este Mirror."
+              : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
