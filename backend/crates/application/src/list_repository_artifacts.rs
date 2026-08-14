@@ -163,9 +163,7 @@ struct YankedFlag {
 }
 
 fn yanked_from_index_entry(entry: &[u8]) -> bool {
-    serde_json::from_slice::<YankedFlag>(entry)
-        .map(|flag| flag.yanked)
-        .unwrap_or(false)
+    serde_json::from_slice::<YankedFlag>(entry).is_ok_and(|flag| flag.yanked)
 }
 
 fn sort_listed(listed: &mut [ListedArtifact]) {
