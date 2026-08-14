@@ -21,6 +21,10 @@ pub struct IndexedArtifact {
     pub artifact_id: ArtifactId,
     /// Coordenada de paquete asociada.
     pub coordinate: PackageCoordinate,
+    /// Entrada de índice ya serializada por la estrategia de
+    /// empaquetado (una línea JSON para Cargo). Permite leer flags
+    /// como `yanked` sin que este puerto conozca el ecosistema.
+    pub entry: Bytes,
 }
 
 /// Puerto de persistencia del índice de paquetes: la lista, por
@@ -249,13 +253,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter_map(|((repo_id, coordinate), (artifact_id, _))| {
+                .filter_map(|((repo_id, coordinate), (artifact_id, entry))| {
                     if *repo_id != repository_id {
                         return None;
                     }
                     artifact_id.map(|artifact_id| IndexedArtifact {
                         artifact_id,
                         coordinate: coordinate.clone(),
+                        entry: entry.clone(),
                     })
                 })
                 .collect())

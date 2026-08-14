@@ -858,4 +858,55 @@ mod tests {
                 .is_some_and(|token| token.starts_with("fb_"))
         );
     }
+
+    #[tokio::test]
+    async fn listing_artifacts_exposes_yanked_and_source_repository() {
+        let fx = fixture().await;
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball",
+        );
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", fx.developer_token.clone())
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/cargo/{}/api/v1/crates/ferrobox-cli/0.1.0/yank",
+                    fx.repo_id
+                ))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, body) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/repositories/{}/artifacts", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json[0]["name"], "ferrobox-cli");
+        assert_eq!(json[0]["version"], "0.1.0");
+        assert_eq!(json[0]["yanked"], true);
+        assert_eq!(json[0]["repository_id"], fx.repo_id.to_string());
+    }
 }

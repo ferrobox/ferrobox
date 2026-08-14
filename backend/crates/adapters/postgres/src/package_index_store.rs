@@ -217,7 +217,7 @@ impl PackageIndexStore for PostgresPackageIndexStore {
 
         let rows = sqlx::query(
             r"
-            SELECT artifact_id, ecosystem, package_name, package_version
+            SELECT artifact_id, ecosystem, package_name, package_version, entry
             FROM package_index_entries
             WHERE repository_id = $1
               AND artifact_id IS NOT NULL
@@ -252,10 +252,17 @@ impl PackageIndexStore for PostgresPackageIndexStore {
                     PackageName::parse(package_name).map_err(|err| backend_error(err.to_string()))?;
                 let version = PackageVersion::parse(package_version)
                     .map_err(|err| backend_error(err.to_string()))?;
+                let entry: serde_json::Value = row
+                    .try_get("entry")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let entry = serde_json::to_vec(&entry)
+                    .map(Bytes::from)
+                    .map_err(|err| backend_error(err.to_string()))?;
 
                 Ok(IndexedArtifact {
                     artifact_id: ArtifactId::from(artifact_id),
                     coordinate: PackageCoordinate::new(ecosystem, name, version),
+                    entry,
                 })
             })
             .collect()

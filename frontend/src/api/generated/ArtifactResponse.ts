@@ -11,4 +11,13 @@ name: string | null,
 /**
  * Versión del paquete si el índice la conoce.
  */
-version: string | null, checksum: string, size_bytes: number, };
+version: string | null, checksum: string, size_bytes: number, 
+/**
+ * `true` si el índice marca esta versión como *yanked*.
+ */
+yanked: boolean, 
+/**
+ * Repositorio que almacena el binario. En un `Alloy` es el
+ * miembro del que proviene el paquete.
+ */
+repository_id: string, };

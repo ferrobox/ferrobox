@@ -122,6 +122,30 @@ export function useDeleteArtifact(repositoryId: string) {
   });
 }
 
+export function useSetYanked(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      name,
+      version,
+      yanked,
+    }: {
+      name: string;
+      version: string;
+      yanked: boolean;
+    }) =>
+      yanked
+        ? api.yankCrate(repositoryId, name, version)
+        : api.unyankCrate(repositoryId, name, version),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
 export function useCreateApiToken() {
   const queryClient = useQueryClient();
 

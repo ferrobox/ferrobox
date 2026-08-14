@@ -275,13 +275,14 @@ impl PackageIndexStore for InMemoryPackageIndexStore {
             .lock()
             .unwrap()
             .iter()
-            .filter_map(|(repo_id, coordinate, artifact_id, _)| {
+            .filter_map(|(repo_id, coordinate, artifact_id, entry)| {
                 if *repo_id != repository_id {
                     return None;
                 }
                 artifact_id.map(|artifact_id| IndexedArtifact {
                     artifact_id,
                     coordinate: coordinate.clone(),
+                    entry: entry.clone(),
                 })
             })
             .collect())
