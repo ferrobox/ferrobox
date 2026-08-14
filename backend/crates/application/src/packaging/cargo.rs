@@ -599,10 +599,24 @@ fn expand_dl_template(template: &str, crate_name: &str, version: &str) -> String
         _ => format!("{}/{}", &lower[0..2], &lower[2..4]),
     };
 
+    // Misma regla que Cargo: si `dl` no trae marcadores, se añade
+    // `/{crate}/{version}/download`. crates.io (índice disperso) publica
+    // `https://static.crates.io/crates` sin plantilla; sin este paso el
+    // Mirror pediría el directorio y crates.io responde 403.
+    // https://doc.rust-lang.org/cargo/reference/registry-index.html
+    let has_markers = ["{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"]
+        .iter()
+        .any(|marker| template.contains(marker));
+    if !has_markers {
+        let base = template.trim_end_matches('/');
+        return format!("{base}/{crate_name}/{version}/download");
+    }
+
     template
         .replace("{crate}", crate_name)
         .replace("{version}", version)
         .replace("{prefix}", &prefix)
+        .replace("{lowerprefix}", &prefix)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1211,6 +1225,26 @@ mod tests {
         assert_eq!(
             cargo_index_shard_path(&PackageName::parse("Ferrobox").unwrap()),
             "fe/rr/ferrobox"
+        );
+    }
+
+    #[test]
+    fn dl_template_without_markers_appends_crate_version_download() {
+        assert_eq!(
+            expand_dl_template("https://static.crates.io/crates", "serde", "1.0.229"),
+            "https://static.crates.io/crates/serde/1.0.229/download"
+        );
+    }
+
+    #[test]
+    fn dl_template_with_markers_substitutes_crate_and_version() {
+        assert_eq!(
+            expand_dl_template(
+                "https://static.example/crates/{crate}/{crate}-{version}.crate",
+                "demo",
+                "1.2.3",
+            ),
+            "https://static.example/crates/demo/demo-1.2.3.crate"
         );
     }
 

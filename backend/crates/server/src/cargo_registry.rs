@@ -206,6 +206,7 @@ struct YankResponse {
 
 #[derive(Deserialize)]
 struct SearchParams {
+    #[serde(default)]
     q: String,
     #[serde(default = "default_per_page")]
     per_page: u8,
@@ -319,17 +320,13 @@ async fn set_yanked(
 }
 
 /// `GET /cargo/{repository_id}/api/v1/crates?q=…&per_page=…`.
+/// `q` vacío lista los paquetes indexados hasta `per_page`.
 async fn search(
     State(state): State<Arc<AppState>>,
     Path(repository_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> Result<Json<SearchResponse>, ApiError> {
     let query = params.q.trim();
-    if query.is_empty() {
-        return Err(ApiError::BadRequest(
-            "search query parameter 'q' cannot be empty".to_string(),
-        ));
-    }
 
     let limit = usize::from(params.per_page.clamp(1, 100));
     let repository = state
@@ -680,6 +677,18 @@ mod tests {
         assert_eq!(json["crates"][0]["name"], "ferrobox-cli");
         assert_eq!(json["crates"][0]["max_version"], "0.1.0");
         assert_eq!(json["meta"]["total"], 1);
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!("/cargo/{}/api/v1/crates?q=", fx.repo_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["crates"][0]["name"], "ferrobox-cli");
 
         let (status, body) = send(
             fx.app.clone(),
