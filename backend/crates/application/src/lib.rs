@@ -52,6 +52,9 @@ pub mod bootstrap_admin;
 /// Caso de uso: autenticar con usuario y contraseña.
 pub mod login;
 
+/// Caso de uso: el usuario autenticado cambia su propia contraseña.
+pub mod change_password;
+
 /// Casos de uso: crear, listar y revocar tokens de API.
 pub mod manage_api_tokens;
 

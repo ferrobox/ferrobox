@@ -358,6 +358,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use bytes::{Bytes, BytesMut};
     use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
+    use ferrobox_application::change_password::ChangePasswordUseCase;
     use ferrobox_application::create_repository::{CreateRepositoryKind, CreateRepositoryUseCase};
     use ferrobox_application::delete_artifact::DeleteArtifactUseCase;
     use ferrobox_application::delete_repository::DeleteRepositoryUseCase;
@@ -449,6 +450,7 @@ mod tests {
             packaging,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
+            change_password: ChangePasswordUseCase::new(user_store.clone()),
             authenticate_token: AuthenticateTokenUseCase::new(
                 user_store.clone(),
                 api_token_store.clone(),
@@ -768,5 +770,92 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn settings_requires_auth_and_returns_instance_info() {
+        let fx = fixture().await;
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri("/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        let (status, body) = send(
+            fx.app,
+            Request::builder()
+                .uri("/settings")
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["public_base_url"], "http://127.0.0.1:3000");
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn change_password_rejects_wrong_current_and_accepts_the_right_one() {
+        let fx = fixture().await;
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/auth/password")
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"current_password":"nope","new_password":"next-secret"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "current password is incorrect");
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/auth/password")
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"current_password":"secret","new_password":"next-secret"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, body) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"username":"developer","password":"next-secret"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["user"]["username"], "developer");
+        assert!(
+            json["token"]
+                .as_str()
+                .is_some_and(|token| token.starts_with("fb_"))
+        );
     }
 }

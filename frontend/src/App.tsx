@@ -15,6 +15,7 @@ import { RepositoriesLayout } from "@/pages/RepositoriesLayout";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailPage } from "@/pages/RepositoryDetailPage";
 import { SecurityPage } from "@/pages/SecurityPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { UsersPage } from "@/pages/UsersPage";
 
 const queryClient = new QueryClient({
@@ -45,6 +46,7 @@ export default function App() {
                     <Route element={<PageContainer />}>
                       <Route path="security" element={<SecurityPage />} />
                       <Route path="users" element={<UsersPage />} />
+                      <Route path="settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Route>
                   </Route>

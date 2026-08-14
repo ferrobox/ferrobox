@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::dto::{
-    ApiTokenCreatedResponse, ApiTokenResponse, CreateApiTokenRequest, LoginRequest, LoginResponse,
-    UserResponse,
+    ApiTokenCreatedResponse, ApiTokenResponse, ChangePasswordRequest, CreateApiTokenRequest,
+    LoginRequest, LoginResponse, UserResponse,
 };
 use crate::error::ApiError;
 
@@ -37,6 +37,27 @@ pub(crate) async fn me(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
 ) -> Json<UserResponse> {
     Json(UserResponse::from(&user))
+}
+
+pub(crate) async fn change_password(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, ApiError> {
+    if payload.new_password.is_empty() {
+        return Err(ApiError::BadRequest("password cannot be empty".to_string()));
+    }
+
+    state
+        .change_password
+        .execute(
+            user.username(),
+            &payload.current_password,
+            &payload.new_password,
+        )
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub(crate) async fn list_tokens(
