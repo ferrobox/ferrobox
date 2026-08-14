@@ -7,4 +7,9 @@ export type CreateRepositoryKindDto = { "type": "forge" } | { "type": "mirror",
 /**
  * URL base del índice disperso remoto (p. ej. `https://index.crates.io/`).
  */
-upstream: string, };
+upstream: string, } | { "type": "alloy", 
+/**
+ * Identificadores de los repositorios miembro, en orden de
+ * resolución.
+ */
+members: Array<string>, };

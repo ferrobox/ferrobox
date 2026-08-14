@@ -34,11 +34,11 @@ function CopyableCodeBlock({ code }: { code: string }) {
 
 export function CargoRegistryPanel({
   repositoryId,
-  isMirror = false,
+  kind = "forge",
   framed = true,
 }: {
   repositoryId: string;
-  isMirror?: boolean;
+  kind?: "forge" | "mirror" | "alloy";
   framed?: boolean;
 }) {
   const { data, isPending, isError } = useCargoRegistryConfig(repositoryId, true);
@@ -56,18 +56,28 @@ export function CargoRegistryPanel({
   }
 
   const indexUrl = `sparse+${data.api}/`;
+  const isMirror = kind === "mirror";
+  const isAlloy = kind === "alloy";
+  const readOnly = isMirror || isAlloy;
+
+  const introTitle = isAlloy
+    ? "Alloy de índice disperso"
+    : isMirror
+      ? "Mirror de índice disperso"
+      : "Índice disperso";
+  const introBody = isAlloy
+    ? "Este Alloy agrega Forges y/o Mirrors Cargo en una sola URL. cargo add y cargo build resuelven contra los miembros, en orden; el primero gana si hay la misma versión. No acepta cargo publish ni cargo yank: publica en un Forge miembro."
+    : isMirror
+      ? "Este Mirror cachea paquetes del upstream la primera vez que se resuelven o descargan. No acepta cargo publish ni cargo yank."
+      : "Este repositorio implementa el protocolo de índice disperso de Cargo: cargo publish, cargo yank, cargo search, cargo add y cargo build funcionan de forma nativa.";
 
   const body = (
     <div className="space-y-5">
       <div>
         <h3 className="text-sm font-semibold text-foreground">
-          {isMirror ? "Mirror de índice disperso" : "Índice disperso"}
+          {introTitle}
         </h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {isMirror
-            ? "Este Mirror cachea paquetes del upstream la primera vez que se resuelven o descargan. No acepta cargo publish ni cargo yank."
-            : "Este repositorio implementa el protocolo de índice disperso de Cargo: cargo publish, cargo yank, cargo search, cargo add y cargo build funcionan de forma nativa."}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{introBody}</p>
       </div>
 
       <div className="space-y-2">
@@ -84,31 +94,39 @@ export function CargoRegistryPanel({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          2. Guarda un token de API (solo para publicar o hacer yank)
-        </p>
-        <CopyableCodeBlock
-          code={`[registries.ferrobox]\ntoken = "fb_…"  # créalo en Seguridad`}
-        />
-        <p className="text-xs text-muted-foreground">
-          El índice y las descargas son públicos: <code className="font-mono">cargo add</code> y{" "}
-          <code className="font-mono">cargo build</code> no necesitan token. Emite uno en{" "}
-          <span className="font-medium">Seguridad</span> y guárdalo en{" "}
-          <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
-          <code className="font-mono">.cargo/credentials.toml</code> del proyecto). Alternativa:{" "}
-          <code className="font-mono">cargo login --registry ferrobox</code> o{" "}
-          <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>. No
-          subas el token al repositorio.
-        </p>
-      </div>
-
-      {isMirror ? (
+      {!readOnly ? (
         <div className="space-y-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            3. Usa crates desde el Mirror
+            2. Guarda un token de API (solo para publicar o hacer yank)
+          </p>
+          <CopyableCodeBlock
+            code={`[registries.ferrobox]\ntoken = "fb_…"  # créalo en Seguridad`}
+          />
+          <p className="text-xs text-muted-foreground">
+            El índice y las descargas son públicos: <code className="font-mono">cargo add</code> y{" "}
+            <code className="font-mono">cargo build</code> no necesitan token. Emite uno en{" "}
+            <span className="font-medium">Seguridad</span> y guárdalo en{" "}
+            <code className="font-mono">~/.cargo/credentials.toml</code> (Cargo no lee{" "}
+            <code className="font-mono">.cargo/credentials.toml</code> del proyecto). Alternativa:{" "}
+            <code className="font-mono">cargo login --registry ferrobox</code> o{" "}
+            <code className="font-mono">cargo publish --registry ferrobox --token fb_…</code>. No
+            subas el token al repositorio.
+          </p>
+        </div>
+      ) : null}
+
+      {readOnly ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            2. Usa crates desde este registro
           </p>
           <CopyableCodeBlock code="cargo add serde --registry ferrobox" />
+          {isAlloy ? (
+            <p className="text-xs text-muted-foreground">
+              Para publicar, apunta <code className="font-mono">cargo publish --registry</code> a
+              un Forge miembro, no a este Alloy.
+            </p>
+          ) : null}
         </div>
       ) : (
         <>

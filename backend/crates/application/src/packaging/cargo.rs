@@ -8,7 +8,7 @@
 //! <https://doc.rust-lang.org/cargo/reference/registry-index.html>
 //! y <https://doc.rust-lang.org/cargo/reference/registries.html>.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,6 +22,7 @@ use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::HttpClient;
 use ferrobox_ports::package_index_store::PackageIndexStore;
+use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,7 @@ pub struct CargoPackagingStrategy {
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
     http_client: Arc<dyn HttpClient>,
+    repository_store: Arc<dyn RepositoryStore>,
 }
 
 impl CargoPackagingStrategy {
@@ -45,12 +47,14 @@ impl CargoPackagingStrategy {
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
         http_client: Arc<dyn HttpClient>,
+        repository_store: Arc<dyn RepositoryStore>,
     ) -> Self {
         Self {
             artifact_store,
             package_index_store,
             storage,
             http_client,
+            repository_store,
         }
     }
 
@@ -64,11 +68,64 @@ impl CargoPackagingStrategy {
         Ok(())
     }
 
+    fn is_read_only(repository: &Repository) -> bool {
+        matches!(
+            repository.kind(),
+            RepositoryKind::Mirror { .. } | RepositoryKind::Alloy { .. }
+        )
+    }
+
     fn mirror_upstream(repository: &Repository) -> Option<&url::Url> {
         match repository.kind() {
             RepositoryKind::Mirror { upstream } => Some(upstream),
             RepositoryKind::Forge | RepositoryKind::Alloy { .. } => None,
         }
+    }
+
+    async fn resolve_read_targets(
+        &self,
+        repository: &Repository,
+    ) -> Result<Vec<Repository>, PackagingError> {
+        match repository.kind() {
+            RepositoryKind::Alloy { members } => {
+                let mut targets = Vec::new();
+                for member_id in members {
+                    let Some(member) = self.repository_store.find_by_id(*member_id).await? else {
+                        continue;
+                    };
+                    if matches!(member.kind(), RepositoryKind::Alloy { .. }) {
+                        continue;
+                    }
+                    if member.ecosystem() != repository.ecosystem() {
+                        continue;
+                    }
+                    targets.push(member);
+                }
+                Ok(targets)
+            }
+            _ => Ok(vec![repository.clone()]),
+        }
+    }
+
+    fn merge_index_documents(documents: &[Bytes]) -> Bytes {
+        let mut seen_versions = HashSet::new();
+        let mut body = BytesMut::new();
+        for document in documents {
+            for line in document.split(|&byte| byte == b'\n') {
+                let line = trim_ascii_whitespace(line);
+                if line.is_empty() {
+                    continue;
+                }
+                let Ok(entry) = serde_json::from_slice::<IndexEntry>(line) else {
+                    continue;
+                };
+                if seen_versions.insert(entry.vers) {
+                    body.extend_from_slice(line);
+                    body.extend_from_slice(b"\n");
+                }
+            }
+        }
+        body.freeze()
     }
 
     async fn refresh_index_from_upstream(
@@ -200,6 +257,117 @@ impl CargoPackagingStrategy {
 
         Ok(None)
     }
+
+    async fn index_one(
+        &self,
+        repository: &Repository,
+        name: &PackageName,
+    ) -> Result<Bytes, PackagingError> {
+        if let Some(upstream) = Self::mirror_upstream(repository) {
+            return self
+                .refresh_index_from_upstream(repository, upstream, name)
+                .await;
+        }
+
+        let entries = self
+            .package_index_store
+            .entries_for_package(repository.id(), PackageEcosystem::Cargo, name)
+            .await?;
+
+        if entries.is_empty() {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        }
+
+        let mut body = BytesMut::new();
+        for entry in entries {
+            body.extend_from_slice(&entry);
+            body.extend_from_slice(b"\n");
+        }
+
+        Ok(body.freeze())
+    }
+
+    async fn download_one(
+        &self,
+        repository: &Repository,
+        coordinate: &PackageCoordinate,
+    ) -> Result<Bytes, PackagingError> {
+        if let Some(artifact_id) = self
+            .package_index_store
+            .artifact_for(repository.id(), coordinate)
+            .await?
+        {
+            let artifact = self
+                .artifact_store
+                .find_by_id(artifact_id)
+                .await?
+                .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+
+            let content = self.storage.get(&storage_key_for(artifact_id)).await?;
+            let actual = sha256_checksum(&content);
+            if actual != *artifact.checksum() {
+                return Err(PackagingError::ChecksumMismatch {
+                    expected: artifact.checksum().to_string(),
+                    actual: actual.to_string(),
+                });
+            }
+
+            return Ok(content);
+        }
+
+        if let Some(upstream) = Self::mirror_upstream(repository) {
+            return self
+                .cache_crate_from_upstream(repository, upstream, coordinate)
+                .await;
+        }
+
+        Err(PackagingError::VersionNotFound(coordinate.clone()))
+    }
+
+    async fn search_one(
+        &self,
+        repository: &Repository,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<PackageSearchHit>, PackagingError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let entries = self
+            .package_index_store
+            .entries_for_repository(repository.id(), PackageEcosystem::Cargo)
+            .await?;
+
+        let needle = query.to_ascii_lowercase();
+        let mut by_name: BTreeMap<String, Vec<IndexEntry>> = BTreeMap::new();
+        for entry_bytes in entries {
+            let entry: IndexEntry = serde_json::from_slice(&entry_bytes)
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            if !entry.name.to_ascii_lowercase().contains(&needle) {
+                continue;
+            }
+            by_name.entry(entry.name.clone()).or_default().push(entry);
+        }
+
+        let mut hits = Vec::new();
+        for (name, versions) in by_name {
+            let max_version = versions
+                .iter()
+                .rev()
+                .find(|entry| !entry.yanked)
+                .or_else(|| versions.last())
+                .expect("grouped versions are never empty")
+                .vers
+                .clone();
+            hits.push(PackageSearchHit { name, max_version });
+            if hits.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(hits)
+    }
 }
 
 #[async_trait]
@@ -214,7 +382,7 @@ impl PackagingStrategy for CargoPackagingStrategy {
         payload: Bytes,
     ) -> Result<PublishOutcome, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
-        if Self::mirror_upstream(repository).is_some() {
+        if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
 
@@ -270,28 +438,30 @@ impl PackagingStrategy for CargoPackagingStrategy {
     ) -> Result<Bytes, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
 
-        if let Some(upstream) = Self::mirror_upstream(repository) {
-            return self
-                .refresh_index_from_upstream(repository, upstream, name)
-                .await;
+        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            let targets = self.resolve_read_targets(repository).await?;
+            let mut documents = Vec::new();
+            let mut other_error = None;
+            for target in &targets {
+                match self.index_one(target, name).await {
+                    Ok(document) => documents.push(document),
+                    Err(PackagingError::PackageNotFound(_)) => {}
+                    Err(error) => {
+                        if other_error.is_none() {
+                            other_error = Some(error);
+                        }
+                    }
+                }
+            }
+            if documents.is_empty() {
+                return Err(other_error.unwrap_or_else(|| {
+                    PackagingError::PackageNotFound(name.to_string())
+                }));
+            }
+            return Ok(Self::merge_index_documents(&documents));
         }
 
-        let entries = self
-            .package_index_store
-            .entries_for_package(repository.id(), PackageEcosystem::Cargo, name)
-            .await?;
-
-        if entries.is_empty() {
-            return Err(PackagingError::PackageNotFound(name.to_string()));
-        }
-
-        let mut body = BytesMut::new();
-        for entry in entries {
-            body.extend_from_slice(&entry);
-            body.extend_from_slice(b"\n");
-        }
-
-        Ok(body.freeze())
+        self.index_one(repository, name).await
     }
 
     async fn download(
@@ -301,36 +471,21 @@ impl PackagingStrategy for CargoPackagingStrategy {
     ) -> Result<Bytes, PackagingError> {
         Self::ensure_cargo_repository(repository)?;
 
-        if let Some(artifact_id) = self
-            .package_index_store
-            .artifact_for(repository.id(), coordinate)
-            .await?
-        {
-            let artifact = self
-                .artifact_store
-                .find_by_id(artifact_id)
-                .await?
-                .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
-
-            let content = self.storage.get(&storage_key_for(artifact_id)).await?;
-            let actual = sha256_checksum(&content);
-            if actual != *artifact.checksum() {
-                return Err(PackagingError::ChecksumMismatch {
-                    expected: artifact.checksum().to_string(),
-                    actual: actual.to_string(),
-                });
+        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            let targets = self.resolve_read_targets(repository).await?;
+            let mut last_error = PackagingError::VersionNotFound(coordinate.clone());
+            for target in &targets {
+                match self.download_one(target, coordinate).await {
+                    Ok(bytes) => return Ok(bytes),
+                    Err(PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_)) => {
+                    }
+                    Err(error) => last_error = error,
+                }
             }
-
-            return Ok(content);
+            return Err(last_error);
         }
 
-        if let Some(upstream) = Self::mirror_upstream(repository) {
-            return self
-                .cache_crate_from_upstream(repository, upstream, coordinate)
-                .await;
-        }
-
-        Err(PackagingError::VersionNotFound(coordinate.clone()))
+        self.download_one(repository, coordinate).await
     }
 
     async fn set_yanked(
@@ -340,7 +495,7 @@ impl PackagingStrategy for CargoPackagingStrategy {
         yanked: bool,
     ) -> Result<(), PackagingError> {
         Self::ensure_cargo_repository(repository)?;
-        if Self::mirror_upstream(repository).is_some() {
+        if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
 
@@ -379,39 +534,22 @@ impl PackagingStrategy for CargoPackagingStrategy {
             return Ok(Vec::new());
         }
 
-        let entries = self
-            .package_index_store
-            .entries_for_repository(repository.id(), PackageEcosystem::Cargo)
-            .await?;
-
-        let needle = query.to_ascii_lowercase();
-        let mut by_name: BTreeMap<String, Vec<IndexEntry>> = BTreeMap::new();
-        for entry_bytes in entries {
-            let entry: IndexEntry = serde_json::from_slice(&entry_bytes)
-                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-            if !entry.name.to_ascii_lowercase().contains(&needle) {
-                continue;
+        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            let targets = self.resolve_read_targets(repository).await?;
+            let mut merged = Vec::new();
+            let mut seen = HashSet::new();
+            for target in &targets {
+                for hit in self.search_one(target, query, usize::MAX).await? {
+                    if seen.insert(hit.name.clone()) {
+                        merged.push(hit);
+                    }
+                }
             }
-            by_name.entry(entry.name.clone()).or_default().push(entry);
+            merged.truncate(limit);
+            return Ok(merged);
         }
 
-        let mut hits = Vec::new();
-        for (name, versions) in by_name {
-            let max_version = versions
-                .iter()
-                .rev()
-                .find(|entry| !entry.yanked)
-                .or_else(|| versions.last())
-                .expect("grouped versions are never empty")
-                .vers
-                .clone();
-            hits.push(PackageSearchHit { name, max_version });
-            if hits.len() >= limit {
-                break;
-            }
-        }
-
-        Ok(hits)
+        self.search_one(repository, query, limit).await
     }
 }
 
@@ -666,10 +804,13 @@ fn split_prefix(payload: &mut Bytes, len: usize, what: &str) -> Result<Bytes, Pa
 mod tests {
     use std::sync::Arc;
 
+    use ferrobox_domain::ids::RepositoryId;
     use ferrobox_domain::repository::{RepositoryKind, RepositoryName};
+    use ferrobox_ports::repository_store::RepositoryStore;
 
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryRepositoryStore, InMemoryStorage,
     };
 
     use super::*;
@@ -689,6 +830,7 @@ mod tests {
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
         )
     }
 
@@ -1097,8 +1239,13 @@ mod tests {
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
         let storage = Arc::new(InMemoryStorage::default());
-        let strategy =
-            CargoPackagingStrategy::new(artifact_store, package_index_store, storage, http.clone());
+        let strategy = CargoPackagingStrategy::new(
+            artifact_store,
+            package_index_store,
+            storage,
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
 
         let upstream = url::Url::parse("https://index.example/").unwrap();
         let repository = Repository::new(
@@ -1158,5 +1305,182 @@ mod tests {
         // pero el artefacto ya está asociado en el índice).
         let downloaded_again = strategy.download(&repository, &coordinate).await.unwrap();
         assert_eq!(downloaded_again, crate_bytes);
+    }
+
+    fn alloy_fixture() -> (
+        CargoPackagingStrategy,
+        Arc<InMemoryRepositoryStore>,
+        Repository,
+        Repository,
+        Repository,
+    ) {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let strategy = CargoPackagingStrategy::new(
+            artifact_store,
+            package_index_store,
+            storage,
+            http,
+            repository_store.clone(),
+        );
+        let first = cargo_repository("crates-local");
+        let second = cargo_repository("crates-other");
+        let alloy = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![first.id(), second.id()],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        (strategy, repository_store, first, second, alloy)
+    }
+
+    #[tokio::test]
+    async fn alloy_index_and_download_see_packages_published_to_a_forge_member() {
+        let (strategy, repository_store, first, second, alloy) = alloy_fixture();
+        repository_store.save(&first).await.unwrap();
+        repository_store.save(&second).await.unwrap();
+        repository_store.save(&alloy).await.unwrap();
+
+        let coordinate = strategy
+            .publish(
+                &first,
+                encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"from-forge"),
+            )
+            .await
+            .unwrap();
+
+        let index = strategy
+            .index(&alloy, &PackageName::parse("ferrobox-cli").unwrap())
+            .await
+            .unwrap();
+        let entry: IndexEntry =
+            serde_json::from_str(std::str::from_utf8(&index).unwrap().trim()).unwrap();
+        assert_eq!(entry.vers, "0.1.0");
+        assert_eq!(entry.cksum, sha256_checksum(b"from-forge").as_str());
+
+        let content = strategy.download(&alloy, &coordinate).await.unwrap();
+        assert_eq!(content, Bytes::from_static(b"from-forge"));
+    }
+
+    #[tokio::test]
+    async fn alloy_index_prefers_the_first_member_on_version_conflict() {
+        let (strategy, repository_store, first, second, alloy) = alloy_fixture();
+        repository_store.save(&first).await.unwrap();
+        repository_store.save(&second).await.unwrap();
+        repository_store.save(&alloy).await.unwrap();
+
+        strategy
+            .publish(
+                &first,
+                encode_publish_payload(&minimal_metadata("demo", "1.0.0"), b"first-wins"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &second,
+                encode_publish_payload(&minimal_metadata("demo", "1.0.0"), b"second-loses"),
+            )
+            .await
+            .unwrap();
+
+        let index = strategy
+            .index(&alloy, &PackageName::parse("demo").unwrap())
+            .await
+            .unwrap();
+        let lines: Vec<&str> = std::str::from_utf8(&index).unwrap().lines().collect();
+        assert_eq!(lines.len(), 1);
+        let entry: IndexEntry = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(entry.cksum, sha256_checksum(b"first-wins").as_str());
+
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("1.0.0").unwrap(),
+        );
+        let downloaded = strategy.download(&alloy, &coordinate).await.unwrap();
+        assert_eq!(downloaded, Bytes::from_static(b"first-wins"));
+    }
+
+    #[tokio::test]
+    async fn alloy_search_unions_member_hits_with_first_member_winning() {
+        let (strategy, repository_store, first, second, alloy) = alloy_fixture();
+        repository_store.save(&first).await.unwrap();
+        repository_store.save(&second).await.unwrap();
+        repository_store.save(&alloy).await.unwrap();
+
+        strategy
+            .publish(
+                &first,
+                encode_publish_payload(&minimal_metadata("shared", "1.0.0"), b"v1"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &second,
+                encode_publish_payload(&minimal_metadata("shared", "2.0.0"), b"v2"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &second,
+                encode_publish_payload(&minimal_metadata("only-second", "0.1.0"), b"v3"),
+            )
+            .await
+            .unwrap();
+
+        let hits = strategy.search(&alloy, "", 10).await.unwrap();
+        assert_eq!(hits.len(), 2);
+        let shared = hits.iter().find(|hit| hit.name == "shared").unwrap();
+        assert_eq!(shared.max_version, "1.0.0");
+        assert!(hits.iter().any(|hit| hit.name == "only-second"));
+    }
+
+    #[tokio::test]
+    async fn rejects_publishing_to_an_alloy_repository() {
+        let strategy = strategy();
+        let alloy = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![RepositoryId::new()],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let payload =
+            encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"fake tarball");
+
+        let result = strategy.publish(&alloy, payload).await;
+
+        assert!(matches!(result, Err(PackagingError::ReadOnlyRepository)));
+    }
+
+    #[tokio::test]
+    async fn yanking_on_an_alloy_is_rejected() {
+        let strategy = strategy();
+        let alloy = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![RepositoryId::new()],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("1.0.0").unwrap(),
+        );
+
+        let result = strategy.set_yanked(&alloy, &coordinate, true).await;
+
+        assert!(matches!(result, Err(PackagingError::ReadOnlyRepository)));
     }
 }

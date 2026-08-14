@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::RepositoryId;
+use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StoragePort};
@@ -17,6 +18,10 @@ pub enum PublishArtifactError {
     /// El repositorio indicado no existe.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
+
+    /// El repositorio es de solo lectura (un `Mirror` o un `Alloy`).
+    #[error("repository is read-only and does not accept publishes")]
+    ReadOnlyRepository,
 
     /// Fallo al consultar el repositorio.
     #[error(transparent)]
@@ -70,13 +75,14 @@ impl PublishArtifactUseCase {
         repository_id: RepositoryId,
         content: Bytes,
     ) -> Result<ArtifactId, PublishArtifactError> {
-        if self
-            .repository_store
-            .find_by_id(repository_id)
-            .await?
-            .is_none()
-        {
+        let Some(repository) = self.repository_store.find_by_id(repository_id).await? else {
             return Err(PublishArtifactError::RepositoryNotFound(repository_id));
+        };
+        if matches!(
+            repository.kind(),
+            RepositoryKind::Mirror { .. } | RepositoryKind::Alloy { .. }
+        ) {
+            return Err(PublishArtifactError::ReadOnlyRepository);
         }
 
         let checksum = sha256_checksum(&content);
@@ -102,6 +108,9 @@ mod tests {
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryRepositoryStore, InMemoryStorage, forge,
     };
+    use ferrobox_domain::package_coordinate::PackageEcosystem;
+    use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+    use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
 
@@ -147,6 +156,57 @@ mod tests {
         assert!(matches!(
             result,
             Err(PublishArtifactError::RepositoryNotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_publishing_to_a_mirror_or_alloy() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+
+        let mirror = Repository::new(
+            RepositoryName::parse("crates-io").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://index.crates.io/").unwrap(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let forge_member = Repository::new(
+            RepositoryName::parse("crates-local").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let alloy = Repository::new(
+            RepositoryName::parse("crates-alloy").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![forge_member.id()],
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repository_store.save(&mirror).await.unwrap();
+        repository_store.save(&forge_member).await.unwrap();
+        repository_store.save(&alloy).await.unwrap();
+
+        let use_case = PublishArtifactUseCase::new(repository_store, artifact_store, storage);
+
+        let mirror_result = use_case
+            .execute(mirror.id(), Bytes::from_static(b"data"))
+            .await;
+        assert!(matches!(
+            mirror_result,
+            Err(PublishArtifactError::ReadOnlyRepository)
+        ));
+
+        let alloy_result = use_case
+            .execute(alloy.id(), Bytes::from_static(b"data"))
+            .await;
+        assert!(matches!(
+            alloy_result,
+            Err(PublishArtifactError::ReadOnlyRepository)
         ));
     }
 }

@@ -1,6 +1,7 @@
 import { Terminal } from "lucide-react";
 
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
+import type { RepositoryStorageKind } from "@/components/repository/RepositoryKindBadge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,10 +14,10 @@ import {
 
 export function SetMeUpDialog({
   repositoryId,
-  isMirror = false,
+  kind = "forge",
 }: {
   repositoryId: string;
-  isMirror?: boolean;
+  kind?: RepositoryStorageKind;
 }) {
   return (
     <Dialog>
@@ -33,7 +34,7 @@ export function SetMeUpDialog({
             <code className="font-mono">~/.cargo</code>. El token se crea en Seguridad.
           </DialogDescription>
         </DialogHeader>
-        <CargoRegistryPanel repositoryId={repositoryId} isMirror={isMirror} framed={false} />
+        <CargoRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
       </DialogContent>
     </Dialog>
   );

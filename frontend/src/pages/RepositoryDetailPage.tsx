@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, NavLink } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useDeleteRepository, useRepository } from "@/api/queries";
+import { useDeleteRepository, useRepositories, useRepository } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
@@ -33,6 +33,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const navigate = useNavigate();
   const { data: repository, isPending, isError, error, refetch, isFetching } =
     useRepository(repositoryId);
+  const { data: repositories } = useRepositories();
   const deleteRepository = useDeleteRepository();
   const canWrite = canWriteArtifacts(user?.role);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -81,6 +82,15 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const eco = ecosystemMeta(repository.ecosystem);
   const EcoIcon = eco.icon;
   const path = `${repository.ecosystem}://${repository.name}/`;
+  const isReadOnly =
+    repository.kind.type === "mirror" || repository.kind.type === "alloy";
+  const alloyMembers =
+    repository.kind.type === "alloy"
+      ? repository.kind.members.map((memberId) => {
+          const member = repositories?.find((item) => item.id === memberId);
+          return { id: memberId, name: member?.name ?? memberId };
+        })
+      : [];
 
   async function copyPath() {
     await navigator.clipboard.writeText(path);
@@ -117,15 +127,33 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
                 {path}
               </button>
             </div>
+            {alloyMembers.length > 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Agrega{" "}
+                {alloyMembers.map((member, index) => (
+                  <span key={member.id}>
+                    {index > 0 ? ", " : null}
+                    <NavLink
+                      to={`/repositories/${member.id}`}
+                      className="font-medium text-foreground underline-offset-4 hover:underline"
+                    >
+                      {member.name}
+                    </NavLink>
+                  </span>
+                ))}
+                . Las lecturas se resuelven en ese orden; publica en un Forge
+                miembro.
+              </p>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {repository.ecosystem === "cargo" ? (
               <SetMeUpDialog
                 repositoryId={repositoryId}
-                isMirror={repository.kind.type === "mirror"}
+                kind={repository.kind.type}
               />
             ) : null}
-            {canWrite && repository.kind.type !== "mirror" ? (
+            {canWrite && !isReadOnly ? (
               <UploadArtifactButton repositoryId={repositoryId} />
             ) : null}
             {canWrite ? (

@@ -53,7 +53,11 @@ impl From<CreateRepositoryError> for ApiError {
     fn from(err: CreateRepositoryError) -> Self {
         match &err {
             CreateRepositoryError::UnsupportedMirrorEcosystem
-            | CreateRepositoryError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
+            | CreateRepositoryError::InvalidUpstream(_)
+            | CreateRepositoryError::EmptyAlloy
+            | CreateRepositoryError::MemberNotFound
+            | CreateRepositoryError::MemberEcosystemMismatch
+            | CreateRepositoryError::NestedAlloy => Self::BadRequest(err.to_string()),
             CreateRepositoryError::Persistence(RepositoryStoreError::DuplicateName(_)) => {
                 Self::Conflict(err.to_string())
             }
@@ -68,6 +72,7 @@ impl From<PublishArtifactError> for ApiError {
     fn from(err: PublishArtifactError) -> Self {
         match err {
             PublishArtifactError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            PublishArtifactError::ReadOnlyRepository => Self::BadRequest(err.to_string()),
             other => Self::Internal(other.to_string()),
         }
     }
@@ -130,6 +135,7 @@ impl From<PackagingError> for ApiError {
             PackagingError::Storage(_)
             | PackagingError::ArtifactPersistence(_)
             | PackagingError::IndexPersistence(_)
+            | PackagingError::RepositoryPersistence(_)
             | PackagingError::ChecksumMismatch { .. }
             | PackagingError::Upstream(_) => Self::Internal(err.to_string()),
         }
