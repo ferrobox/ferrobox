@@ -43,3 +43,5 @@ hex = "0.4"
 password-hash = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+base64 = "0.22"
+sha1 = "0.10"

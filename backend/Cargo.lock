@@ -966,6 +966,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "async-trait",
+ "base64",
  "bytes",
  "ferrobox-domain",
  "ferrobox-ports",
@@ -974,6 +975,7 @@ dependencies = [
  "rand 0.8.7",
  "serde",
  "serde_json",
+ "sha1 0.10.7",
  "sha2 0.10.9",
  "thiserror",
  "tokio",

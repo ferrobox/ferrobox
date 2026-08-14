@@ -148,10 +148,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {repository.ecosystem === "cargo" ? (
+            {repository.ecosystem === "cargo" || repository.ecosystem === "npm" ? (
               <SetMeUpDialog
                 repositoryId={repositoryId}
                 kind={repository.kind.type}
+                ecosystem={repository.ecosystem}
               />
             ) : null}
             {canWrite && repository.kind.type === "alloy" ? (

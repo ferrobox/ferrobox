@@ -18,6 +18,8 @@ rand.workspace = true
 hex.workspace = true
 password-hash.workspace = true
 url.workspace = true
+base64.workspace = true
+sha1.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
