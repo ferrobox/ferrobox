@@ -7,6 +7,7 @@ use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
+use serde::Deserialize;
 use thiserror::Error;
 
 /// Artefacto listado junto con el nombre y la versión de paquete, si el
@@ -17,6 +18,7 @@ pub struct ListedArtifact {
     artifact: Artifact,
     package_name: Option<String>,
     package_version: Option<String>,
+    yanked: bool,
 }
 
 impl ListedArtifact {
@@ -36,6 +38,12 @@ impl ListedArtifact {
     #[must_use]
     pub fn package_version(&self) -> Option<&str> {
         self.package_version.as_deref()
+    }
+
+    /// `true` si el índice marca esta versión como *yanked*.
+    #[must_use]
+    pub fn yanked(&self) -> bool {
+        self.yanked
     }
 }
 
@@ -125,23 +133,37 @@ impl ListRepositoryArtifactsUseCase {
             names_by_artifact.entry(item.artifact_id).or_insert((
                 item.coordinate.name().as_str().to_owned(),
                 item.coordinate.version().as_str().to_owned(),
+                yanked_from_index_entry(&item.entry),
             ));
         }
 
         Ok(artifacts
             .into_iter()
             .map(|artifact| {
-                let (package_name, package_version) = names_by_artifact
+                let (package_name, package_version, yanked) = names_by_artifact
                     .remove(&artifact.id())
-                    .map_or((None, None), |(name, version)| (Some(name), Some(version)));
+                    .map_or((None, None, false), |(name, version, yanked)| {
+                        (Some(name), Some(version), yanked)
+                    });
                 ListedArtifact {
                     artifact,
                     package_name,
                     package_version,
+                    yanked,
                 }
             })
             .collect())
     }
+}
+
+#[derive(Deserialize)]
+struct YankedFlag {
+    #[serde(default)]
+    yanked: bool,
+}
+
+fn yanked_from_index_entry(entry: &[u8]) -> bool {
+    serde_json::from_slice::<YankedFlag>(entry).is_ok_and(|flag| flag.yanked)
 }
 
 fn sort_listed(listed: &mut [ListedArtifact]) {
@@ -252,6 +274,41 @@ mod tests {
 
         assert_eq!(result[0].package_name(), Some("demo-ferrobox"));
         assert_eq!(result[0].package_version(), Some("0.1.0"));
+        assert!(!result[0].yanked());
+    }
+
+    #[tokio::test]
+    async fn attaches_yanked_from_the_index_entry() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository_id = RepositoryId::new();
+        let artifact = Artifact::new(repository_id, checksum(), 810);
+        artifact_store.save(&artifact).await.unwrap();
+
+        package_index_store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Cargo,
+                    PackageName::parse("demo-ferrobox").unwrap(),
+                    PackageVersion::parse("0.1.0").unwrap(),
+                ),
+                Some(artifact.id()),
+                Bytes::from_static(br#"{"yanked":true}"#),
+            )
+            .await
+            .unwrap();
+
+        let result = use_case(
+            Arc::new(InMemoryRepositoryStore::default()),
+            artifact_store,
+            package_index_store,
+        )
+        .execute(repository_id)
+        .await
+        .unwrap();
+
+        assert!(result[0].yanked());
     }
 
     #[tokio::test]
@@ -323,6 +380,8 @@ mod tests {
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].package_name(), Some("alpha"));
+        assert_eq!(result[0].artifact().repository_id(), first.id());
         assert_eq!(result[1].package_name(), Some("beta"));
+        assert_eq!(result[1].artifact().repository_id(), second.id());
     }
 }

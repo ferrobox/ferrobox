@@ -1,19 +1,23 @@
 import { useMemo, useState } from "react";
+import { NavLink } from "react-router-dom";
 import {
   AlertCircle,
+  Ban,
   ChevronDown,
   ChevronRight,
   Download,
   FileBox,
   Package,
   RefreshCw,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ApiError, downloadArtifact } from "@/api/client";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
-import { useDeleteArtifact, useRepositoryArtifacts } from "@/api/queries";
+import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
+import { useDeleteArtifact, useRepositoryArtifacts, useSetYanked } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
@@ -38,15 +42,21 @@ function displayName(artifact: ArtifactResponse): string {
 export function ArtifactsTable({
   repositoryId,
   kind,
+  ecosystem,
+  memberNames = {},
 }: {
   repositoryId: string;
   kind: RepositoryStorageKind;
+  ecosystem: PackageEcosystemDto;
+  memberNames?: Readonly<Record<string, string>>;
 }) {
   const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
   const deleteArtifact = useDeleteArtifact(repositoryId);
+  const setYanked = useSetYanked(repositoryId);
   const canWrite = canWriteArtifacts(user?.role);
+  const canYank = canWrite && kind === "forge" && ecosystem === "cargo";
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -79,6 +89,26 @@ export function ArtifactsTable({
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el artefacto");
       throw err;
+    }
+  }
+
+  async function onSetYanked(artifact: ArtifactResponse, yanked: boolean) {
+    if (!artifact.name || !artifact.version) {
+      return;
+    }
+    try {
+      await setYanked.mutateAsync({
+        name: artifact.name,
+        version: artifact.version,
+        yanked,
+      });
+      toast.success(
+        yanked
+          ? `${artifact.name} ${artifact.version} marcado como yanked`
+          : `${artifact.name} ${artifact.version} restaurado`,
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo actualizar el yank");
     }
   }
 
@@ -151,6 +181,7 @@ export function ArtifactsTable({
         if (!latest) {
           return null;
         }
+        const yankedCount = group.artifacts.filter((artifact) => artifact.yanked).length;
 
         return (
           <section key={group.name} className="border-b border-border last:border-b-0">
@@ -175,71 +206,116 @@ export function ArtifactsTable({
                   {group.artifacts.length === 1
                     ? "1 versión"
                     : `${group.artifacts.length} versiones`}
+                  {yankedCount > 0
+                    ? ` · ${yankedCount === 1 ? "1 yanked" : `${yankedCount} yanked`}`
+                    : null}
                 </span>
               </span>
             </button>
             {isCollapsed ? null : (
               <ul className="border-t border-border bg-background/40">
-                {group.artifacts.map((artifact) => (
-                  <li
-                    key={artifact.id}
-                    className="flex items-center gap-3 border-l-2 border-l-orange-500/40 px-4 py-2.5 pl-14 hover:bg-muted/30"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-2">
-                        {artifact.version ? (
-                          <Badge variant="outline" className="font-mono">
-                            v{artifact.version}
-                          </Badge>
-                        ) : (
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {truncateMiddle(artifact.id)}
+                {group.artifacts.map((artifact) => {
+                  const memberName =
+                    kind === "alloy"
+                      ? (memberNames[artifact.repository_id] ?? artifact.repository_id)
+                      : null;
+
+                  return (
+                    <li
+                      key={artifact.id}
+                      className="flex items-center gap-3 border-l-2 border-l-orange-500/40 px-4 py-2.5 pl-14 hover:bg-muted/30"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          {artifact.version ? (
+                            <Badge
+                              variant="outline"
+                              className={`font-mono ${artifact.yanked ? "text-muted-foreground line-through" : ""}`}
+                            >
+                              v{artifact.version}
+                            </Badge>
+                          ) : (
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {truncateMiddle(artifact.id)}
+                            </span>
+                          )}
+                          {artifact.yanked ? (
+                            <Badge
+                              variant="outline"
+                              className="border-destructive/40 text-destructive"
+                            >
+                              Yanked
+                            </Badge>
+                          ) : null}
+                          <span className="text-xs text-muted-foreground">
+                            {formatBytes(artifact.size_bytes)}
                           </span>
-                        )}
-                        <span className="text-xs text-muted-foreground">
-                          {formatBytes(artifact.size_bytes)}
+                          {memberName ? (
+                            <NavLink
+                              to={`/repositories/${artifact.repository_id}`}
+                              className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                            >
+                              {memberName}
+                            </NavLink>
+                          ) : null}
+                        </span>
+                        <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                          sha256:{truncateMiddle(artifact.checksum, 6)}
                         </span>
                       </span>
-                      <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                        sha256:{truncateMiddle(artifact.checksum, 6)}
-                      </span>
-                    </span>
-                    <div className="flex shrink-0 gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          void downloadArtifact(artifact.id, artifactFilename(artifact)).catch(
-                            (err: unknown) => {
-                              toast.error(
-                                err instanceof ApiError
-                                  ? err.message
-                                  : "No se pudo descargar el artefacto",
-                              );
-                            },
-                          );
-                        }}
-                      >
-                        <Download />
-                        Descargar
-                      </Button>
-                      {canWrite && kind !== "alloy" ? (
-                        <ConfirmDeleteDialog
-                          title={`Eliminar ${artifactFilename(artifact)}`}
-                          description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
-                          pending={deleteArtifact.isPending}
-                          onConfirm={() => onDelete(artifact.id)}
-                          trigger={
-                            <Button variant="ghost" size="sm">
-                              <Trash2 />
-                              Eliminar
-                            </Button>
-                          }
-                        />
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            void downloadArtifact(artifact.id, artifactFilename(artifact)).catch(
+                              (err: unknown) => {
+                                toast.error(
+                                  err instanceof ApiError
+                                    ? err.message
+                                    : "No se pudo descargar el artefacto",
+                                );
+                              },
+                            );
+                          }}
+                        >
+                          <Download />
+                          Descargar
+                        </Button>
+                        {canYank && artifact.name && artifact.version ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={setYanked.isPending}
+                            title={
+                              artifact.yanked
+                                ? "Vuelve a ofrecer esta versión a cargo"
+                                : "cargo dejará de usarla en resoluciones nuevas; sigue descargable si está en Cargo.lock"
+                            }
+                            onClick={() => void onSetYanked(artifact, !artifact.yanked)}
+                          >
+                            {artifact.yanked ? <RotateCcw /> : <Ban />}
+                            {artifact.yanked ? "Restaurar" : "Yank"}
+                          </Button>
+                        ) : null}
+                        {canWrite && kind !== "alloy" ? (
+                          <ConfirmDeleteDialog
+                            title={`Eliminar ${artifactFilename(artifact)}`}
+                            description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
+                            pending={deleteArtifact.isPending}
+                            onConfirm={() => onDelete(artifact.id)}
+                            trigger={
+                              <Button variant="ghost" size="sm">
+                                <Trash2 />
+                                Eliminar
+                              </Button>
+                            }
+                          />
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

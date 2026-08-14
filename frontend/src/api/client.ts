@@ -197,6 +197,28 @@ export function deleteArtifact(repositoryId: string, artifactId: string): Promis
   });
 }
 
+export function yankCrate(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/cargo/${repositoryId}/api/v1/crates/${encodeURIComponent(name)}/${encodeURIComponent(version)}/yank`,
+    { method: "DELETE" },
+  );
+}
+
+export function unyankCrate(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/cargo/${repositoryId}/api/v1/crates/${encodeURIComponent(name)}/${encodeURIComponent(version)}/unyank`,
+    { method: "PUT" },
+  );
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,

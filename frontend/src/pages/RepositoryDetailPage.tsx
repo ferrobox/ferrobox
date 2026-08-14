@@ -191,7 +191,14 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             Agrupados por nombre, con cada versión debajo.
           </p>
         </div>
-        <ArtifactsTable repositoryId={repositoryId} kind={repository.kind.type} />
+        <ArtifactsTable
+          repositoryId={repositoryId}
+          kind={repository.kind.type}
+          ecosystem={repository.ecosystem}
+          memberNames={Object.fromEntries(
+            alloyMembers.map((member) => [member.id, member.name]),
+          )}
+        />
       </section>
     </div>
   );

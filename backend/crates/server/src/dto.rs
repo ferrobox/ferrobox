@@ -181,6 +181,11 @@ pub(crate) struct ArtifactResponse {
     pub(crate) checksum: String,
     #[ts(type = "number")]
     pub(crate) size_bytes: u64,
+    /// `true` si el índice marca esta versión como *yanked*.
+    pub(crate) yanked: bool,
+    /// Repositorio que almacena el binario. En un `Alloy` es el
+    /// miembro del que proviene el paquete.
+    pub(crate) repository_id: String,
 }
 
 impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for ArtifactResponse {
@@ -191,6 +196,8 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
             version: listed.package_version().map(ToOwned::to_owned),
             checksum: listed.artifact().checksum().to_string(),
             size_bytes: listed.artifact().size_bytes(),
+            yanked: listed.yanked(),
+            repository_id: listed.artifact().repository_id().to_string(),
         }
     }
 }
