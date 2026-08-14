@@ -47,6 +47,7 @@ use ferrobox_application::manage_users::{
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
+use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
 
@@ -55,6 +56,7 @@ struct AppState {
     create_repository: CreateRepositoryUseCase,
     list_repositories: ListRepositoriesUseCase,
     get_repository: GetRepositoryUseCase,
+    update_alloy_members: UpdateAlloyMembersUseCase,
     publish_artifact: PublishArtifactUseCase,
     download_artifact: DownloadArtifactUseCase,
     list_repository_artifacts: ListRepositoryArtifactsUseCase,
@@ -144,7 +146,9 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         )
         .route(
             "/repositories/{repository_id}",
-            get(repositories::get_repository).delete(repositories::delete_repository),
+            get(repositories::get_repository)
+                .patch(repositories::update_alloy_members)
+                .delete(repositories::delete_repository),
         )
         .route(
             "/repositories/{repository_id}/artifacts",
@@ -219,6 +223,7 @@ fn build_app_state(
         create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
         list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
         get_repository: GetRepositoryUseCase::new(repository_store.clone()),
+        update_alloy_members: UpdateAlloyMembersUseCase::new(repository_store.clone()),
         publish_artifact: PublishArtifactUseCase::new(
             repository_store.clone(),
             artifact_store.clone(),

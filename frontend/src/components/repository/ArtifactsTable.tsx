@@ -17,6 +17,7 @@ import { useDeleteArtifact, useRepositoryArtifacts } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
+import type { RepositoryStorageKind } from "@/components/repository/RepositoryKindBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,13 @@ function displayName(artifact: ArtifactResponse): string {
   return artifact.name ?? "Artefacto sin índice";
 }
 
-export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
+export function ArtifactsTable({
+  repositoryId,
+  kind,
+}: {
+  repositoryId: string;
+  kind: RepositoryStorageKind;
+}) {
   const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
@@ -121,8 +128,16 @@ export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
         </div>
         <p className="font-medium text-foreground">Este repositorio está vacío</p>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Publica un crate con <code className="font-mono">cargo publish --registry ferrobox</code>{" "}
-          o sube un binario genérico.
+          {kind === "alloy" ? (
+            "Los paquetes aparecen cuando existen en los Forges o Mirrors miembros. Publica en un Forge miembro."
+          ) : kind === "mirror" ? (
+            "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+          ) : (
+            <>
+              Publica un crate con <code className="font-mono">cargo publish --registry ferrobox</code>{" "}
+              o sube un binario genérico.
+            </>
+          )}
         </p>
       </div>
     );
@@ -208,7 +223,7 @@ export function ArtifactsTable({ repositoryId }: { repositoryId: string }) {
                         <Download />
                         Descargar
                       </Button>
-                      {canWrite ? (
+                      {canWrite && kind !== "alloy" ? (
                         <ConfirmDeleteDialog
                           title={`Eliminar ${artifactFilename(artifact)}`}
                           description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."

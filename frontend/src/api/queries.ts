@@ -5,6 +5,7 @@ import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenReques
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { RoleDto } from "@/api/generated/RoleDto";
+import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
@@ -71,6 +72,22 @@ export function useDeleteRepository() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.removeQueries({ queryKey: queryKeys.repository(repositoryId) });
       void queryClient.removeQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function useUpdateAlloyMembers(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: UpdateAlloyMembersRequest) =>
+      api.updateAlloyMembers(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
     },

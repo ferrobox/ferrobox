@@ -160,6 +160,15 @@ pub(crate) struct CreateRepositoryResponse {
     pub(crate) id: String,
 }
 
+/// Cuerpo de la petición para actualizar los miembros de un `Alloy`.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct UpdateAlloyMembersRequest {
+    /// Identificadores de los repositorios miembro, en orden de
+    /// resolución.
+    pub(crate) members: Vec<String>,
+}
+
 /// Representación de un artefacto en las respuestas de la API.
 #[derive(Serialize, TS)]
 #[ts(export)]

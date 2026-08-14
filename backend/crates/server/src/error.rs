@@ -19,6 +19,7 @@ use ferrobox_application::manage_users::{
 };
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
+use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 
@@ -62,6 +63,25 @@ impl From<CreateRepositoryError> for ApiError {
                 Self::Conflict(err.to_string())
             }
             CreateRepositoryError::Persistence(RepositoryStoreError::Backend(_)) => {
+                Self::Internal(err.to_string())
+            }
+        }
+    }
+}
+
+impl From<UpdateAlloyMembersError> for ApiError {
+    fn from(err: UpdateAlloyMembersError) -> Self {
+        match &err {
+            UpdateAlloyMembersError::NotFound(_) => Self::NotFound(err.to_string()),
+            UpdateAlloyMembersError::NotAnAlloy
+            | UpdateAlloyMembersError::EmptyAlloy
+            | UpdateAlloyMembersError::MemberNotFound
+            | UpdateAlloyMembersError::MemberEcosystemMismatch
+            | UpdateAlloyMembersError::NestedAlloy => Self::BadRequest(err.to_string()),
+            UpdateAlloyMembersError::Persistence(RepositoryStoreError::DuplicateName(_)) => {
+                Self::Conflict(err.to_string())
+            }
+            UpdateAlloyMembersError::Persistence(RepositoryStoreError::Backend(_)) => {
                 Self::Internal(err.to_string())
             }
         }
