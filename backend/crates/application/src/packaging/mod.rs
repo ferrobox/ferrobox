@@ -39,6 +39,10 @@ pub mod npm;
 /// simple PEP 503) del patrón Strategy.
 pub mod pypi;
 
+/// La implementación de OCI (Distribution Spec v2: `docker push` /
+/// `docker pull`) del patrón Strategy.
+pub mod oci;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -133,6 +137,17 @@ pub struct PackageSearchHit {
     pub max_version: String,
 }
 
+/// Un manifiesto OCI leído del índice: media type, digest y cuerpo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OciManifestDocument {
+    /// Media type OCI o Docker del manifiesto.
+    pub media_type: String,
+    /// Digest `sha256:…` del cuerpo.
+    pub digest: String,
+    /// Cuerpo crudo del manifiesto.
+    pub body: Bytes,
+}
+
 /// Estrategia de empaquetado para un ecosistema concreto.
 ///
 /// Cada implementación encapsula las tres operaciones que el gestor de
@@ -205,6 +220,71 @@ pub trait PackagingStrategy: Send + Sync {
         filename: &str,
     ) -> Result<Bytes, PackagingError> {
         Err(PackagingError::FileNotFound(filename.to_string()))
+    }
+
+    /// Almacena un blob OCI identificado por su digest `sha256:…`.
+    /// La implementación por defecto indica que el ecosistema no usa blobs.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
+    /// soporta blobs, u otro error si falla el puerto correspondiente.
+    async fn put_blob(
+        &self,
+        _repository: &Repository,
+        _digest: &str,
+        _body: Bytes,
+    ) -> Result<u64, PackagingError> {
+        Err(PackagingError::InvalidPayload(
+            "this ecosystem does not store OCI blobs".to_string(),
+        ))
+    }
+
+    /// Publica un manifiesto OCI (por etiqueta o por digest).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
+    /// soporta manifiestos, u otro error si falla el puerto correspondiente.
+    async fn put_manifest(
+        &self,
+        _repository: &Repository,
+        _name: &str,
+        _reference: &str,
+        _media_type: &str,
+        _body: Bytes,
+    ) -> Result<String, PackagingError> {
+        Err(PackagingError::InvalidPayload(
+            "this ecosystem does not store OCI manifests".to_string(),
+        ))
+    }
+
+    /// Lee un manifiesto OCI por etiqueta o digest.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::PackageNotFound`] o
+    /// [`PackagingError::VersionNotFound`] si no existe.
+    async fn get_manifest(
+        &self,
+        _repository: &Repository,
+        _name: &str,
+        _reference: &str,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        Err(PackagingError::PackageNotFound(_name.to_string()))
+    }
+
+    /// Lista las etiquetas de una imagen OCI.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::PackageNotFound`] si la imagen no existe.
+    async fn list_tags(
+        &self,
+        _repository: &Repository,
+        _name: &str,
+    ) -> Result<Vec<String>, PackagingError> {
+        Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
     /// Marca (o desmarca) una versión ya publicada como *yanked*. No
@@ -290,6 +370,7 @@ mod tests {
 
     use super::cargo::CargoPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
+    use super::oci::OciPackagingStrategy;
     use super::pypi::PypiPackagingStrategy;
     use super::*;
     use crate::test_support::{
@@ -329,16 +410,27 @@ mod tests {
         ))
     }
 
+    fn oci_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(OciPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
             .register(cargo_strategy())
             .register(npm_strategy())
-            .register(pypi_strategy());
+            .register(pypi_strategy())
+            .register(oci_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
         assert!(registry.strategy_for(PackageEcosystem::PyPi).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Oci).is_some());
     }
 
     #[test]

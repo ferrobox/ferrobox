@@ -28,6 +28,7 @@ ts-rs.workspace = true
 [dev-dependencies]
 ferrobox-application = { path = "../application", features = ["test-utils"] }
 tower = { version = "0.5", features = ["util"] }
+sha2.workspace = true
 
 [lints]
 workspace = true
