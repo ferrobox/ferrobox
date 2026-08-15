@@ -317,11 +317,24 @@ fn entry_version_matches(entry: &Bytes, version: &str) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(entry) else {
         return false;
     };
-    value
-        .get("version")
-        .or_else(|| value.get("vers"))
-        .and_then(serde_json::Value::as_str)
-        == Some(version)
+    if ["version", "vers", "reference"]
+        .iter()
+        .any(|key| value.get(*key).and_then(serde_json::Value::as_str) == Some(version))
+    {
+        return true;
+    }
+    // Conan indexa `version`/`user`/`channel` por separado; la UI manda
+    // la coordenada `0.1@_:_`.
+    match (
+        value.get("version").and_then(serde_json::Value::as_str),
+        value.get("user").and_then(serde_json::Value::as_str),
+        value.get("channel").and_then(serde_json::Value::as_str),
+    ) {
+        (Some(recipe_version), Some(user), Some(channel)) => {
+            format!("{recipe_version}@{user}:{channel}") == version
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -362,22 +375,46 @@ mod tests {
             .unwrap();
     }
 
+    fn osv_high_lodash_vuln() -> serde_json::Value {
+        serde_json::json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "Command Injection in lodash",
+            "database_specific": { "severity": "HIGH" },
+            "affected": [{ "ranges": [{ "events": [{ "fixed": "4.17.21" }] }] }],
+            "references": [{ "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm" }]
+        })
+    }
+
     fn osv_high_lodash() -> Bytes {
         Bytes::from(
             serde_json::json!({
                 "results": [{
-                    "vulns": [{
-                        "id": "GHSA-35jh-r3h4-6jhm",
-                        "aliases": ["CVE-2021-23337"],
-                        "summary": "Command Injection in lodash",
-                        "database_specific": { "severity": "HIGH" },
-                        "affected": [{ "ranges": [{ "events": [{ "fixed": "4.17.21" }] }] }],
-                        "references": [{ "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm" }]
-                    }]
+                    "vulns": [osv_high_lodash_vuln()]
                 }]
             })
             .to_string(),
         )
+    }
+
+    #[test]
+    fn entry_version_matches_oci_reference_and_conan_recipe() {
+        assert!(entry_version_matches(
+            &Bytes::from(r#"{"reference":"latest"}"#),
+            "latest",
+        ));
+        assert!(entry_version_matches(
+            &Bytes::from(r#"{"version":"0.1","user":"_","channel":"_"}"#),
+            "0.1@_:_",
+        ));
+        assert!(entry_version_matches(
+            &Bytes::from(r#"{"vers":"1.0.0"}"#),
+            "1.0.0",
+        ));
+        assert!(!entry_version_matches(
+            &Bytes::from(r#"{"reference":"latest"}"#),
+            "1.0.0",
+        ));
     }
 
     #[tokio::test]
@@ -444,6 +481,134 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.id(), second.id());
+    }
+
+    #[tokio::test]
+    async fn thin_osv_batch_is_hydrated_from_vuln_endpoint() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_lodash(&index, &repository).await;
+        http.stub(
+            "https://api.osv.dev/v1/querybatch",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "results": [{ "vulns": [{ "id": "GHSA-35jh-r3h4-6jhm" }] }]
+                })
+                .to_string(),
+            ),
+        );
+        http.stub(
+            "https://api.osv.dev/v1/vulns/GHSA-35jh-r3h4-6jhm",
+            200,
+            Bytes::from(osv_high_lodash_vuln().to_string()),
+        );
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            http,
+        );
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(assay.counts().high, 1);
+        assert_eq!(assay.findings()[0].title(), "Command Injection in lodash");
+        assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
+    }
+
+    #[tokio::test]
+    async fn oci_tag_entry_is_unsupported_without_layer_inventory() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("images").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repos.save(&repository).await.unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("alpine").unwrap(),
+            PackageVersion::parse("latest").unwrap(),
+        );
+        index
+            .upsert_entry(
+                repository.id(),
+                &coordinate,
+                None,
+                Bytes::from(
+                    r#"{"name":"alpine","reference":"latest","digest":"sha256:abc","media_type":"application/vnd.oci.image.manifest.v1+json","size":527,"artifact_id":"00000000-0000-0000-0000-000000000001"}"#,
+                ),
+            )
+            .await
+            .unwrap();
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryHttpClient::default()),
+        );
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Oci, "alpine", "latest")
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Unsupported);
+        assert!(assay.findings().is_empty());
+        assert!(assay.error_message().is_some());
+    }
+
+    #[tokio::test]
+    async fn conan_recipe_is_unsupported_without_lock_inventory() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("conan-releases").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Conan,
+        )
+        .unwrap();
+        repos.save(&repository).await.unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Conan,
+            PackageName::parse("hello").unwrap(),
+            PackageVersion::parse("0.1@_:_").unwrap(),
+        );
+        index
+            .upsert_entry(
+                repository.id(),
+                &coordinate,
+                None,
+                Bytes::from(
+                    r#"{"name":"hello","version":"0.1","user":"_","channel":"_","yanked":false,"files":[],"revisions":[]}"#,
+                ),
+            )
+            .await
+            .unwrap();
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryHttpClient::default()),
+        );
+        let assay = service
+            .run(
+                repository.id(),
+                PackageEcosystem::Conan,
+                "hello",
+                "0.1@_:_",
+            )
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Unsupported);
     }
 
     #[tokio::test]

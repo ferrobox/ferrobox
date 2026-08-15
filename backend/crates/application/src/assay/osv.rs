@@ -1,5 +1,7 @@
 //! Consulta OSV (*Open Source Vulnerabilities*) por lote.
 
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use ferrobox_domain::assay::{AssayComponent, AssayFinding, AssaySeverity};
 use ferrobox_domain::package_coordinate::PackageEcosystem;
@@ -10,6 +12,7 @@ use serde_json::json;
 use super::extract::{is_exact_version, osv_ecosystem};
 
 const OSV_QUERYBATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
+const OSV_VULN_URL: &str = "https://api.osv.dev/v1/vulns";
 
 /// Consulta OSV para los componentes con versión concreta.
 ///
@@ -55,7 +58,12 @@ pub async fn query_findings(
     let response = http
         .post(OSV_QUERYBATCH_URL, body, "application/json")
         .await?;
-    Ok(parse_querybatch(&response.body, &queried_packages))
+    let mut parsed = parse_querybatch_vulns(&response.body, &queried_packages);
+    hydrate_thin_vulns(http, &mut parsed).await;
+    Ok(parsed
+        .iter()
+        .map(|(name, version, vuln)| finding_from_vuln(vuln, name, version))
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -70,7 +78,7 @@ struct QueryBatchResult {
     vulns: Vec<OsvVuln>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvVuln {
     id: String,
     #[serde(default)]
@@ -89,7 +97,7 @@ struct OsvVuln {
     references: Vec<OsvReference>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvSeverity {
     #[serde(default)]
     #[serde(rename = "type")]
@@ -98,50 +106,84 @@ struct OsvSeverity {
     score: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvDatabaseSpecific {
     #[serde(default)]
     severity: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvAffected {
     #[serde(default)]
     ranges: Vec<OsvRange>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvRange {
     #[serde(default)]
     events: Vec<OsvEvent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvEvent {
     #[serde(default)]
     fixed: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct OsvReference {
     #[serde(default)]
     url: Option<String>,
 }
 
-fn parse_querybatch(body: &[u8], queried: &[(String, String)]) -> Vec<AssayFinding> {
+fn parse_querybatch_vulns(
+    body: &[u8],
+    queried: &[(String, String)],
+) -> Vec<(String, String, OsvVuln)> {
     let Ok(parsed) = serde_json::from_slice::<QueryBatchResponse>(body) else {
         return Vec::new();
     };
-    let mut findings = Vec::new();
+    let mut vulns = Vec::new();
     for (index, result) in parsed.results.into_iter().enumerate() {
         let Some((name, version)) = queried.get(index) else {
             continue;
         };
         for vuln in result.vulns {
-            findings.push(finding_from_vuln(&vuln, name, version));
+            vulns.push((name.clone(), version.clone(), vuln));
         }
     }
-    findings
+    vulns
+}
+
+fn is_thin(vuln: &OsvVuln) -> bool {
+    vuln.summary.is_none()
+        && vuln.details.is_none()
+        && vuln.severity.is_empty()
+        && vuln.database_specific.is_none()
+        && vuln.affected.is_empty()
+        && vuln.aliases.is_empty()
+}
+
+async fn hydrate_thin_vulns(http: &dyn HttpClient, parsed: &mut [(String, String, OsvVuln)]) {
+    let mut cache: HashMap<String, OsvVuln> = HashMap::new();
+    for (_, _, vuln) in parsed.iter_mut() {
+        if !is_thin(vuln) {
+            continue;
+        }
+        if let Some(full) = cache.get(&vuln.id) {
+            *vuln = full.clone();
+            continue;
+        }
+        let url = format!("{OSV_VULN_URL}/{}", vuln.id);
+        let Ok(response) = http.get(&url).await else {
+            continue;
+        };
+        let Ok(full) = serde_json::from_slice::<OsvVuln>(&response.body) else {
+            continue;
+        };
+        cache.insert(vuln.id.clone(), full.clone());
+        *vuln = full;
+    }
 }
 
 fn finding_from_vuln(vuln: &OsvVuln, component_name: &str, component_version: &str) -> AssayFinding {
@@ -238,14 +280,15 @@ mod tests {
                 }]
             }]
         });
-        let findings = parse_querybatch(
+        let parsed = parse_querybatch_vulns(
             &serde_json::to_vec(&body).unwrap(),
             &[("lodash".to_string(), "4.17.20".to_string())],
         );
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].vulnerability_id(), "GHSA-35jh-r3h4-6jhm");
-        assert_eq!(findings[0].aliases(), &["CVE-2021-23337".to_string()]);
-        assert_eq!(findings[0].severity(), AssaySeverity::High);
-        assert_eq!(findings[0].fixed_version(), Some("4.17.21"));
+        assert_eq!(parsed.len(), 1);
+        let finding = finding_from_vuln(&parsed[0].2, &parsed[0].0, &parsed[0].1);
+        assert_eq!(finding.vulnerability_id(), "GHSA-35jh-r3h4-6jhm");
+        assert_eq!(finding.aliases(), &["CVE-2021-23337".to_string()]);
+        assert_eq!(finding.severity(), AssaySeverity::High);
+        assert_eq!(finding.fixed_version(), Some("4.17.21"));
     }
 }
