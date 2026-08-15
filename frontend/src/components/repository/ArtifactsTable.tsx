@@ -31,7 +31,13 @@ import { formatBytes, truncateMiddle } from "@/lib/format";
 function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
   if (artifact.name && artifact.version) {
     const extension =
-      ecosystem === "npm" ? "tgz" : ecosystem === "pypi" ? "tar.gz" : "crate";
+      ecosystem === "npm"
+        ? "tgz"
+        : ecosystem === "pypi"
+          ? "tar.gz"
+          : ecosystem === "oci"
+            ? "json"
+            : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -64,7 +70,10 @@ export function ArtifactsTable({
   const canYank =
     canWrite &&
     kind === "forge" &&
-    (ecosystem === "cargo" || ecosystem === "npm" || ecosystem === "pypi");
+    (ecosystem === "cargo" ||
+      ecosystem === "npm" ||
+      ecosystem === "pypi" ||
+      ecosystem === "oci");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -73,6 +82,9 @@ export function ArtifactsTable({
     }
     const byName = new Map<string, ArtifactResponse[]>();
     for (const artifact of data) {
+      if (artifact.name === "_blob") {
+        continue;
+      }
       const key = artifact.name ?? artifact.id;
       const existing = byName.get(key) ?? [];
       existing.push(artifact);
@@ -159,7 +171,7 @@ export function ArtifactsTable({
     );
   }
 
-  if (data.length === 0) {
+  if (!data || groups.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
         <div className="flex size-12 items-center justify-center rounded-full bg-muted">
@@ -184,6 +196,11 @@ export function ArtifactsTable({
             <>
               Publica un paquete con <code className="font-mono">twine upload</code> apuntando a
               este registro.
+            </>
+          ) : ecosystem === "oci" ? (
+            <>
+              Publica una imagen con <code className="font-mono">docker push</code> apuntando a este
+              registro.
             </>
           ) : (
             <>

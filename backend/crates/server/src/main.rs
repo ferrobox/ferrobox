@@ -10,6 +10,7 @@ mod config;
 mod dto;
 mod error;
 mod npm_registry;
+mod oci_registry;
 mod pypi_registry;
 mod repositories;
 mod settings;
@@ -51,6 +52,7 @@ use ferrobox_application::manage_users::{
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
+use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
@@ -135,7 +137,8 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .route("/auth/login", post(auth::login))
         .merge(cargo_registry::public_router())
         .merge(npm_registry::public_router())
-        .merge(pypi_registry::public_router());
+        .merge(pypi_registry::public_router())
+        .merge(oci_registry::public_router());
 
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
@@ -176,6 +179,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .merge(cargo_registry::write_router())
         .merge(npm_registry::write_router())
         .merge(pypi_registry::write_router())
+        .merge(oci_registry::write_router())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_extract::require_auth,
@@ -247,6 +251,12 @@ fn build_app_state(
             http_client,
             repository_store.clone(),
             config.public_base_url.clone(),
+        )))
+        .register(Arc::new(OciPackagingStrategy::new(
+            artifact_store.clone(),
+            package_index_store.clone(),
+            storage.clone(),
+            repository_store.clone(),
         )));
 
     AppState {

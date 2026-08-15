@@ -267,6 +267,28 @@ export function unyankPypi(
   );
 }
 
+export function yankOci(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/oci/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/yank`,
+    { method: "DELETE" },
+  );
+}
+
+export function unyankOci(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/oci/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/unyank`,
+    { method: "PUT" },
+  );
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,
