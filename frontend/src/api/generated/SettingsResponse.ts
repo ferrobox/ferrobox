@@ -12,4 +12,9 @@ public_base_url: string,
 /**
  * Versión del servidor (`CARGO_PKG_VERSION`).
  */
-version: string, };
+version: string, 
+/**
+ * Días de edad mínima para servir una versión desde un Mirror npm
+ * o `PyPI`. `0` desactiva la cuarentena. El valor por defecto es 14.
+ */
+mirror_quarantine_days: number, };

@@ -63,6 +63,8 @@ export function PypiRegistryPanel({
   const readOnly = isMirror || isAlloy;
 
   const introTitle = isAlloy ? "Alloy PyPI" : isMirror ? "Mirror PyPI" : "Registro PyPI";
+  const quarantineDays = data.mirror_quarantine_days;
+  const showQuarantine = (isMirror || isAlloy) && quarantineDays > 0;
   const introBody = isAlloy
     ? "Este Alloy agrega Forges y/o Mirrors PyPI en una sola URL. pip install resuelve contra los miembros, en orden. No acepta twine upload: publica en un Forge miembro."
     : isMirror
@@ -74,6 +76,15 @@ export function PypiRegistryPanel({
       <div>
         <h3 className="text-sm font-semibold text-foreground">{introTitle}</h3>
         <p className="mt-1 text-sm text-muted-foreground">{introBody}</p>
+        {showQuarantine ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {isAlloy
+              ? `Si un miembro es Mirror, las versiones publicadas en el upstream hace menos de ${quarantineDays} días no aparecen en el índice y pip install recibe 403 hasta que cumplan esa edad.`
+              : `Las versiones publicadas en el upstream hace menos de ${quarantineDays} días no aparecen en el índice y pip install recibe 403 hasta que cumplan esa edad.`}{" "}
+            Reduce la ventana de typosquatting. Los Forges no se retienen. Se configura con{" "}
+            <code className="font-mono">MIRROR_QUARANTINE_DAYS</code> (0 la desactiva).
+          </p>
+        ) : null}
       </div>
 
       {readOnly ? (

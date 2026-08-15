@@ -146,6 +146,7 @@ impl From<PackagingError> for ApiError {
             | PackagingError::ReadOnlyRepository
             | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
+            PackagingError::Quarantined { .. } => Self::Forbidden(err.to_string()),
             PackagingError::PackageNotFound(_)
             | PackagingError::VersionNotFound(_)
             | PackagingError::FileNotFound(_) => {

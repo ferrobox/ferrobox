@@ -361,6 +361,7 @@ mod tests {
             ),
             packaging,
             public_base_url: "http://127.0.0.1:3000".to_string(),
+            mirror_quarantine_days: 14,
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
             change_password: ChangePasswordUseCase::new(user_store.clone()),
             authenticate_token: AuthenticateTokenUseCase::new(

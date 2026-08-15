@@ -16,5 +16,6 @@ pub(crate) async fn get_settings(
     Json(SettingsResponse {
         public_base_url: state.public_base_url.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        mirror_quarantine_days: state.mirror_quarantine_days,
     })
 }

@@ -47,6 +47,9 @@ pub mod oci;
 /// `conan install`) del patrón Strategy.
 pub mod conan;
 
+/// Cuarentena de versiones recién publicadas en Mirrors npm / `PyPI`.
+pub mod quarantine;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -127,6 +130,18 @@ pub enum PackagingError {
     /// La respuesta del *upstream* no tiene el formato esperado.
     #[error("invalid upstream response: {0}")]
     InvalidUpstream(String),
+
+    /// Una versión de un `Mirror` npm/`PyPI` es demasiado reciente y
+    /// permanece en cuarentena hasta `available_at`.
+    #[error("{package} {version} is in mirror quarantine until {available_at}")]
+    Quarantined {
+        /// Nombre del paquete retenido.
+        package: String,
+        /// Versión retenida.
+        version: String,
+        /// Instante RFC 3339 a partir del cual se servirá.
+        available_at: String,
+    },
 }
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.

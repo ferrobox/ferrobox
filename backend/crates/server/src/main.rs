@@ -56,6 +56,7 @@ use ferrobox_application::packaging::conan::ConanPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
+use ferrobox_application::packaging::quarantine::MirrorQuarantine;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
@@ -75,6 +76,7 @@ struct AppState {
     delete_artifact: DeleteArtifactUseCase,
     packaging: PackagingRegistry,
     public_base_url: String,
+    mirror_quarantine_days: u32,
     login: LoginUseCase,
     change_password: ChangePasswordUseCase,
     authenticate_token: AuthenticateTokenUseCase,
@@ -241,22 +243,28 @@ fn build_app_state(
             http_client.clone(),
             repository_store.clone(),
         )))
-        .register(Arc::new(NpmPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            http_client.clone(),
-            repository_store.clone(),
-            config.public_base_url.clone(),
-        )))
-        .register(Arc::new(PypiPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            http_client.clone(),
-            repository_store.clone(),
-            config.public_base_url.clone(),
-        )))
+        .register(Arc::new(
+            NpmPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+                config.public_base_url.clone(),
+            )
+            .with_quarantine(MirrorQuarantine::from_days(config.mirror_quarantine_days)),
+        ))
+        .register(Arc::new(
+            PypiPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+                config.public_base_url.clone(),
+            )
+            .with_quarantine(MirrorQuarantine::from_days(config.mirror_quarantine_days)),
+        ))
         .register(Arc::new(OciPackagingStrategy::new(
             artifact_store.clone(),
             package_index_store.clone(),
@@ -309,6 +317,7 @@ fn build_app_state(
         ),
         packaging,
         public_base_url: config.public_base_url.clone(),
+        mirror_quarantine_days: config.mirror_quarantine_days,
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),
         authenticate_token: AuthenticateTokenUseCase::new(

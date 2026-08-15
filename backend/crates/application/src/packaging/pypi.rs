@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
+use chrono::Utc;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::ArtifactId;
 use ferrobox_domain::package_coordinate::{
@@ -34,6 +35,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::quarantine::MirrorQuarantine;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -45,6 +47,7 @@ pub struct PypiPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
+    quarantine: MirrorQuarantine,
 }
 
 impl PypiPackagingStrategy {
@@ -66,7 +69,15 @@ impl PypiPackagingStrategy {
             http_client,
             repository_store,
             public_base_url,
+            quarantine: MirrorQuarantine::DISABLED,
         }
+    }
+
+    /// Aplica una política de cuarentena a las versiones de un `Mirror`.
+    #[must_use]
+    pub fn with_quarantine(mut self, quarantine: MirrorQuarantine) -> Self {
+        self.quarantine = quarantine;
+        self
     }
 
     fn ensure_pypi_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -91,6 +102,20 @@ impl PypiPackagingStrategy {
             RepositoryKind::Mirror { upstream } => Some(upstream),
             RepositoryKind::Forge | RepositoryKind::Alloy { .. } => None,
         }
+    }
+
+    async fn fetch_upstream_upload_times(
+        &self,
+        upstream: &Url,
+        normalized_name: &str,
+    ) -> BTreeMap<String, String> {
+        let Some(url) = warehouse_json_url(upstream, normalized_name) else {
+            return BTreeMap::new();
+        };
+        let Ok(response) = self.http_client.get(&url).await else {
+            return BTreeMap::new();
+        };
+        parse_warehouse_upload_times(&response.body)
     }
 
     async fn resolve_read_targets(
@@ -172,7 +197,18 @@ impl PypiPackagingStrategy {
         if entries.is_empty() {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         }
-        simple_project_page(name.as_str(), &entries, |filename| {
+        let now = Utc::now();
+        let visible: Vec<Bytes> = entries
+            .into_iter()
+            .filter(|entry_bytes| {
+                serde_json::from_slice::<VersionEntry>(entry_bytes)
+                    .is_ok_and(|entry| !self.quarantine.is_held(entry.published_at.as_deref(), now))
+            })
+            .collect();
+        if visible.is_empty() {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        }
+        simple_project_page(name.as_str(), &visible, |filename| {
             self.file_url(serving, filename)
         })
     }
@@ -193,7 +229,12 @@ impl PypiPackagingStrategy {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         }
 
+        let upload_times = self
+            .fetch_upstream_upload_times(upstream, &normalized)
+            .await;
+
         let mut existing_files = HashMap::new();
+        let mut existing_times = HashMap::new();
         for entry_bytes in self
             .package_index_store
             .entries_for_package(repository.id(), PackageEcosystem::PyPi, name)
@@ -201,6 +242,9 @@ impl PypiPackagingStrategy {
         {
             let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            if let Some(published_at) = entry.published_at.clone() {
+                existing_times.insert(entry.version.clone(), published_at);
+            }
             for file in entry.files {
                 existing_files.insert(file.filename.clone(), file);
             }
@@ -232,9 +276,13 @@ impl PypiPackagingStrategy {
 
             let entry = by_version.entry(version.clone()).or_insert_with(|| VersionEntry {
                 name: normalized.clone(),
-                version,
+                version: version.clone(),
                 yanked: false,
                 files: Vec::new(),
+                published_at: upload_times
+                    .get(&version)
+                    .cloned()
+                    .or_else(|| existing_times.get(&version).cloned()),
             });
             entry.files.push(file);
         }
@@ -331,11 +379,15 @@ impl PypiPackagingStrategy {
             .await?;
 
         let needle = query.to_ascii_lowercase();
+        let now = Utc::now();
         let mut by_name: BTreeMap<String, Vec<VersionEntry>> = BTreeMap::new();
         for entry_bytes in entries {
             let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
             if !entry.name.to_ascii_lowercase().contains(&needle) {
+                continue;
+            }
+            if self.quarantine.is_held(entry.published_at.as_deref(), now) {
                 continue;
             }
             by_name.entry(entry.name.clone()).or_default().push(entry);
@@ -417,6 +469,7 @@ impl PackagingStrategy for PypiPackagingStrategy {
                 version: coordinate.version().as_str().to_string(),
                 yanked: false,
                 files: Vec::new(),
+                published_at: None,
             });
 
         if entry
@@ -506,6 +559,14 @@ impl PackagingStrategy for PypiPackagingStrategy {
             .load_version_entry(repository, coordinate)
             .await?
             .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        if Self::mirror_upstream(repository).is_some() {
+            self.quarantine.reject_if_held(
+                entry.name.as_str(),
+                entry.version.as_str(),
+                entry.published_at.as_deref(),
+                Utc::now(),
+            )?;
+        }
         let file = entry
             .files
             .first()
@@ -548,6 +609,15 @@ impl PackagingStrategy for PypiPackagingStrategy {
             else {
                 continue;
             };
+
+            if Self::mirror_upstream(repository).is_some() {
+                self.quarantine.reject_if_held(
+                    entry.name.as_str(),
+                    entry.version.as_str(),
+                    entry.published_at.as_deref(),
+                    Utc::now(),
+                )?;
+            }
 
             if !entry.files[file_index].artifact_id.is_empty()
                 && let Ok(artifact_id) = parse_artifact_id(&entry.files[file_index].artifact_id)
@@ -788,6 +858,53 @@ fn join_upstream(upstream: &Url, relative: &str) -> String {
     format!("{base}/{relative}")
 }
 
+fn warehouse_json_url(simple: &Url, normalized_name: &str) -> Option<String> {
+    let path = simple.path().trim_end_matches('/');
+    let stripped = path.strip_suffix("/simple")?;
+    let json_path = if stripped.is_empty() {
+        format!("/pypi/{normalized_name}/json")
+    } else {
+        format!("{stripped}/pypi/{normalized_name}/json")
+    };
+    let mut url = simple.clone();
+    url.set_path(&json_path);
+    url.set_query(None);
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+fn parse_warehouse_upload_times(body: &[u8]) -> BTreeMap<String, String> {
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return BTreeMap::new();
+    };
+    let Some(releases) = json.get("releases").and_then(serde_json::Value::as_object) else {
+        return BTreeMap::new();
+    };
+    let mut times = BTreeMap::new();
+    for (version, files) in releases {
+        let Some(files) = files.as_array() else {
+            continue;
+        };
+        let mut earliest: Option<String> = None;
+        for file in files {
+            let stamp = file
+                .get("upload_time_iso_8601")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| file.get("upload_time").and_then(serde_json::Value::as_str));
+            let Some(stamp) = stamp.map(str::trim).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            if earliest.as_deref().is_none_or(|current| stamp < current) {
+                earliest = Some(stamp.to_string());
+            }
+        }
+        if let Some(stamp) = earliest {
+            times.insert(version.clone(), stamp);
+        }
+    }
+    times
+}
+
 struct ParsedSimpleLink {
     filename: String,
     url: String,
@@ -1020,6 +1137,9 @@ struct VersionEntry {
     yanked: bool,
     #[serde(default)]
     files: Vec<FileEntry>,
+    /// Instante RFC 3339 de subida al *upstream*, si se conoce.
+    #[serde(default)]
+    published_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1065,10 +1185,12 @@ mod tests {
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
+    use crate::packaging::quarantine::MirrorQuarantine;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
         InMemoryRepositoryStore, InMemoryStorage,
     };
+    use chrono::Utc;
 
     fn strategy() -> PypiPackagingStrategy {
         PypiPackagingStrategy::new(
@@ -1578,5 +1700,123 @@ mod tests {
 
         let downloaded = strategy.download_file(&alloy, filename).await.unwrap();
         assert_eq!(downloaded, content);
+    }
+
+    fn days_ago(days: i64) -> String {
+        (Utc::now() - chrono::Duration::days(days)).to_rfc3339()
+    }
+
+    #[test]
+    fn warehouse_json_url_replaces_simple_suffix() {
+        let upstream = Url::parse("https://pypi.org/simple/").unwrap();
+        assert_eq!(
+            warehouse_json_url(&upstream, "requests").as_deref(),
+            Some("https://pypi.org/pypi/requests/json")
+        );
+    }
+
+    #[tokio::test]
+    async fn mirror_quarantine_hides_recent_pypi_versions() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        )
+        .with_quarantine(MirrorQuarantine::from_days(14));
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let old = "demo_pypi-1.0.0.tar.gz";
+        let young = "demo_pypi-2.0.0.tar.gz";
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<html><body>\
+                 <a href=\"https://files.example/{old}\">{old}</a>\
+                 <a href=\"https://files.example/{young}\">{young}</a>\
+                 </body></html>"
+            )),
+        );
+        http.stub(
+            "https://pypi.example/pypi/demo-pypi/json",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "releases": {
+                        "1.0.0": [{ "upload_time_iso_8601": days_ago(30) }],
+                        "2.0.0": [{ "upload_time_iso_8601": days_ago(1) }]
+                    }
+                })
+                .to_string(),
+            ),
+        );
+
+        let page = strategy
+            .index(&repository, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&page).unwrap();
+        assert!(html.contains(old));
+        assert!(!html.contains(young));
+
+        let err = strategy.download_file(&repository, young).await.unwrap_err();
+        assert!(matches!(err, PackagingError::Quarantined { .. }));
+    }
+
+    #[tokio::test]
+    async fn mirror_without_upload_time_is_not_quarantined() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        )
+        .with_quarantine(MirrorQuarantine::from_days(14));
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let filename = "demo_pypi-1.0.0.tar.gz";
+        let content = Bytes::from_static(b"cached-pypi-sdist");
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<html><body><a href=\"https://files.example/{filename}\">{filename}</a></body></html>"
+            )),
+        );
+        http.stub(
+            &format!("https://files.example/{filename}"),
+            200,
+            content.clone(),
+        );
+
+        let page = strategy
+            .index(&repository, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&page).unwrap();
+        assert!(html.contains(filename));
+
+        let downloaded = strategy.download_file(&repository, filename).await.unwrap();
+        assert_eq!(downloaded, content);
+    }
+
+    #[test]
+    fn parse_warehouse_upload_times_keeps_earliest_file() {
+        let body = serde_json::json!({
+            "releases": {
+                "1.0.0": [
+                    { "upload_time_iso_8601": "2026-08-10T12:00:00Z" },
+                    { "upload_time_iso_8601": "2026-08-01T00:00:00Z" }
+                ]
+            }
+        })
+        .to_string();
+        let times = parse_warehouse_upload_times(body.as_bytes());
+        assert_eq!(times.get("1.0.0").map(String::as_str), Some("2026-08-01T00:00:00Z"));
     }
 }

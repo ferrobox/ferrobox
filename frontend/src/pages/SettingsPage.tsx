@@ -135,8 +135,10 @@ export function SettingsPage() {
           <CardHeader>
             <CardTitle>Instancia</CardTitle>
             <CardDescription>
-              URL pública que deben usar Cargo y otros clientes. Se toma de{" "}
-              <code className="font-mono">PUBLIC_BASE_URL</code>.
+              URL pública que deben usar Cargo y otros clientes (
+              <code className="font-mono">PUBLIC_BASE_URL</code>) y retención de
+              Mirrors npm / PyPI (
+              <code className="font-mono">MIRROR_QUARANTINE_DAYS</code>).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -171,6 +173,23 @@ export function SettingsPage() {
                   <p className="text-sm text-muted-foreground">Versión del servidor</p>
                   <p className="mt-1 font-mono text-sm text-foreground">
                     {settings?.version ?? "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Cuarentena de Mirrors npm / PyPI
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-foreground">
+                    {settings?.mirror_quarantine_days === 0
+                      ? "Desactivada"
+                      : `${settings?.mirror_quarantine_days ?? "—"} días`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {settings?.mirror_quarantine_days === 0
+                      ? "Las versiones nuevas de npm y PyPI públicos se sirven al momento. El valor por defecto es 14."
+                      : "Las versiones publicadas en npm o PyPI hace menos de ese plazo no aparecen en el índice y la descarga responde 403. Reduce la ventana de typosquatting. No aplica a Forges."}{" "}
+                    Se toma de <code className="font-mono">MIRROR_QUARANTINE_DAYS</code>
+                    {settings?.mirror_quarantine_days === 0 ? "." : " (0 la desactiva)."}
                   </p>
                 </div>
               </>

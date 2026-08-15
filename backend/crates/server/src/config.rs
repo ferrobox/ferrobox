@@ -8,6 +8,10 @@ pub enum ConfigError {
     /// Falta una variable de entorno obligatoria.
     #[error("missing required environment variable: {0}")]
     MissingVar(&'static str),
+
+    /// Una variable de entorno tiene un valor que no se puede interpretar.
+    #[error("invalid value for environment variable: {0}")]
+    InvalidVar(&'static str),
 }
 
 /// Configuración del servidor, ensamblada una sola vez al arrancar.
@@ -31,6 +35,9 @@ pub struct Config {
     /// absolutas en protocolos que las requieren, como el `config.json`
     /// del índice disperso de Cargo.
     pub public_base_url: String,
+    /// Días de edad mínima para servir una versión desde un Mirror npm
+    /// o `PyPI`. `0` desactiva la cuarentena. El valor por defecto es 14.
+    pub mirror_quarantine_days: u32,
     /// Nombre del administrador inicial (solo se usa si no hay usuarios).
     pub admin_username: String,
     /// Contraseña del administrador inicial (solo se usa si no hay usuarios).
@@ -54,6 +61,7 @@ impl Config {
             s3_bucket: require_env("S3_BUCKET")?,
             bind_address: env_or("BIND_ADDRESS", "127.0.0.1:3000"),
             public_base_url: env_or("PUBLIC_BASE_URL", "http://127.0.0.1:3000"),
+            mirror_quarantine_days: env_u32("MIRROR_QUARANTINE_DAYS", 14)?,
             admin_username: env_or("ADMIN_USERNAME", "admin"),
             admin_password: env_or("ADMIN_PASSWORD", "admin"),
         })
@@ -66,4 +74,14 @@ fn require_env(key: &'static str) -> Result<String, ConfigError> {
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn env_u32(key: &'static str, default: u32) -> Result<u32, ConfigError> {
+    match std::env::var(key) {
+        Ok(value) => value
+            .trim()
+            .parse()
+            .map_err(|_| ConfigError::InvalidVar(key)),
+        Err(_) => Ok(default),
+    }
 }

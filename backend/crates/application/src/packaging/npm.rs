@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
+use chrono::Utc;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -30,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::quarantine::MirrorQuarantine;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -41,6 +43,7 @@ pub struct NpmPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
+    quarantine: MirrorQuarantine,
 }
 
 impl NpmPackagingStrategy {
@@ -62,7 +65,15 @@ impl NpmPackagingStrategy {
             http_client,
             repository_store,
             public_base_url,
+            quarantine: MirrorQuarantine::DISABLED,
         }
+    }
+
+    /// Aplica una política de cuarentena a las versiones de un `Mirror`.
+    #[must_use]
+    pub fn with_quarantine(mut self, quarantine: MirrorQuarantine) -> Self {
+        self.quarantine = quarantine;
+        self
     }
 
     fn ensure_npm_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -163,6 +174,7 @@ impl NpmPackagingStrategy {
         };
 
         let dist_tags = parse_dist_tags(packument.get("dist-tags"));
+        let times = packument.get("time").and_then(Value::as_object);
 
         for (version_str, manifest) in versions {
             let Ok(version) = PackageVersion::parse(version_str.clone()) else {
@@ -171,6 +183,12 @@ impl NpmPackagingStrategy {
             let mut entry =
                 version_entry_from_upstream_manifest(name.as_str(), version_str, manifest)?;
             entry.dist_tags.clone_from(&dist_tags);
+            entry.published_at = times
+                .and_then(|map| map.get(version_str))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
             let coordinate =
                 PackageCoordinate::new(PackageEcosystem::Npm, name.clone(), version);
             let entry_bytes = Bytes::from(
@@ -205,6 +223,12 @@ impl NpmPackagingStrategy {
             .find_local_entry(repository, coordinate)
             .await?
             .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        self.quarantine.reject_if_held(
+            entry.name.as_str(),
+            entry.version.as_str(),
+            entry.published_at.as_deref(),
+            Utc::now(),
+        )?;
 
         let tarball_url = entry
             .manifest
@@ -282,9 +306,21 @@ impl NpmPackagingStrategy {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         }
 
+        let now = Utc::now();
+        let visible: Vec<Bytes> = entries
+            .into_iter()
+            .filter(|entry_bytes| {
+                serde_json::from_slice::<VersionEntry>(entry_bytes)
+                    .is_ok_and(|entry| !self.quarantine.is_held(entry.published_at.as_deref(), now))
+            })
+            .collect();
+        if visible.is_empty() {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        }
+
         packument_from_entries(
             name.as_str(),
-            &entries,
+            &visible,
             |version| self.tarball_url(serving, name.as_str(), version),
         )
     }
@@ -294,6 +330,17 @@ impl NpmPackagingStrategy {
         repository: &Repository,
         coordinate: &PackageCoordinate,
     ) -> Result<Bytes, PackagingError> {
+        if Self::mirror_upstream(repository).is_some()
+            && let Some(entry) = self.find_local_entry(repository, coordinate).await?
+        {
+            self.quarantine.reject_if_held(
+                entry.name.as_str(),
+                entry.version.as_str(),
+                entry.published_at.as_deref(),
+                Utc::now(),
+            )?;
+        }
+
         if let Some(artifact_id) = self
             .package_index_store
             .artifact_for(repository.id(), coordinate)
@@ -342,11 +389,15 @@ impl NpmPackagingStrategy {
             .await?;
 
         let needle = query.to_ascii_lowercase();
+        let now = Utc::now();
         let mut by_name: BTreeMap<String, Vec<VersionEntry>> = BTreeMap::new();
         for entry_bytes in entries {
             let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
             if !entry.name.to_ascii_lowercase().contains(&needle) {
+                continue;
+            }
+            if self.quarantine.is_held(entry.published_at.as_deref(), now) {
                 continue;
             }
             by_name.entry(entry.name.clone()).or_default().push(entry);
@@ -417,6 +468,7 @@ impl PackagingStrategy for NpmPackagingStrategy {
             yanked: false,
             dist_tags: parsed.dist_tags,
             manifest: parsed.manifest,
+            published_at: None,
         };
         let entry_bytes = Bytes::from(
             serde_json::to_vec(&entry).expect("a VersionEntry always serializes to valid JSON"),
@@ -614,6 +666,7 @@ fn version_entry_from_upstream_manifest(
         yanked: manifest.get("deprecated").is_some(),
         dist_tags: BTreeMap::new(),
         manifest: manifest.clone(),
+        published_at: None,
     })
 }
 
@@ -629,6 +682,9 @@ struct VersionEntry {
     dist_tags: BTreeMap<String, String>,
     #[serde(default)]
     manifest: Value,
+    /// Instante RFC 3339 de publicación en el *upstream*, si se conoce.
+    #[serde(default)]
+    published_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -929,10 +985,12 @@ mod tests {
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
+    use crate::packaging::quarantine::MirrorQuarantine;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
         InMemoryRepositoryStore, InMemoryStorage,
     };
+    use chrono::Utc;
 
     fn strategy() -> NpmPackagingStrategy {
         NpmPackagingStrategy::new(
@@ -1562,5 +1620,118 @@ mod tests {
         )
         .unwrap();
         assert_eq!(packument["dist-tags"]["latest"], "4.17.21");
+    }
+
+    fn days_ago(days: i64) -> String {
+        (Utc::now() - chrono::Duration::days(days)).to_rfc3339()
+    }
+
+    fn quarantined_strategy(http: Arc<InMemoryHttpClient>) -> NpmPackagingStrategy {
+        NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http,
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        )
+        .with_quarantine(MirrorQuarantine::from_days(14))
+    }
+
+    #[tokio::test]
+    async fn mirror_quarantine_hides_recent_versions_and_keeps_old_latest() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = quarantined_strategy(http.clone());
+        let repository = npm_mirror("npm-proxy", "https://registry.example/");
+        let tarball = b"pkg-bytes";
+        http.stub(
+            "https://registry.example/demo-pkg",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "name": "demo-pkg",
+                    "dist-tags": { "latest": "2.0.0" },
+                    "time": {
+                        "1.0.0": days_ago(30),
+                        "2.0.0": days_ago(1)
+                    },
+                    "versions": {
+                        "1.0.0": version_dist(
+                            "demo-pkg",
+                            "1.0.0",
+                            "https://registry.example/demo-pkg/-/demo-pkg-1.0.0.tgz",
+                            tarball,
+                        ),
+                        "2.0.0": version_dist(
+                            "demo-pkg",
+                            "2.0.0",
+                            "https://registry.example/demo-pkg/-/demo-pkg-2.0.0.tgz",
+                            tarball,
+                        )
+                    }
+                })
+                .to_string(),
+            ),
+        );
+
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, &PackageName::parse("demo-pkg").unwrap())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(packument["versions"].get("1.0.0").is_some());
+        assert!(packument["versions"].get("2.0.0").is_none());
+        assert_eq!(packument["dist-tags"]["latest"], "1.0.0");
+
+        let err = strategy
+            .download(
+                &repository,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Npm,
+                    PackageName::parse("demo-pkg").unwrap(),
+                    PackageVersion::parse("2.0.0").unwrap(),
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PackagingError::Quarantined { .. }));
+    }
+
+    #[tokio::test]
+    async fn mirror_without_publish_time_is_not_quarantined() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = quarantined_strategy(http.clone());
+        let repository = npm_mirror("npm-proxy", "https://registry.example/");
+        let tarball = Bytes::from_static(b"cached-npm-tarball");
+        let tarball_url = "https://registry.example/demo-pkg/-/demo-pkg-1.0.0.tgz";
+        http.stub(
+            "https://registry.example/demo-pkg",
+            200,
+            upstream_packument("demo-pkg", "1.0.0", tarball_url, &tarball),
+        );
+        http.stub(tarball_url, 200, tarball.clone());
+
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, &PackageName::parse("demo-pkg").unwrap())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(packument["versions"].get("1.0.0").is_some());
+        let body = strategy
+            .download(
+                &repository,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Npm,
+                    PackageName::parse("demo-pkg").unwrap(),
+                    PackageVersion::parse("1.0.0").unwrap(),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(body, tarball);
     }
 }

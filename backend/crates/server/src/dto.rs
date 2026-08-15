@@ -315,6 +315,10 @@ pub(crate) struct SettingsResponse {
     pub(crate) public_base_url: String,
     /// Versión del servidor (`CARGO_PKG_VERSION`).
     pub(crate) version: String,
+    /// Días de edad mínima para servir una versión desde un Mirror npm
+    /// o `PyPI`. `0` desactiva la cuarentena. El valor por defecto es 14.
+    #[ts(type = "number")]
+    pub(crate) mirror_quarantine_days: u32,
 }
 
 /// Respuesta al iniciar sesión correctamente.
