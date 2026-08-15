@@ -3,6 +3,7 @@
 //!
 //! Referencias:
 //! - índice simple: <https://peps.python.org/pep-0503/>
+//! - índice JSON: <https://peps.python.org/pep-0691/>
 //! - subida *legacy*: <https://docs.pypi.org/api/upload/>
 //!
 //! Las lecturas (`/simple/` y `/packages/`) son públicas. Las escrituras
@@ -19,7 +20,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
-use ferrobox_application::packaging::pypi::simple_root_page;
+use ferrobox_application::packaging::pypi::{
+    normalize_pypi_name, project_page_json, simple_root_json, simple_root_page,
+};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -84,23 +87,40 @@ struct PypiOk {
 async fn simple_root(
     State(state): State<Arc<AppState>>,
     Path(repository_id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
     let repository = load_pypi_repository(&state, repository_id).await?;
     let strategy = pypi_strategy(&state)?;
     let hits = strategy.search(&repository, "", 10_000).await?;
-    Ok(html_raw(simple_root_page(&hits)))
+    if prefers_simple_json(&headers) {
+        Ok(json_simple(simple_root_json(&hits)))
+    } else {
+        Ok(html_raw(simple_root_page(&hits)))
+    }
 }
 
 async fn simple_project(
     State(state): State<Arc<AppState>>,
     Path((repository_id, name)): Path<(Uuid, String)>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
     let repository = load_pypi_repository(&state, repository_id).await?;
     let package_name =
-        PackageName::parse(name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+        PackageName::parse(name.clone()).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let strategy = pypi_strategy(&state)?;
-    let body = strategy.index(&repository, &package_name).await?;
-    Ok(html_raw(body))
+    let html = strategy.index(&repository, &package_name).await?;
+    if prefers_simple_json(&headers) {
+        let page_url = format!(
+            "{}/pypi/{}/simple/{}/",
+            state.public_base_url.trim_end_matches('/'),
+            repository_id,
+            normalize_pypi_name(&name)
+        );
+        let json = project_page_json(package_name.as_str(), &html, &page_url)?;
+        Ok(json_simple(json))
+    } else {
+        Ok(html_raw(html))
+    }
 }
 
 async fn download_file(
@@ -283,12 +303,65 @@ fn utf8_field(bytes: &Bytes) -> String {
 }
 
 fn html_raw(body: Bytes) -> (StatusCode, HeaderMap, Bytes) {
+    simple_index_response("text/html; charset=utf-8", body)
+}
+
+fn json_simple(body: Bytes) -> (StatusCode, HeaderMap, Bytes) {
+    simple_index_response("application/vnd.pypi.simple.v1+json", body)
+}
+
+fn simple_index_response(
+    content_type: &'static str,
+    body: Bytes,
+) -> (StatusCode, HeaderMap, Bytes) {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::VARY, HeaderValue::from_static("Accept"));
     (StatusCode::OK, headers, body)
+}
+
+/// Elige JSON PEP 691 si el cliente lo prefiere sobre HTML (como `pip` y `uv`).
+/// Sin `Accept`, o con solo `*/*`, se sirve HTML PEP 503.
+fn prefers_simple_json(headers: &HeaderMap) -> bool {
+    let Some(accept) = headers.get(header::ACCEPT).and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+
+    let mut json_q: Option<f32> = None;
+    let mut html_q: Option<f32> = None;
+    for part in accept.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (media, params) = part.split_once(';').map_or((part, ""), |(media, rest)| (media, rest));
+        let media = media.trim().to_ascii_lowercase();
+        let mut quality = 1.0_f32;
+        for param in params.split(';') {
+            let param = param.trim();
+            if let Some(value) = param
+                .strip_prefix("q=")
+                .or_else(|| param.strip_prefix("Q="))
+            {
+                quality = value.trim().parse().unwrap_or(0.0);
+            }
+        }
+        if media == "application/vnd.pypi.simple.v1+json" || media == "application/json" {
+            json_q = Some(json_q.map_or(quality, |old| old.max(quality)));
+        }
+        if media == "text/html"
+            || media == "application/vnd.pypi.simple.v1+html"
+            || media == "*/*"
+        {
+            html_q = Some(html_q.map_or(quality, |old| old.max(quality)));
+        }
+    }
+
+    match (json_q, html_q) {
+        (Some(json), Some(html)) => json >= html,
+        (Some(_), None) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -297,7 +370,7 @@ mod tests {
 
     use axum::Router;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use bytes::Bytes;
@@ -489,12 +562,51 @@ mod tests {
     }
 
     async fn send(app: Router, request: Request<Body>) -> (StatusCode, Bytes) {
+        let (_, status, body) = send_with_headers(app, request).await;
+        (status, body)
+    }
+
+    async fn send_with_headers(
+        app: Router,
+        request: Request<Body>,
+    ) -> (HeaderMap, StatusCode, Bytes) {
         let response = app.oneshot(request).await.unwrap();
         let status = response.status();
+        let headers = response.headers().clone();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        (status, body)
+        (headers, status, body)
+    }
+
+    fn accept_headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ACCEPT, HeaderValue::from_str(value).unwrap());
+        headers
+    }
+
+    #[test]
+    fn prefers_json_when_pip_advertises_it() {
+        assert!(super::prefers_simple_json(&accept_headers(
+            "application/vnd.pypi.simple.v1+json, application/vnd.pypi.simple.v1+html;q=0.1, text/html;q=0.01",
+        )));
+    }
+
+    #[test]
+    fn prefers_html_when_accept_is_missing() {
+        assert!(!super::prefers_simple_json(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn prefers_html_when_accept_is_star() {
+        assert!(!super::prefers_simple_json(&accept_headers("*/*")));
+    }
+
+    #[test]
+    fn prefers_html_when_html_has_higher_quality() {
+        assert!(!super::prefers_simple_json(&accept_headers(
+            "text/html, application/vnd.pypi.simple.v1+json;q=0.5",
+        )));
     }
 
     #[tokio::test]
@@ -611,6 +723,94 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let html = std::str::from_utf8(&body).unwrap();
         assert!(html.contains("data-yanked"));
+    }
+
+    #[tokio::test]
+    async fn simple_index_negotiates_pep691_json() {
+        let fx = fixture().await;
+        let filename = "demo_pypi-1.0.0.tar.gz";
+        let (content_type, body) = multipart_body("Demo_Pypi", "1.0.0", filename, b"sdist-bytes");
+        let basic = BASE64.encode(format!("__token__:{}", fx.developer_token));
+        let pip_accept = "application/vnd.pypi.simple.v1+json, application/vnd.pypi.simple.v1+html;q=0.1, text/html;q=0.01";
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/pypi/{}/legacy/", fx.repo_id))
+                .header("Authorization", format!("Basic {basic}"))
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (headers, status, body) = send_with_headers(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!("/pypi/{}/simple/", fx.repo_id))
+                .header("Accept", pip_accept)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/vnd.pypi.simple.v1+json"
+        );
+        assert_eq!(headers.get(header::VARY).unwrap(), "Accept");
+        let root: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(root["meta"]["api-version"], "1.0");
+        assert_eq!(root["projects"][0]["name"], "demo-pypi");
+
+        let (headers, status, body) = send_with_headers(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!("/pypi/{}/simple/demo-pypi/", fx.repo_id))
+                .header("Accept", pip_accept)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/vnd.pypi.simple.v1+json"
+        );
+        let project: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(project["name"], "demo-pypi");
+        assert_eq!(project["files"][0]["filename"], filename);
+        assert_eq!(
+            project["files"][0]["hashes"]["sha256"].as_str().unwrap().len(),
+            64
+        );
+        assert!(
+            project["files"][0]["url"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("/pypi/{}/packages/{filename}", fx.repo_id))
+        );
+
+        let (headers, status, body) = send_with_headers(
+            fx.app,
+            Request::builder()
+                .uri(format!("/pypi/{}/simple/", fx.repo_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            headers
+                .get(header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("text/html")
+        );
+        assert!(std::str::from_utf8(&body).unwrap().contains("Simple Index"));
     }
 
     #[tokio::test]

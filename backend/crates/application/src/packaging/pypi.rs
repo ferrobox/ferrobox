@@ -1,9 +1,10 @@
 //! Estrategia de empaquetado para el ecosistema `PyPI`: implementa el
-//! subconjunto del protocolo que `twine upload` y `pip install`
-//! necesitan contra un repositorio `FerroBox`.
+//! subconjunto del protocolo que `twine upload`, `pip install` y
+//! `uv pip install` necesitan contra un repositorio `FerroBox`.
 //!
 //! Referencias:
 //! - índice simple: <https://peps.python.org/pep-0503/>
+//! - índice JSON: <https://peps.python.org/pep-0691/>
 //! - subida *legacy*: <https://docs.pypi.org/api/upload/>
 //!
 //! Cubre **Forge** (subir sdist/wheel, índice simple, descarga y yank),
@@ -935,6 +936,72 @@ pub fn simple_root_page(hits: &[PackageSearchHit]) -> Bytes {
     Bytes::from(simple_html("Simple Index", &links))
 }
 
+/// Página raíz PEP 691 (`/simple/`) en JSON.
+#[must_use]
+pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
+    let projects: Vec<serde_json::Value> = hits
+        .iter()
+        .map(|hit| serde_json::json!({ "name": normalize_pypi_name(&hit.name) }))
+        .collect();
+    Bytes::from(
+        serde_json::to_vec(&serde_json::json!({
+            "meta": { "api-version": "1.0" },
+            "projects": projects,
+        }))
+        .expect("simple root JSON always serializes"),
+    )
+}
+
+/// Convierte una página HTML PEP 503 de proyecto al JSON PEP 691.
+///
+/// # Errors
+///
+/// Devuelve [`PackagingError::InvalidPayload`] si `html` no es UTF-8, o
+/// [`PackagingError::PackageNotFound`] si no hay ficheros.
+pub fn project_page_json(
+    name: &str,
+    html: &[u8],
+    page_url: &str,
+) -> Result<Bytes, PackagingError> {
+    let html = std::str::from_utf8(html)
+        .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+    let links = parse_simple_links(html, page_url)?;
+    if links.is_empty() {
+        return Err(PackagingError::PackageNotFound(name.to_string()));
+    }
+
+    let files: Vec<serde_json::Value> = links
+        .into_iter()
+        .map(|link| {
+            let mut file = serde_json::json!({
+                "filename": link.filename,
+                "url": link.url,
+                "hashes": if link.sha256.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::json!({ "sha256": link.sha256 })
+                },
+            });
+            if link.yanked {
+                file["yanked"] = serde_json::Value::Bool(true);
+            }
+            if let Some(requires_python) = link.requires_python {
+                file["requires-python"] = serde_json::Value::String(requires_python);
+            }
+            file
+        })
+        .collect();
+
+    Ok(Bytes::from(
+        serde_json::to_vec(&serde_json::json!({
+            "name": normalize_pypi_name(name),
+            "files": files,
+            "meta": { "api-version": "1.0" },
+        }))
+        .expect("project JSON always serializes"),
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct VersionEntry {
     name: String,
@@ -1250,6 +1317,48 @@ mod tests {
         let html = std::str::from_utf8(&root).unwrap();
         assert!(html.contains("href=\"demo-pkg/\""));
         assert!(html.contains(">demo-pkg</a>"));
+        let root_json: serde_json::Value =
+            serde_json::from_slice(&simple_root_json(&hits)).unwrap();
+        assert_eq!(root_json["projects"][0]["name"], "demo-pkg");
+        assert_eq!(root_json["meta"]["api-version"], "1.0");
+    }
+
+    #[tokio::test]
+    async fn project_page_json_includes_hashes_and_yanked() {
+        let strategy = strategy();
+        let repository = pypi_forge("pypi-local");
+        let coordinate = strategy
+            .publish(
+                &repository,
+                publish_body("demo-pypi", "1.0.0", "demo_pypi-1.0.0.tar.gz", b"sdist"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .set_yanked(&repository, &coordinate, true)
+            .await
+            .unwrap();
+        let html = strategy
+            .index(&repository, coordinate.name())
+            .await
+            .unwrap();
+        let page_url = format!(
+            "http://127.0.0.1:3000/pypi/{}/simple/demo-pypi/",
+            repository.id()
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(&project_page_json("demo-pypi", &html, &page_url).unwrap())
+                .unwrap();
+        assert_eq!(json["name"], "demo-pypi");
+        assert_eq!(json["files"][0]["filename"], "demo_pypi-1.0.0.tar.gz");
+        assert!(json["files"][0]["hashes"]["sha256"].as_str().unwrap().len() == 64);
+        assert_eq!(json["files"][0]["yanked"], true);
+        assert!(
+            json["files"][0]["url"]
+                .as_str()
+                .unwrap()
+                .contains("/packages/demo_pypi-1.0.0.tar.gz")
+        );
     }
 
     fn pypi_mirror(name: &str, upstream: &str) -> Repository {

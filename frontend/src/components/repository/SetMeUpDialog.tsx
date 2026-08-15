@@ -32,7 +32,8 @@ export function SetMeUpDialog({
     ) : ecosystem === "pypi" ? (
       <>
         Copia estos fragmentos en <code className="font-mono">~/.pypirc</code> o en el comando de{" "}
-        <code className="font-mono">pip</code>. El token se crea en Seguridad.
+        <code className="font-mono">pip</code> / <code className="font-mono">uv</code>. El token se
+        crea en Seguridad.
       </>
     ) : (
       <>
