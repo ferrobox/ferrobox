@@ -1,7 +1,7 @@
 //! Dobles en memoria de los puertos, para tests de aplicación y HTTP.
 #![allow(missing_docs, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -453,42 +453,61 @@ impl ApiTokenStore for InMemoryApiTokenStore {
 
 #[derive(Default)]
 pub struct InMemoryHttpClient {
-    responses: Mutex<HashMap<String, HttpResponse>>,
+    responses: Mutex<HashMap<String, VecDeque<HttpResponse>>>,
 }
 
 impl InMemoryHttpClient {
     pub fn stub(&self, url: &str, status: u16, body: impl Into<Bytes>) {
-        self.responses.lock().unwrap().insert(
-            url.to_string(),
-            HttpResponse {
-                status,
-                body: body.into(),
-            },
-        );
+        self.stub_response(url, HttpResponse::new(status, body.into()));
+    }
+
+    pub fn stub_response(&self, url: &str, response: HttpResponse) {
+        self.stub_sequence(url, vec![response]);
+    }
+
+    pub fn stub_sequence(&self, url: &str, responses: Vec<HttpResponse>) {
+        self.responses
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), VecDeque::from(responses));
     }
 }
 
 #[async_trait]
 impl HttpClient for InMemoryHttpClient {
     async fn get(&self, url: &str) -> Result<HttpResponse, HttpClientError> {
-        self.responses
-            .lock()
-            .unwrap()
-            .get(url)
-            .cloned()
-            .ok_or_else(|| HttpClientError::Status {
-                status: 404,
+        let response = self.get_with_headers(url, &[]).await?;
+        if response.is_success() {
+            Ok(response)
+        } else {
+            Err(HttpClientError::Status {
+                status: response.status,
                 url: url.to_string(),
             })
-            .and_then(|response| {
-                if response.is_success() {
-                    Ok(response)
-                } else {
-                    Err(HttpClientError::Status {
-                        status: response.status,
-                        url: url.to_string(),
-                    })
-                }
-            })
+        }
+    }
+
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        _headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, HttpClientError> {
+        let mut responses = self.responses.lock().unwrap();
+        let Some(queue) = responses.get_mut(url) else {
+            return Err(HttpClientError::Status {
+                status: 404,
+                url: url.to_string(),
+            });
+        };
+        if queue.is_empty() {
+            return Err(HttpClientError::Status {
+                status: 404,
+                url: url.to_string(),
+            });
+        }
+        if queue.len() == 1 {
+            return Ok(queue[0].clone());
+        }
+        Ok(queue.pop_front().expect("queue length was checked"))
     }
 }

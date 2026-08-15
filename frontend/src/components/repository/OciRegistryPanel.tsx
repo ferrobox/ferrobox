@@ -64,9 +64,9 @@ export function OciRegistryPanel({
 
   const introTitle = isAlloy ? "Alloy OCI" : isMirror ? "Mirror OCI" : "Registro OCI";
   const introBody = isAlloy
-    ? "Este Alloy agrega Forges OCI en una sola URL. docker pull resuelve contra los miembros, en orden. No acepta docker push: publica en un Forge miembro."
+    ? "Este Alloy agrega Forges y/o Mirrors OCI en una sola URL. docker pull resuelve contra los miembros, en orden. No acepta docker push: publica en un Forge miembro."
     : isMirror
-      ? "El Mirror OCI todavía no está implementado. Crea un Forge para docker push y docker pull."
+      ? "Este Mirror cachea imágenes del upstream (por ejemplo Docker Hub) la primera vez que docker pull las resuelve. No acepta docker push ni yank."
       : "Este repositorio implementa el Distribution Spec v2: docker push y docker pull funcionan de forma nativa.";
 
   const body = (
@@ -76,45 +76,48 @@ export function OciRegistryPanel({
         <p className="mt-1 text-sm text-muted-foreground">{introBody}</p>
       </div>
 
-      {isMirror ? null : (
-        <>
-          {readOnly ? null : (
-            <div className="space-y-2">
-              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                1. Login (token de Seguridad)
-              </p>
-              <CopyableCodeBlock
-                code={`echo 'fb_…' | docker login ${registryHost} -u __token__ --password-stdin`}
-              />
-              <p className="text-xs text-muted-foreground">
-                En HTTP local Docker exige{" "}
-                <code className="font-mono">insecure-registries: [&quot;{registryHost}&quot;]</code>{" "}
-                en <code className="font-mono">/etc/docker/daemon.json</code> y reiniciar el daemon.
-                Copia el UUID completo (8-4-4-4-12). Si un <code className="font-mono">login</code>{" "}
-                antiguo no basta para el push, haz{" "}
-                <code className="font-mono">docker logout {registryHost}</code> y vuelve a entrar.
-              </p>
-            </div>
-          )}
-          <div className="space-y-2">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              {readOnly ? "1. Instala (pull)" : "2. Publica y tira"}
-            </p>
-            <CopyableCodeBlock
-              code={
-                readOnly
-                  ? `docker pull ${imageRef}`
-                  : `docker tag alpine:latest ${imageRef}\ndocker push ${imageRef}\ndocker pull ${imageRef}`
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              El nombre de imagen es <code className="font-mono">&lt;UUID&gt;/demo</code>. El
-              registro es la raíz del host (<code className="font-mono">/v2/</code>), no un prefijo
-              extra.
-            </p>
-          </div>
-        </>
+      {readOnly ? null : (
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            1. Login (token de Seguridad)
+          </p>
+          <CopyableCodeBlock
+            code={`echo 'fb_…' | docker login ${registryHost} -u __token__ --password-stdin`}
+          />
+          <p className="text-xs text-muted-foreground">
+            En HTTP local Docker exige{" "}
+            <code className="font-mono">insecure-registries: [&quot;{registryHost}&quot;]</code>{" "}
+            en <code className="font-mono">/etc/docker/daemon.json</code> y reiniciar el daemon.
+            Copia el UUID completo (8-4-4-4-12). Si un <code className="font-mono">login</code>{" "}
+            antiguo no basta para el push, haz{" "}
+            <code className="font-mono">docker logout {registryHost}</code> y vuelve a entrar.
+          </p>
+        </div>
       )}
+      <div className="space-y-2">
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          {readOnly ? "1. Instala (pull)" : "2. Publica y tira"}
+        </p>
+        <CopyableCodeBlock
+          code={
+            readOnly
+              ? `docker pull ${imageRef}`
+              : `docker tag alpine:latest ${imageRef}\ndocker push ${imageRef}\ndocker pull ${imageRef}`
+          }
+        />
+        <p className="text-xs text-muted-foreground">
+          El nombre de imagen es <code className="font-mono">&lt;UUID&gt;/demo</code>. El
+          registro es la raíz del host (<code className="font-mono">/v2/</code>), no un prefijo
+          extra.
+          {isMirror ? (
+            <>
+              {" "}
+              Con upstream Docker Hub, <code className="font-mono">alpine:latest</code> se
+              resuelve como <code className="font-mono">library/alpine</code>.
+            </>
+          ) : null}
+        </p>
+      </div>
     </div>
   );
 

@@ -274,6 +274,21 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
+    /// Descarga un blob OCI por digest. `name` es el nombre de imagen
+    /// (un `Mirror` lo necesita para construir la URL *upstream*).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::FileNotFound`] si el blob no existe.
+    async fn get_blob(
+        &self,
+        repository: &Repository,
+        _name: &str,
+        digest: &str,
+    ) -> Result<Bytes, PackagingError> {
+        self.download_file(repository, digest).await
+    }
+
     /// Lista las etiquetas de una imagen OCI.
     ///
     /// # Errors
@@ -416,6 +431,7 @@ mod tests {
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryRepositoryStore::default()),
+            Arc::new(InMemoryHttpClient::default()),
         ))
     }
 

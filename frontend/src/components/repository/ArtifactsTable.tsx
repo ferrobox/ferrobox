@@ -50,6 +50,10 @@ function displayName(artifact: ArtifactResponse): string {
   return artifact.name ?? "Artefacto sin índice";
 }
 
+function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
+  return ecosystem === "cargo" ? `v${version}` : version;
+}
+
 export function ArtifactsTable({
   repositoryId,
   kind,
@@ -186,7 +190,9 @@ export function ArtifactsTable({
               ? "Los paquetes se cachean la primera vez que npm install los resuelve contra este Mirror."
               : ecosystem === "pypi"
                 ? "Los paquetes se cachean la primera vez que pip install los resuelve contra este Mirror."
-                : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+                : ecosystem === "oci"
+                  ? "Las imágenes se cachean la primera vez que docker pull las resuelve contra este Mirror."
+                  : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
@@ -272,7 +278,7 @@ export function ArtifactsTable({
                               variant="outline"
                               className={`font-mono ${artifact.yanked ? "text-muted-foreground line-through" : ""}`}
                             >
-                              v{artifact.version}
+                              {versionLabel(artifact.version, ecosystem)}
                             </Badge>
                           ) : (
                             <span className="font-mono text-xs text-muted-foreground">

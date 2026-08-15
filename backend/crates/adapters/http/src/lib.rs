@@ -39,29 +39,52 @@ impl Default for ReqwestHttpClient {
 #[async_trait]
 impl HttpClient for ReqwestHttpClient {
     async fn get(&self, url: &str) -> Result<HttpResponse, HttpClientError> {
-        let response = self.client.get(url).send().await.map_err(|err| {
-            HttpClientError::Transport {
+        let response = self.get_with_headers(url, &[]).await?;
+        if response.is_success() {
+            Ok(response)
+        } else {
+            Err(HttpClientError::Status {
+                status: response.status,
                 url: url.to_string(),
-                message: err.to_string(),
-            }
+            })
+        }
+    }
+
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, HttpClientError> {
+        let mut request = self.client.get(url);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+
+        let response = request.send().await.map_err(|err| HttpClientError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
         })?;
 
         let status = response.status().as_u16();
+        let header_pairs = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|text| (name.as_str().to_ascii_lowercase(), text.to_string()))
+            })
+            .collect();
         let body = response.bytes().await.map_err(|err| HttpClientError::Transport {
             url: url.to_string(),
             message: err.to_string(),
         })?;
 
-        if !(200..300).contains(&status) {
-            return Err(HttpClientError::Status {
-                status,
-                url: url.to_string(),
-            });
-        }
-
         Ok(HttpResponse {
             status,
             body,
+            headers: header_pairs,
         })
     }
 }
