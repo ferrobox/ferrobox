@@ -30,7 +30,8 @@ import { formatBytes, truncateMiddle } from "@/lib/format";
 
 function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
   if (artifact.name && artifact.version) {
-    const extension = ecosystem === "npm" ? "tgz" : "crate";
+    const extension =
+      ecosystem === "npm" ? "tgz" : ecosystem === "pypi" ? "tar.gz" : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -61,7 +62,9 @@ export function ArtifactsTable({
   const setYanked = useSetYanked(repositoryId);
   const canWrite = canWriteArtifacts(user?.role);
   const canYank =
-    canWrite && kind === "forge" && (ecosystem === "cargo" || ecosystem === "npm");
+    canWrite &&
+    kind === "forge" &&
+    (ecosystem === "cargo" || ecosystem === "npm" || ecosystem === "pypi");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -173,6 +176,11 @@ export function ArtifactsTable({
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
+              este registro.
+            </>
+          ) : ecosystem === "pypi" ? (
+            <>
+              Publica un paquete con <code className="font-mono">twine upload</code> apuntando a
               este registro.
             </>
           ) : (
@@ -305,8 +313,8 @@ export function ArtifactsTable({
                             disabled={setYanked.isPending}
                             title={
                               artifact.yanked
-                                ? "Vuelve a ofrecer esta versión a cargo"
-                                : "cargo dejará de usarla en resoluciones nuevas; sigue descargable si está en Cargo.lock"
+                                ? "Vuelve a ofrecer esta versión en resoluciones nuevas"
+                                : "Deja de usarse en resoluciones nuevas; sigue descargable si ya está fijado"
                             }
                             onClick={() => void onSetYanked(artifact, !artifact.yanked)}
                           >

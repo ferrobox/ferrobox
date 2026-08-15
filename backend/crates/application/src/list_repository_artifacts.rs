@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::RepositoryId;
+use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use serde::Deserialize;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Artefacto listado junto con el nombre y la versión de paquete, si el
 /// índice de su ecosistema los conoce (por ejemplo, un crate publicado
@@ -130,11 +131,7 @@ impl ListRepositoryArtifactsUseCase {
 
         let mut names_by_artifact = HashMap::new();
         for item in indexed {
-            names_by_artifact.entry(item.artifact_id).or_insert((
-                item.coordinate.name().as_str().to_owned(),
-                item.coordinate.version().as_str().to_owned(),
-                yanked_from_index_entry(&item.entry),
-            ));
+        apply_index_item(&mut names_by_artifact, &item);
         }
 
         Ok(artifacts
@@ -157,13 +154,47 @@ impl ListRepositoryArtifactsUseCase {
 }
 
 #[derive(Deserialize)]
-struct YankedFlag {
+struct IndexEntryMeta {
+    #[serde(default)]
+    yanked: bool,
+    #[serde(default)]
+    files: Vec<IndexFileMeta>,
+}
+
+#[derive(Deserialize)]
+struct IndexFileMeta {
+    artifact_id: String,
     #[serde(default)]
     yanked: bool,
 }
 
-fn yanked_from_index_entry(entry: &[u8]) -> bool {
-    serde_json::from_slice::<YankedFlag>(entry).is_ok_and(|flag| flag.yanked)
+fn apply_index_item(
+    names_by_artifact: &mut HashMap<ArtifactId, (String, String, bool)>,
+    item: &ferrobox_ports::package_index_store::IndexedArtifact,
+) {
+    let name = item.coordinate.name().as_str().to_owned();
+    let version = item.coordinate.version().as_str().to_owned();
+    let meta = serde_json::from_slice::<IndexEntryMeta>(&item.entry).unwrap_or(IndexEntryMeta {
+        yanked: false,
+        files: Vec::new(),
+    });
+
+    let mut mapped_file = false;
+    for file in &meta.files {
+        if let Ok(uuid) = Uuid::parse_str(&file.artifact_id) {
+            names_by_artifact.insert(
+                ArtifactId::from(uuid),
+                (name.clone(), version.clone(), meta.yanked || file.yanked),
+            );
+            mapped_file = true;
+        }
+    }
+
+    if !mapped_file {
+        names_by_artifact
+            .entry(item.artifact_id)
+            .or_insert((name, version, meta.yanked));
+    }
 }
 
 fn sort_listed(listed: &mut [ListedArtifact]) {
@@ -383,5 +414,68 @@ mod tests {
         assert_eq!(result[0].artifact().repository_id(), first.id());
         assert_eq!(result[1].package_name(), Some("beta"));
         assert_eq!(result[1].artifact().repository_id(), second.id());
+    }
+
+    #[tokio::test]
+    async fn attaches_names_from_every_pypi_file_in_the_index_entry() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository_id = RepositoryId::new();
+        let sdist = Artifact::new(repository_id, checksum(), 10);
+        let wheel = Artifact::new(repository_id, checksum(), 20);
+        artifact_store.save(&sdist).await.unwrap();
+        artifact_store.save(&wheel).await.unwrap();
+
+        let entry = serde_json::json!({
+            "name": "demo-pypi",
+            "version": "1.0.0",
+            "yanked": true,
+            "files": [
+                {
+                    "filename": "demo_pypi-1.0.0.tar.gz",
+                    "sha256": "aa",
+                    "artifact_id": sdist.id().to_string(),
+                    "yanked": true
+                },
+                {
+                    "filename": "demo_pypi-1.0.0-py3-none-any.whl",
+                    "sha256": "bb",
+                    "artifact_id": wheel.id().to_string(),
+                    "yanked": true
+                }
+            ]
+        });
+
+        package_index_store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::PyPi,
+                    PackageName::parse("demo-pypi").unwrap(),
+                    PackageVersion::parse("1.0.0").unwrap(),
+                ),
+                Some(wheel.id()),
+                Bytes::from(entry.to_string()),
+            )
+            .await
+            .unwrap();
+
+        let result = use_case(
+            Arc::new(InMemoryRepositoryStore::default()),
+            artifact_store,
+            package_index_store,
+        )
+        .execute(repository_id)
+        .await
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(
+            result
+                .iter()
+                .all(|item| item.package_name() == Some("demo-pypi")
+                    && item.package_version() == Some("1.0.0")
+                    && item.yanked())
+        );
     }
 }
