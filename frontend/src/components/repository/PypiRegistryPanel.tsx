@@ -88,9 +88,19 @@ export function PypiRegistryPanel({
                 : `pip install demo-ferrobox-pypi --index-url ${indexUrl} --trusted-host 127.0.0.1`
             }
           />
+          <CopyableCodeBlock
+            code={
+              isMirror
+                ? `uv pip install requests --index-url ${indexUrl} --allow-insecure-host 127.0.0.1`
+                : `uv pip install demo-ferrobox-pypi --index-url ${indexUrl} --allow-insecure-host 127.0.0.1`
+            }
+          />
           <p className="text-xs text-muted-foreground">
             La barra final de <code className="font-mono">/simple/</code> es obligatoria. En HTTP
-            local añade <code className="font-mono">--trusted-host 127.0.0.1</code>.
+            local, <code className="font-mono">pip</code> usa{" "}
+            <code className="font-mono">--trusted-host</code> y <code className="font-mono">uv</code>{" "}
+            usa <code className="font-mono">--allow-insecure-host</code>. Ambos piden el índice JSON
+            PEP 691.
           </p>
         </div>
       ) : (
@@ -126,6 +136,15 @@ password = fb_…`}
             <CopyableCodeBlock
               code={`pip install demo-ferrobox-pypi --index-url ${indexUrl} --trusted-host 127.0.0.1`}
             />
+            <CopyableCodeBlock
+              code={`uv pip install demo-ferrobox-pypi --index-url ${indexUrl} --allow-insecure-host 127.0.0.1`}
+            />
+            <p className="text-xs text-muted-foreground">
+              En HTTP local, <code className="font-mono">uv</code> usa{" "}
+              <code className="font-mono">--allow-insecure-host</code> en lugar de{" "}
+              <code className="font-mono">--trusted-host</code>. pip y uv piden el índice JSON PEP
+              691.
+            </p>
           </div>
         </>
       )}
