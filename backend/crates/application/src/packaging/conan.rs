@@ -159,6 +159,7 @@ impl ConanPackagingStrategy {
                     .load_recipe(repository, name, version, user, channel)
                     .await?
                     .ok_or_else(|| PackagingError::PackageNotFound(name.clone()))?;
+                reject_if_yanked(&entry)?;
                 let revision = entry
                     .latest_revision()
                     .ok_or_else(|| PackagingError::PackageNotFound(name.clone()))?;
@@ -177,6 +178,7 @@ impl ConanPackagingStrategy {
                     .load_recipe(repository, name, version, user, channel)
                     .await?
                     .ok_or_else(|| PackagingError::PackageNotFound(name.clone()))?;
+                reject_if_yanked(&entry)?;
                 let revisions = entry
                     .revisions
                     .iter()
@@ -286,6 +288,7 @@ impl ConanPackagingStrategy {
                     .load_recipe(repository, name, version, user, channel)
                     .await?
                     .ok_or_else(|| PackagingError::PackageNotFound(name.clone()))?;
+                reject_if_yanked(&entry)?;
                 Ok(json_bytes(&package_search_document(&entry, rrev)))
             }
             ConanResource::RecipeFile { filename, .. }
@@ -537,6 +540,21 @@ fn recipe_coordinate(
         package_name,
         package_version,
     ))
+}
+
+fn recipe_reference(entry: &RecipeEntry) -> String {
+    format!(
+        "{}/{}@{}/{}",
+        entry.name, entry.version, entry.user, entry.channel
+    )
+}
+
+fn reject_if_yanked(entry: &RecipeEntry) -> Result<(), PackagingError> {
+    if entry.yanked {
+        Err(PackagingError::PackageNotFound(recipe_reference(entry)))
+    } else {
+        Ok(())
+    }
 }
 
 fn json_bytes<T: Serialize>(value: &T) -> Bytes {
@@ -1147,10 +1165,7 @@ impl PackagingStrategy for ConanPackagingStrategy {
                 if entry.yanked {
                     continue;
                 }
-                let reference = format!(
-                    "{}/{}@{}/{}",
-                    entry.name, entry.version, entry.user, entry.channel
-                );
+                let reference = recipe_reference(&entry);
                 if !needle.is_empty() && !reference.to_ascii_lowercase().contains(&needle) {
                     continue;
                 }
@@ -1351,6 +1366,59 @@ mod tests {
             .unwrap();
         let hits = strategy.search(&repository, "*", 20).await.unwrap();
         assert_eq!(hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn yank_hides_latest_but_keeps_pinned_revision_files() {
+        let strategy = strategy();
+        let repository = conan_forge("conan-yank-latest");
+        strategy
+            .put_protocol_file(
+                &repository,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+                Bytes::from_static(b"recipe"),
+            )
+            .await
+            .unwrap();
+        let coordinate = recipe_coordinate("hello", "0.1", "_", "_").unwrap();
+        strategy
+            .set_yanked(&repository, &coordinate, true)
+            .await
+            .unwrap();
+
+        let latest = strategy
+            .protocol_metadata(&repository, "hello/0.1/_/_/latest")
+            .await
+            .unwrap_err();
+        assert!(matches!(latest, PackagingError::PackageNotFound(_)));
+
+        let revisions = strategy
+            .protocol_metadata(&repository, "hello/0.1/_/_/revisions")
+            .await
+            .unwrap_err();
+        assert!(matches!(revisions, PackagingError::PackageNotFound(_)));
+
+        let body = strategy
+            .get_protocol_file(
+                &repository,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+            )
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), b"recipe");
+
+        strategy
+            .set_yanked(&repository, &coordinate, false)
+            .await
+            .unwrap();
+        let latest: serde_json::Value = serde_json::from_slice(
+            &strategy
+                .protocol_metadata(&repository, "hello/0.1/_/_/latest")
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(latest["revision"], "rrev1");
     }
 
     #[tokio::test]
