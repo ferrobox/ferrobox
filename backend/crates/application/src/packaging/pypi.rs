@@ -937,6 +937,11 @@ pub fn simple_root_page(hits: &[PackageSearchHit]) -> Bytes {
 }
 
 /// Página raíz PEP 691 (`/simple/`) en JSON.
+///
+/// # Panics
+///
+/// Solo si `serde_json` no puede serializar un objeto de forma fija, lo que no
+/// ocurre con este payload.
 #[must_use]
 pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
     let projects: Vec<serde_json::Value> = hits
@@ -958,6 +963,11 @@ pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
 ///
 /// Devuelve [`PackagingError::InvalidPayload`] si `html` no es UTF-8, o
 /// [`PackagingError::PackageNotFound`] si no hay ficheros.
+///
+/// # Panics
+///
+/// Solo si `serde_json` no puede serializar un objeto de forma fija, lo que no
+/// ocurre con este payload.
 pub fn project_page_json(
     name: &str,
     html: &[u8],
@@ -1351,7 +1361,10 @@ mod tests {
                 .unwrap();
         assert_eq!(json["name"], "demo-pypi");
         assert_eq!(json["files"][0]["filename"], "demo_pypi-1.0.0.tar.gz");
-        assert!(json["files"][0]["hashes"]["sha256"].as_str().unwrap().len() == 64);
+        assert_eq!(
+            json["files"][0]["hashes"]["sha256"].as_str().unwrap().len(),
+            64
+        );
         assert_eq!(json["files"][0]["yanked"], true);
         assert!(
             json["files"][0]["url"]
