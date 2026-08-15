@@ -48,7 +48,7 @@ impl ListedArtifact {
         self.yanked
     }
 
-    /// Nombre de fichero en el índice (receta Conan, sdist PyPI, etc.).
+    /// Nombre de fichero en el índice (receta `Conan`, sdist de `PyPI`, etc.).
     #[must_use]
     pub fn filename(&self) -> Option<&str> {
         self.filename.as_deref()

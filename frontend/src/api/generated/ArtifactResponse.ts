@@ -14,7 +14,7 @@ name: string | null,
 version: string | null, 
 /**
  * Nombre de fichero en el índice, si el ecosistema lo distingue
- * (receta Conan, sdist/wheel PyPI, etc.).
+ * (receta `Conan`, sdist/wheel de `PyPI`, etc.).
  */
 filename: string | null, checksum: string, size_bytes: number, 
 /**

@@ -183,7 +183,7 @@ pub(crate) struct ArtifactResponse {
     /// Versión del paquete si el índice la conoce.
     pub(crate) version: Option<String>,
     /// Nombre de fichero en el índice, si el ecosistema lo distingue
-    /// (receta Conan, sdist/wheel PyPI, etc.).
+    /// (receta `Conan`, sdist/wheel de `PyPI`, etc.).
     pub(crate) filename: Option<String>,
     pub(crate) checksum: String,
     #[ts(type = "number")]
