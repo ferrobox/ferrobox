@@ -12,8 +12,8 @@ use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 /// Motivos por los que crear un repositorio puede fallar.
 #[derive(Debug, Error)]
 pub enum CreateRepositoryError {
-    /// Un `Mirror` solo está soportado para Cargo y npm en esta versión.
-    #[error("mirror repositories currently require the cargo or npm ecosystem")]
+    /// Un `Mirror` solo está soportado para Cargo, npm y `PyPI` en esta versión.
+    #[error("mirror repositories currently require the cargo, npm or pypi ecosystem")]
     UnsupportedMirrorEcosystem,
 
     /// La URL *upstream* de un `Mirror` no es válida.
@@ -61,8 +61,8 @@ pub enum CreateRepositoryKind {
     Forge,
     /// Réplica cacheada de un *upstream*.
     Mirror {
-        /// URL base del registro remoto (índice sparse de Cargo o
-        /// registro npm).
+        /// URL base del registro remoto (índice sparse de Cargo,
+        /// registro npm o índice simple de `PyPI`).
         upstream: String,
     },
     /// Agregación de otros repositorios `Forge` o `Mirror`.
@@ -110,7 +110,7 @@ impl CreateRepositoryUseCase {
             CreateRepositoryKind::Mirror { upstream } => {
                 if !matches!(
                     ecosystem,
-                    PackageEcosystem::Cargo | PackageEcosystem::Npm
+                    PackageEcosystem::Cargo | PackageEcosystem::Npm | PackageEcosystem::PyPi
                 ) {
                     return Err(CreateRepositoryError::UnsupportedMirrorEcosystem);
                 }
@@ -214,6 +214,32 @@ mod tests {
             other => panic!("expected mirror, got {other:?}"),
         }
         assert_eq!(repository.ecosystem(), PackageEcosystem::Npm);
+    }
+
+    #[tokio::test]
+    async fn creates_a_pypi_mirror_with_upstream() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("pypi-proxy").unwrap(),
+                PackageEcosystem::PyPi,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://pypi.org/simple/".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(upstream.as_str(), "https://pypi.org/simple/");
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
+        assert_eq!(repository.ecosystem(), PackageEcosystem::PyPi);
     }
 
     #[tokio::test]

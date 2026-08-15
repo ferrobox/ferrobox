@@ -172,7 +172,9 @@ export function ArtifactsTable({
           ) : kind === "mirror" ? (
             ecosystem === "npm"
               ? "Los paquetes se cachean la primera vez que npm install los resuelve contra este Mirror."
-              : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+              : ecosystem === "pypi"
+                ? "Los paquetes se cachean la primera vez que pip install los resuelve contra este Mirror."
+                : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a

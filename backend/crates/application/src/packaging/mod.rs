@@ -323,6 +323,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
             Arc::new(InMemoryRepositoryStore::default()),
             "http://127.0.0.1:3000".to_string(),
         ))
