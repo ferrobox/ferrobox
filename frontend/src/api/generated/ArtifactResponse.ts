@@ -11,7 +11,12 @@ name: string | null,
 /**
  * Versión del paquete si el índice la conoce.
  */
-version: string | null, checksum: string, size_bytes: number, 
+version: string | null, 
+/**
+ * Nombre de fichero en el índice, si el ecosistema lo distingue
+ * (receta Conan, sdist/wheel PyPI, etc.).
+ */
+filename: string | null, checksum: string, size_bytes: number, 
 /**
  * `true` si el índice marca esta versión como *yanked*.
  */

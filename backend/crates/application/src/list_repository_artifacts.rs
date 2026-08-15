@@ -20,6 +20,7 @@ pub struct ListedArtifact {
     package_name: Option<String>,
     package_version: Option<String>,
     yanked: bool,
+    filename: Option<String>,
 }
 
 impl ListedArtifact {
@@ -45,6 +46,12 @@ impl ListedArtifact {
     #[must_use]
     pub fn yanked(&self) -> bool {
         self.yanked
+    }
+
+    /// Nombre de fichero en el índice (receta Conan, sdist PyPI, etc.).
+    #[must_use]
+    pub fn filename(&self) -> Option<&str> {
+        self.filename.as_deref()
     }
 }
 
@@ -131,26 +138,30 @@ impl ListRepositoryArtifactsUseCase {
 
         let mut names_by_artifact = HashMap::new();
         for item in indexed {
-        apply_index_item(&mut names_by_artifact, &item);
+            apply_index_item(&mut names_by_artifact, &item);
         }
 
         Ok(artifacts
             .into_iter()
             .map(|artifact| {
-                let (package_name, package_version, yanked) = names_by_artifact
-                    .remove(&artifact.id())
-                    .map_or((None, None, false), |(name, version, yanked)| {
-                        (Some(name), Some(version), yanked)
-                    });
+                let meta = names_by_artifact.remove(&artifact.id());
                 ListedArtifact {
                     artifact,
-                    package_name,
-                    package_version,
-                    yanked,
+                    package_name: meta.as_ref().map(|item| item.name.clone()),
+                    package_version: meta.as_ref().map(|item| item.version.clone()),
+                    yanked: meta.as_ref().is_some_and(|item| item.yanked),
+                    filename: meta.and_then(|item| item.filename),
                 }
             })
             .collect())
     }
+}
+
+struct ArtifactIndexMeta {
+    name: String,
+    version: String,
+    yanked: bool,
+    filename: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -166,10 +177,12 @@ struct IndexFileMeta {
     artifact_id: String,
     #[serde(default)]
     yanked: bool,
+    #[serde(default)]
+    filename: Option<String>,
 }
 
 fn apply_index_item(
-    names_by_artifact: &mut HashMap<ArtifactId, (String, String, bool)>,
+    names_by_artifact: &mut HashMap<ArtifactId, ArtifactIndexMeta>,
     item: &ferrobox_ports::package_index_store::IndexedArtifact,
 ) {
     let name = item.coordinate.name().as_str().to_owned();
@@ -182,9 +195,20 @@ fn apply_index_item(
     let mut mapped_file = false;
     for file in &meta.files {
         if let Ok(uuid) = Uuid::parse_str(&file.artifact_id) {
+            let filename = file
+                .filename
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
             names_by_artifact.insert(
                 ArtifactId::from(uuid),
-                (name.clone(), version.clone(), meta.yanked || file.yanked),
+                ArtifactIndexMeta {
+                    name: name.clone(),
+                    version: version.clone(),
+                    yanked: meta.yanked || file.yanked,
+                    filename,
+                },
             );
             mapped_file = true;
         }
@@ -193,7 +217,12 @@ fn apply_index_item(
     if !mapped_file {
         names_by_artifact
             .entry(item.artifact_id)
-            .or_insert((name, version, meta.yanked));
+            .or_insert_with(|| ArtifactIndexMeta {
+                name,
+                version,
+                yanked: meta.yanked,
+                filename: None,
+            });
     }
 }
 
@@ -202,7 +231,8 @@ fn sort_listed(listed: &mut [ListedArtifact]) {
         match (left.package_name(), right.package_name()) {
             (Some(left_name), Some(right_name)) => left_name
                 .cmp(right_name)
-                .then_with(|| left.package_version().cmp(&right.package_version())),
+                .then_with(|| left.package_version().cmp(&right.package_version()))
+                .then_with(|| left.filename().cmp(&right.filename())),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => left
@@ -477,5 +507,68 @@ mod tests {
                     && item.package_version() == Some("1.0.0")
                     && item.yanked())
         );
+        let filenames: Vec<_> = result.iter().filter_map(ListedArtifact::filename).collect();
+        assert!(filenames.contains(&"demo_pypi-1.0.0.tar.gz"));
+        assert!(filenames.contains(&"demo_pypi-1.0.0-py3-none-any.whl"));
+    }
+
+    #[tokio::test]
+    async fn attaches_conan_recipe_filenames_from_the_index_entry() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository_id = RepositoryId::new();
+        let recipe = Artifact::new(repository_id, checksum(), 80);
+        let manifest = Artifact::new(repository_id, checksum(), 20);
+        artifact_store.save(&recipe).await.unwrap();
+        artifact_store.save(&manifest).await.unwrap();
+
+        let entry = serde_json::json!({
+            "name": "hello",
+            "version": "0.1",
+            "user": "_",
+            "channel": "_",
+            "yanked": false,
+            "files": [
+                {
+                    "filename": "conanfile.py",
+                    "artifact_id": recipe.id().to_string()
+                },
+                {
+                    "filename": "conanmanifest.txt",
+                    "artifact_id": manifest.id().to_string()
+                }
+            ]
+        });
+
+        package_index_store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Conan,
+                    PackageName::parse("hello").unwrap(),
+                    PackageVersion::parse("0.1@_:_").unwrap(),
+                ),
+                Some(manifest.id()),
+                Bytes::from(entry.to_string()),
+            )
+            .await
+            .unwrap();
+
+        let result = use_case(
+            Arc::new(InMemoryRepositoryStore::default()),
+            artifact_store,
+            package_index_store,
+        )
+        .execute(repository_id)
+        .await
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|item| item.package_name() == Some("hello")
+            && item.package_version() == Some("0.1@_:_")
+            && !item.yanked()));
+        let filenames: Vec<_> = result.iter().filter_map(ListedArtifact::filename).collect();
+        assert!(filenames.contains(&"conanfile.py"));
+        assert!(filenames.contains(&"conanmanifest.txt"));
     }
 }

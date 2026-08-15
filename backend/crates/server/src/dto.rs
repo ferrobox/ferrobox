@@ -182,6 +182,9 @@ pub(crate) struct ArtifactResponse {
     pub(crate) name: Option<String>,
     /// Versión del paquete si el índice la conoce.
     pub(crate) version: Option<String>,
+    /// Nombre de fichero en el índice, si el ecosistema lo distingue
+    /// (receta Conan, sdist/wheel PyPI, etc.).
+    pub(crate) filename: Option<String>,
     pub(crate) checksum: String,
     #[ts(type = "number")]
     pub(crate) size_bytes: u64,
@@ -198,6 +201,7 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
             id: listed.artifact().id().to_string(),
             name: listed.package_name().map(ToOwned::to_owned),
             version: listed.package_version().map(ToOwned::to_owned),
+            filename: listed.filename().map(ToOwned::to_owned),
             checksum: listed.artifact().checksum().to_string(),
             size_bytes: listed.artifact().size_bytes(),
             yanked: listed.yanked(),
