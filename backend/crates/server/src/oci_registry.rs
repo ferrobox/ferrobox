@@ -2,10 +2,10 @@
 //!
 //! Referencia: <https://github.com/opencontainers/distribution-spec>.
 //!
-//! Las lecturas (`GET`/`HEAD` de manifiestos, blobs y etiquetas, y
-//! `GET /v2/`) son públicas. Las escrituras (subida de blobs y
-//! manifiestos, yank) exigen `Authorization` (`Bearer`, `Token` o Basic)
-//! y rol de escritura.
+//! Las lecturas de manifiestos, blobs y etiquetas son públicas. `GET /v2/`
+//! desafía a Docker con un `Bearer` cuyo `realm` apunta a `/v2/token`.
+//! Las escrituras (subida de blobs y manifiestos, yank) exigen un token
+//! de API (`Bearer`, `Token` o Basic) y rol de escritura.
 //!
 //! El registro vive en la raíz del host (`/v2/`). El primer componente
 //! del nombre de imagen es el UUID del repositorio `FerroBox`:
@@ -30,7 +30,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::auth_extract::AuthenticatedUser;
+use crate::auth_extract::{
+    AuthenticatedUser, OCI_ANONYMOUS_TOKEN, extract_bearer_token, oci_bearer_challenge,
+};
 use crate::authz::require_write_artifacts;
 use crate::error::ApiError;
 
@@ -47,6 +49,8 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v2/", get(version_check))
         .route("/v2", get(version_check))
+        .route("/v2/token", get(issue_token).post(issue_token))
+        .route("/v2/token/", get(issue_token).post(issue_token))
         .route(
             "/v2/{repository_id}/{name}/manifests/{reference}",
             get(get_manifest).head(get_manifest),
@@ -115,8 +119,44 @@ async fn load_oci_repository(
     Ok(repository)
 }
 
-async fn version_check() -> (StatusCode, HeaderMap, Bytes) {
-    oci_json(StatusCode::OK, b"{}")
+async fn version_check(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    match extract_bearer_token(&headers) {
+        None => Err(OciApiError::unauthorized(&state.public_base_url, "/v2/")),
+        Some(secret) if secret == OCI_ANONYMOUS_TOKEN => Ok(oci_json(StatusCode::OK, b"{}")),
+        Some(secret) => {
+            state
+                .authenticate_token
+                .execute(&secret)
+                .await
+                .map_err(|_| OciApiError::unauthorized(&state.public_base_url, "/v2/"))?;
+            Ok(oci_json(StatusCode::OK, b"{}"))
+        }
+    }
+}
+
+async fn issue_token(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    let token = match extract_bearer_token(&headers) {
+        None => OCI_ANONYMOUS_TOKEN.to_string(),
+        Some(secret) => {
+            state.authenticate_token.execute(&secret).await.map_err(|_| {
+                OciApiError::unauthorized(&state.public_base_url, "/v2/token")
+            })?;
+            secret
+        }
+    };
+    let payload = serde_json::json!({
+        "token": token,
+        "access_token": token,
+        "expires_in": 3600,
+    });
+    let body = serde_json::to_vec(&payload).map_err(|err| ApiError::Internal(err.to_string()))?;
+    Ok(oci_json(StatusCode::OK, &body))
 }
 
 async fn get_manifest(
@@ -467,6 +507,7 @@ fn uploads() -> &'static UploadStore {
 struct OciApiError {
     status: StatusCode,
     body: Bytes,
+    challenges: Vec<HeaderValue>,
 }
 
 impl OciApiError {
@@ -477,7 +518,21 @@ impl OciApiError {
         Self {
             status,
             body: Bytes::from(serde_json::to_vec(&payload).unwrap_or_else(|_| b"{}".to_vec())),
+            challenges: Vec::new(),
         }
+    }
+
+    fn unauthorized(public_base_url: &str, path: &str) -> Self {
+        let mut error = Self::from_code(
+            StatusCode::UNAUTHORIZED,
+            "UNAUTHORIZED",
+            "authentication required",
+        );
+        error.challenges.push(oci_bearer_challenge(public_base_url, path));
+        error
+            .challenges
+            .push(HeaderValue::from_static(r#"Basic realm="ferrobox""#));
+        error
     }
 }
 
@@ -488,6 +543,9 @@ impl axum::response::IntoResponse for OciApiError {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
         );
+        for challenge in self.challenges {
+            headers.append(header::WWW_AUTHENTICATE, challenge);
+        }
         (self.status, headers, self.body).into_response()
     }
 }
@@ -566,6 +624,8 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::http::{HeaderMap, Request, StatusCode};
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD as BASE64;
     use bytes::Bytes;
     use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
     use ferrobox_application::change_password::ChangePasswordUseCase;
@@ -747,25 +807,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn version_check_is_public() {
+    async fn version_check_challenges_unauthenticated_clients() {
         let fx = fixture().await;
-        let (status, headers, body) = send(
+        let (status, headers, _) = send(
             fx.app,
             Request::builder().uri("/v2/").body(Body::empty()).unwrap(),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenges: Vec<_> = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect();
+        assert!(
+            challenges
+                .iter()
+                .any(|value| value.contains(r#"realm="http://127.0.0.1:3000/v2/token""#))
+        );
+        assert!(challenges.iter().any(|value| value.contains("Basic")));
         assert_eq!(
             headers.get("docker-distribution-api-version").unwrap(),
             "registry/2.0"
         );
+    }
+
+    #[tokio::test]
+    async fn token_endpoint_exchanges_basic_for_bearer() {
+        let fx = fixture().await;
+        let (status, _, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri("/v2/token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["token"], "anonymous");
+
+        let basic = BASE64.encode(format!("__token__:{}", fx.developer_token));
+        let (status, _, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri("/v2/token?service=ferrobox&scope=repository:demo:pull,push")
+                .header("Authorization", format!("Basic {basic}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["token"], fx.developer_token);
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri("/v2/")
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(body.as_ref(), b"{}");
     }
 
     #[tokio::test]
     async fn blob_upload_without_a_token_is_unauthorized() {
         let fx = fixture().await;
-        let (status, _, _) = send(
+        let (status, headers, _) = send(
             fx.app,
             Request::builder()
                 .method("POST")
@@ -775,6 +887,14 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenge = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(challenge.contains("/v2/token"));
+        assert!(challenge.contains(&format!("repository:{}/demo:pull,push", fx.repo_id)));
     }
 
     #[tokio::test]
