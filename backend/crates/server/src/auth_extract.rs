@@ -16,9 +16,9 @@ use ferrobox_domain::user::User;
 use crate::AppState;
 use crate::dto::ErrorResponse;
 
-/// Token Bearer que `GET /v2/token` emite sin credenciales para que
-/// `docker pull` anónimo pueda superar el ping de `/v2/`. Las escrituras
-/// lo rechazan porque no es un secreto de API real.
+/// Token Bearer que `GET /v2/token` emite sin credenciales cuando el
+/// `scope` es solo `pull` (o no hay scope). Las escrituras lo rechazan:
+/// no es un secreto de API real, y Helm/ORAS no reintenta tras un 401.
 pub(crate) const OCI_ANONYMOUS_TOKEN: &str = "anonymous";
 
 /// Construye el desafío Bearer que Docker espera: un `realm` con URL
@@ -166,6 +166,14 @@ pub(crate) async fn require_auth(
         }
         return Err(AuthError::Missing);
     };
+
+    if is_oci && secret == OCI_ANONYMOUS_TOKEN {
+        return Ok(oci_unauthorized_response(
+            &state.public_base_url,
+            &path,
+            "anonymous token cannot write",
+        ));
+    }
 
     let principal = match state.authenticate_token.execute(&secret).await {
         Ok(principal) => principal,

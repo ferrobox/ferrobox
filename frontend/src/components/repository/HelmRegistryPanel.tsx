@@ -94,7 +94,10 @@ export function HelmRegistryPanel({
           <p className="text-xs text-muted-foreground">
             Copia el UUID completo (8-4-4-4-12). En HTTP local,{" "}
             <code className="font-mono">helm push</code> / <code className="font-mono">helm pull</code>{" "}
-            necesitan <code className="font-mono">--plain-http</code>.
+            necesitan <code className="font-mono">--plain-http</code>. Si un push anterior falló con
+            401, <code className="font-mono">helm logout {registryHost}</code> y vuelve a entrar:
+            Helm puede haber cacheado un token anónimo del ping a{" "}
+            <code className="font-mono">/v2/</code>.
           </p>
         </div>
       )}
