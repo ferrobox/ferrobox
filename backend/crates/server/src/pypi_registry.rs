@@ -1,4 +1,4 @@
-//! Rutas HTTP que implementan el subconjunto del protocolo de PyPI que
+//! Rutas HTTP que implementan el subconjunto del protocolo de `PyPI` que
 //! `twine upload` y `pip install` necesitan.
 //!
 //! Referencias:
@@ -35,7 +35,7 @@ use crate::error::ApiError;
 /// Tamaño máximo de una subida `twine` (sdist o wheel).
 const PYPI_UPLOAD_LIMIT: usize = 100 * 1024 * 1024;
 
-/// Rutas de solo lectura del protocolo de PyPI.
+/// Rutas de solo lectura del protocolo de `PyPI`.
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/pypi/{repository_id}/simple/", get(simple_root))
@@ -51,7 +51,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura del protocolo de PyPI.
+/// Rutas de escritura del protocolo de `PyPI`.
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/pypi/{repository_id}/", post(upload))

@@ -40,7 +40,7 @@ pub mod list_repositories;
 pub mod get_repository;
 
 /// El patrón Strategy para publicar, indexar y descargar paquetes según
-/// su ecosistema (Cargo, npm, PyPI, ...).
+/// su ecosistema (Cargo, npm, `PyPI`, ...).
 pub mod packaging;
 
 /// Hashing de contraseñas y secretos de tokens de API.

@@ -35,7 +35,7 @@ pub mod cargo;
 /// `npm install`) del patrón Strategy.
 pub mod npm;
 
-/// La implementación de PyPI (`twine upload` / `pip install`, índice
+/// La implementación de `PyPI` (`twine upload` / `pip install`, índice
 /// simple PEP 503) del patrón Strategy.
 pub mod pypi;
 
@@ -76,7 +76,7 @@ pub enum PackagingError {
     VersionNotFound(PackageCoordinate),
 
     /// No existe un fichero con ese nombre en el índice del repositorio
-    /// (p. ej. un wheel o sdist concreto de PyPI).
+    /// (p. ej. un wheel o sdist concreto de `PyPI`).
     #[error("file '{0}' was not found in this repository")]
     FileNotFound(String),
 
@@ -192,7 +192,7 @@ pub trait PackagingStrategy: Send + Sync {
     ) -> Result<Bytes, PackagingError>;
 
     /// Descarga un fichero del repositorio por su nombre de archivo
-    /// (p. ej. un wheel o sdist de PyPI). La implementación por defecto
+    /// (p. ej. un wheel o sdist de `PyPI`). La implementación por defecto
     /// indica que el ecosistema no resuelve artefactos por nombre.
     ///
     /// # Errors

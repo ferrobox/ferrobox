@@ -131,7 +131,7 @@ impl ListRepositoryArtifactsUseCase {
 
         let mut names_by_artifact = HashMap::new();
         for item in indexed {
-            apply_index_item(&mut names_by_artifact, item);
+        apply_index_item(&mut names_by_artifact, &item);
         }
 
         Ok(artifacts
@@ -170,7 +170,7 @@ struct IndexFileMeta {
 
 fn apply_index_item(
     names_by_artifact: &mut HashMap<ArtifactId, (String, String, bool)>,
-    item: ferrobox_ports::package_index_store::IndexedArtifact,
+    item: &ferrobox_ports::package_index_store::IndexedArtifact,
 ) {
     let name = item.coordinate.name().as_str().to_owned();
     let version = item.coordinate.version().as_str().to_owned();

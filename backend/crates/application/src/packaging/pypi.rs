@@ -1,4 +1,4 @@
-//! Estrategia de empaquetado para el ecosistema PyPI: implementa el
+//! Estrategia de empaquetado para el ecosistema `PyPI`: implementa el
 //! subconjunto del protocolo que `twine upload` y `pip install`
 //! necesitan contra un repositorio `FerroBox`.
 //!
@@ -7,7 +7,7 @@
 //! - subida *legacy*: <https://docs.pypi.org/api/upload/>
 //!
 //! Este primer corte cubre **Forge** (subir sdist/wheel, índice simple,
-//! descarga y yank) y lecturas en **Alloy**. Un `Mirror` de PyPI no
+//! descarga y yank) y lecturas en **Alloy**. Un `Mirror` de `PyPI` no
 //! está implementado todavía.
 
 use std::collections::{BTreeMap, HashSet};
@@ -34,7 +34,7 @@ use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome}
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema PyPI.
+/// Estrategia de empaquetado para el ecosistema `PyPI`.
 pub struct PypiPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -779,25 +779,21 @@ mod tests {
             .set_yanked(&repository, &coordinate, true)
             .await
             .unwrap();
-        let html = std::str::from_utf8(
-            &strategy
-                .index(&repository, coordinate.name())
-                .await
-                .unwrap(),
-        )
-        .unwrap();
+        let yanked_page = strategy
+            .index(&repository, coordinate.name())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&yanked_page).unwrap();
         assert!(html.contains("data-yanked"));
         strategy
             .set_yanked(&repository, &coordinate, false)
             .await
             .unwrap();
-        let html = std::str::from_utf8(
-            &strategy
-                .index(&repository, coordinate.name())
-                .await
-                .unwrap(),
-        )
-        .unwrap();
+        let restored_page = strategy
+            .index(&repository, coordinate.name())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&restored_page).unwrap();
         assert!(!html.contains("data-yanked"));
     }
 
@@ -852,13 +848,11 @@ mod tests {
             .await
             .unwrap();
 
-        let html = std::str::from_utf8(
-            &strategy
-                .index(&alloy, &PackageName::parse("demo-pypi").unwrap())
-                .await
-                .unwrap(),
-        )
-        .unwrap();
+        let alloy_page = strategy
+            .index(&alloy, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&alloy_page).unwrap();
         assert!(html.contains(&alloy.id().to_string()));
 
         let downloaded = strategy
@@ -901,7 +895,8 @@ mod tests {
             .await
             .unwrap();
         let hits = strategy.search(&repository, "", 100).await.unwrap();
-        let html = std::str::from_utf8(&simple_root_page(&hits)).unwrap();
+        let root = simple_root_page(&hits);
+        let html = std::str::from_utf8(&root).unwrap();
         assert!(html.contains("href=\"demo-pkg/\""));
         assert!(html.contains(">demo-pkg</a>"));
     }
