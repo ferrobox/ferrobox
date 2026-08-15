@@ -435,18 +435,31 @@ mod tests {
         ))
     }
 
+    fn helm_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(OciPackagingStrategy::for_ecosystem(
+            PackageEcosystem::Helm,
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            Arc::new(InMemoryHttpClient::default()),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
             .register(cargo_strategy())
             .register(npm_strategy())
             .register(pypi_strategy())
-            .register(oci_strategy());
+            .register(oci_strategy())
+            .register(helm_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
         assert!(registry.strategy_for(PackageEcosystem::PyPi).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Oci).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Helm).is_some());
     }
 
     #[test]

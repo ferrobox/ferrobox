@@ -56,6 +56,7 @@ use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
+use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
 
@@ -253,6 +254,14 @@ fn build_app_state(
             config.public_base_url.clone(),
         )))
         .register(Arc::new(OciPackagingStrategy::new(
+            artifact_store.clone(),
+            package_index_store.clone(),
+            storage.clone(),
+            repository_store.clone(),
+            http_client.clone(),
+        )))
+        .register(Arc::new(OciPackagingStrategy::for_ecosystem(
+            PackageEcosystem::Helm,
             artifact_store.clone(),
             package_index_store.clone(),
             storage.clone(),

@@ -41,13 +41,19 @@ fn oci_repository_scope(path: &str) -> Option<String> {
     if rest.is_empty() || rest == "token" {
         return None;
     }
-    let mut parts = rest.split('/');
-    let repository_id = parts.next()?;
-    let name = parts.next()?;
-    if name.is_empty() || name == "token" {
-        return None;
-    }
+    let (repository_id, remainder) = rest.split_once('/')?;
+    let name = strip_distribution_suffix(remainder)?;
     Some(format!("repository:{repository_id}/{name}:pull,push"))
+}
+
+fn strip_distribution_suffix(remainder: &str) -> Option<&str> {
+    let remainder = remainder.trim_matches('/');
+    remainder
+        .strip_suffix("/tags/list")
+        .or_else(|| remainder.rsplit_once("/manifests/").map(|(name, _)| name))
+        .or_else(|| remainder.split_once("/blobs/").map(|(name, _)| name))
+        .map(|name| name.trim_matches('/'))
+        .filter(|name| !name.is_empty())
 }
 
 /// 401 del Distribution Spec con `WWW-Authenticate` usable por Docker.
@@ -287,6 +293,14 @@ mod tests {
         assert!(value.contains(r#"service="ferrobox""#));
         assert!(value.contains(
             r#"scope="repository:01a00518-8774-7f01-aa8c-3e6eb7d947d9/alpine:pull,push""#
+        ));
+
+        let nested = oci_bearer_challenge(
+            "http://127.0.0.1:3000",
+            "/v2/01a00518-8774-7f01-aa8c-3e6eb7d947d9/bitnami/nginx/manifests/latest",
+        );
+        assert!(nested.to_str().unwrap().contains(
+            r#"scope="repository:01a00518-8774-7f01-aa8c-3e6eb7d947d9/bitnami/nginx:pull,push""#
         ));
     }
 }

@@ -32,7 +32,7 @@ function CopyableCodeBlock({ code }: { code: string }) {
   );
 }
 
-export function OciRegistryPanel({
+export function HelmRegistryPanel({
   repositoryId,
   kind = "forge",
   framed = true,
@@ -57,17 +57,26 @@ export function OciRegistryPanel({
 
   const baseUrl = data.public_base_url.replace(/\/$/, "");
   const registryHost = baseUrl.replace(/^https?:\/\//, "");
-  const imageRef = `${registryHost}/${repositoryId}/demo:latest`;
+  const chartRef = `oci://${registryHost}/${repositoryId}/demo`;
   const isMirror = kind === "mirror";
   const isAlloy = kind === "alloy";
   const readOnly = isMirror || isAlloy;
+  const plainHttp = baseUrl.startsWith("http://");
 
-  const introTitle = isAlloy ? "Alloy OCI" : isMirror ? "Mirror OCI" : "Registro OCI";
+  const introTitle = isAlloy ? "Alloy Helm" : isMirror ? "Mirror Helm" : "Registro Helm";
   const introBody = isAlloy
-    ? "Este Alloy agrega Forges y/o Mirrors OCI en una sola URL. docker pull resuelve contra los miembros, en orden. No acepta docker push: publica en un Forge miembro."
+    ? "Este Alloy agrega Forges y/o Mirrors Helm en una sola URL. helm pull e helm install resuelven contra los miembros, en orden. No acepta helm push: publica en un Forge miembro."
     : isMirror
-      ? "Este Mirror cachea imágenes del upstream (por ejemplo Docker Hub) la primera vez que docker pull las resuelve. No acepta docker push ni yank."
-      : "Este repositorio implementa el Distribution Spec v2: docker push y docker pull funcionan de forma nativa.";
+      ? "Este Mirror cachea charts OCI del upstream la primera vez que helm pull los resuelve. No acepta helm push ni yank."
+      : "Los charts se publican como artefactos OCI (Distribution Spec v2). helm push y helm pull hablan con /v2/ en la raíz del host.";
+
+  const login = `echo 'fb_…' | helm registry login ${registryHost} -u __token__ --password-stdin`;
+  const pushPull = plainHttp
+    ? `helm package ./demo\nhelm push demo-0.1.0.tgz ${chartRef.replace(/\/demo$/, "")} --plain-http\nhelm pull ${chartRef} --version 0.1.0 --plain-http`
+    : `helm package ./demo\nhelm push demo-0.1.0.tgz ${chartRef.replace(/\/demo$/, "")}\nhelm pull ${chartRef} --version 0.1.0`;
+  const pullOnly = plainHttp
+    ? `helm pull ${chartRef} --version 0.1.0 --plain-http`
+    : `helm pull ${chartRef} --version 0.1.0`;
 
   const body = (
     <div className="space-y-5">
@@ -81,39 +90,32 @@ export function OciRegistryPanel({
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             1. Login (token de Seguridad)
           </p>
-          <CopyableCodeBlock
-            code={`echo 'fb_…' | docker login ${registryHost} -u __token__ --password-stdin`}
-          />
+          <CopyableCodeBlock code={login} />
           <p className="text-xs text-muted-foreground">
-            En HTTP local Docker exige{" "}
-            <code className="font-mono">insecure-registries: [&quot;{registryHost}&quot;]</code>{" "}
-            en <code className="font-mono">/etc/docker/daemon.json</code> y reiniciar el daemon.
-            Copia el UUID completo (8-4-4-4-12). Si un <code className="font-mono">login</code>{" "}
-            antiguo no basta para el push, haz{" "}
-            <code className="font-mono">docker logout {registryHost}</code> y vuelve a entrar.
+            Copia el UUID completo (8-4-4-4-12). En HTTP local,{" "}
+            <code className="font-mono">helm push</code> / <code className="font-mono">helm pull</code>{" "}
+            necesitan <code className="font-mono">--plain-http</code>.
           </p>
         </div>
       )}
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {readOnly ? "1. Instala (pull)" : "2. Publica y tira"}
+          {readOnly ? "1. Instala (pull)" : "2. Empaqueta, publica y tira"}
         </p>
-        <CopyableCodeBlock
-          code={
-            readOnly
-              ? `docker pull ${imageRef}`
-              : `docker tag alpine:latest ${imageRef}\ndocker push ${imageRef}\ndocker pull ${imageRef}`
-          }
-        />
+        <CopyableCodeBlock code={readOnly ? pullOnly : pushPull} />
         <p className="text-xs text-muted-foreground">
-          El nombre de imagen es <code className="font-mono">&lt;UUID&gt;/demo</code> (también vale
-          con barra, p. ej. <code className="font-mono">bitnami/nginx</code>). El registro es la
-          raíz del host (<code className="font-mono">/v2/</code>), no un prefijo extra.
+          El chart queda en <code className="font-mono">oci://&lt;host&gt;/&lt;UUID&gt;/&lt;nombre&gt;</code>
+          . El nombre sale de <code className="font-mono">Chart.yaml</code>. Los nombres con barra
+          (por ejemplo <code className="font-mono">bitnami/nginx</code>) también funcionan.
           {isMirror ? (
             <>
               {" "}
-              Con upstream Docker Hub, <code className="font-mono">alpine:latest</code> se
-              resuelve como <code className="font-mono">library/alpine</code>.
+              Con upstream Docker Hub:{" "}
+              <code className="font-mono">
+                helm pull oci://{registryHost}/{repositoryId}/bitnami/nginx --version 18.0.0
+                {plainHttp ? " --plain-http" : ""}
+              </code>
+              .
             </>
           ) : null}
         </p>

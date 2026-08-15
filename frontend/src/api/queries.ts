@@ -148,7 +148,7 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankPypi(repositoryId, name, version)
           : api.unyankPypi(repositoryId, name, version);
       }
-      if (ecosystem === "oci") {
+      if (ecosystem === "oci" || ecosystem === "helm") {
         return yanked
           ? api.yankOci(repositoryId, name, version)
           : api.unyankOci(repositoryId, name, version);

@@ -6,7 +6,8 @@
 //!
 //! Cubre **Forge** (blobs, manifiestos, etiquetas y yank), **Mirror**
 //! (caché *pull-through* de un registro OCI como Docker Hub) y lecturas
-//! en **Alloy**.
+//! en **Alloy**. La misma estrategia sirve al ecosistema **Helm**: los
+//! charts se publican con `helm push` como artefactos OCI.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -42,19 +43,40 @@ pub const DEFAULT_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifes
 
 const MANIFEST_ACCEPT: &str = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.artifact.manifest.v1+json";
 
-/// Estrategia de empaquetado para el ecosistema OCI.
+/// Estrategia de empaquetado para OCI y Helm (charts como artefactos OCI).
 pub struct OciPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
     repository_store: Arc<dyn RepositoryStore>,
     http_client: Arc<dyn HttpClient>,
+    ecosystem: PackageEcosystem,
 }
 
 impl OciPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Construye la estrategia OCI a partir de sus puertos.
     #[must_use]
     pub fn new(
+        artifact_store: Arc<dyn ArtifactStore>,
+        package_index_store: Arc<dyn PackageIndexStore>,
+        storage: Arc<dyn StoragePort>,
+        repository_store: Arc<dyn RepositoryStore>,
+        http_client: Arc<dyn HttpClient>,
+    ) -> Self {
+        Self::for_ecosystem(
+            PackageEcosystem::Oci,
+            artifact_store,
+            package_index_store,
+            storage,
+            repository_store,
+            http_client,
+        )
+    }
+
+    /// Construye la estrategia para OCI o Helm.
+    #[must_use]
+    pub fn for_ecosystem(
+        ecosystem: PackageEcosystem,
         artifact_store: Arc<dyn ArtifactStore>,
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
@@ -67,13 +89,14 @@ impl OciPackagingStrategy {
             storage,
             repository_store,
             http_client,
+            ecosystem,
         }
     }
 
-    fn ensure_oci_repository(repository: &Repository) -> Result<(), PackagingError> {
-        if repository.ecosystem() != PackageEcosystem::Oci {
+    fn ensure_repository(&self, repository: &Repository) -> Result<(), PackagingError> {
+        if repository.ecosystem() != self.ecosystem {
             return Err(PackagingError::EcosystemMismatch {
-                expected: "oci",
+                expected: self.ecosystem.label(),
                 actual: repository.ecosystem().label(),
             });
         }
@@ -133,7 +156,7 @@ impl OciPackagingStrategy {
             )));
         }
 
-        let coordinate = blob_coordinate(&digest)?;
+        let coordinate = blob_coordinate(self.ecosystem, &digest)?;
         if let Some(existing) = self
             .package_index_store
             .artifact_for(repository.id(), &coordinate)
@@ -175,7 +198,7 @@ impl OciPackagingStrategy {
         digest: &str,
     ) -> Result<Bytes, PackagingError> {
         let digest = parse_oci_digest(digest)?;
-        let coordinate = blob_coordinate(&digest)?;
+        let coordinate = blob_coordinate(self.ecosystem, &digest)?;
         let artifact_id = self
             .package_index_store
             .artifact_for(repository.id(), &coordinate)
@@ -192,7 +215,7 @@ impl OciPackagingStrategy {
     ) -> Result<Option<ManifestEntry>, PackagingError> {
         let entries = self
             .package_index_store
-            .entries_for_package(repository.id(), PackageEcosystem::Oci, name)
+            .entries_for_package(repository.id(), self.ecosystem, name)
             .await?;
         for entry_bytes in entries {
             let entry: ManifestEntry = serde_json::from_slice(&entry_bytes)
@@ -229,7 +252,7 @@ impl OciPackagingStrategy {
         let tag_version = PackageVersion::parse(reference.clone())
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
         let tag_coordinate =
-            PackageCoordinate::new(PackageEcosystem::Oci, package_name.clone(), tag_version);
+            PackageCoordinate::new(self.ecosystem, package_name.clone(), tag_version);
 
         let checksum = sha256_checksum(&body);
         let artifact = Artifact::new(repository.id(), checksum, body.len() as u64);
@@ -266,7 +289,7 @@ impl OciPackagingStrategy {
             let digest_version = PackageVersion::parse(digest.clone())
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
             let digest_coordinate =
-                PackageCoordinate::new(PackageEcosystem::Oci, package_name, digest_version);
+                PackageCoordinate::new(self.ecosystem, package_name, digest_version);
             let digest_entry = ManifestEntry {
                 reference: digest.clone(),
                 ..tag_entry
@@ -319,7 +342,7 @@ impl OciPackagingStrategy {
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
         let entries = self
             .package_index_store
-            .entries_for_package(repository.id(), PackageEcosystem::Oci, &package_name)
+            .entries_for_package(repository.id(), self.ecosystem, &package_name)
             .await?;
         let mut tags = Vec::new();
         let mut seen = HashSet::new();
@@ -353,7 +376,7 @@ impl OciPackagingStrategy {
         if let Some(config) = manifest.config
             && self
                 .package_index_store
-                .artifact_for(repository.id(), &blob_coordinate(&config.digest)?)
+                .artifact_for(repository.id(), &blob_coordinate(self.ecosystem, &config.digest)?)
                 .await?
                 .is_none()
         {
@@ -362,7 +385,7 @@ impl OciPackagingStrategy {
         for layer in manifest.layers.unwrap_or_default() {
             if self
                 .package_index_store
-                .artifact_for(repository.id(), &blob_coordinate(&layer.digest)?)
+                .artifact_for(repository.id(), &blob_coordinate(self.ecosystem, &layer.digest)?)
                 .await?
                 .is_none()
             {
@@ -400,7 +423,7 @@ impl OciPackagingStrategy {
     ) -> Result<Vec<PackageSearchHit>, PackagingError> {
         let entries = self
             .package_index_store
-            .entries_for_repository(repository.id(), PackageEcosystem::Oci)
+            .entries_for_repository(repository.id(), self.ecosystem)
             .await?;
         let query = query.to_ascii_lowercase();
         let mut hits = Vec::new();
@@ -440,7 +463,7 @@ impl OciPackagingStrategy {
         };
         let local_name = normalize_oci_name(name)?;
         let reference = normalize_oci_reference(reference)?;
-        let image = upstream_image_name(upstream, &local_name);
+        let image = upstream_image_name(upstream, &local_name, self.ecosystem);
         let url = join_v2_path(upstream, &format!("{image}/manifests/{reference}"));
         let response = self
             .registry_get_authed(
@@ -487,7 +510,7 @@ impl OciPackagingStrategy {
         };
         let local_name = normalize_oci_name(name)?;
         let digest = parse_oci_digest(digest)?;
-        let image = upstream_image_name(upstream, &local_name);
+        let image = upstream_image_name(upstream, &local_name, self.ecosystem);
         let url = join_v2_path(upstream, &format!("{image}/blobs/{digest}"));
         let response = self.registry_get_authed(&url, Vec::new()).await?;
         self.put_blob_one(repository, &digest, response.body.clone())
@@ -556,7 +579,7 @@ impl OciPackagingStrategy {
 #[async_trait]
 impl PackagingStrategy for OciPackagingStrategy {
     fn ecosystem(&self) -> PackageEcosystem {
-        PackageEcosystem::Oci
+        self.ecosystem
     }
 
     async fn publish(
@@ -564,7 +587,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         repository: &Repository,
         payload: Bytes,
     ) -> Result<PublishOutcome, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
@@ -599,7 +622,7 @@ impl PackagingStrategy for OciPackagingStrategy {
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
         let version = PackageVersion::parse(normalize_oci_reference(&parsed.reference)?)
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-        Ok(PackageCoordinate::new(PackageEcosystem::Oci, name, version))
+        Ok(PackageCoordinate::new(self.ecosystem, name, version))
     }
 
     async fn index(
@@ -646,7 +669,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         digest: &str,
         body: Bytes,
     ) -> Result<u64, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
@@ -661,7 +684,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         media_type: &str,
         body: Bytes,
     ) -> Result<String, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
@@ -675,7 +698,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         name: &str,
         reference: &str,
     ) -> Result<OciManifestDocument, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         let targets = if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
             self.resolve_read_targets(repository).await?
         } else {
@@ -725,7 +748,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         repository: &Repository,
         name: &str,
     ) -> Result<Vec<String>, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
             let targets = self.resolve_read_targets(repository).await?;
             let mut tags = Vec::new();
@@ -760,7 +783,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         coordinate: &PackageCoordinate,
         yanked: bool,
     ) -> Result<(), PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if Self::is_read_only(repository) {
             return Err(PackagingError::ReadOnlyRepository);
         }
@@ -799,7 +822,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         query: &str,
         limit: usize,
     ) -> Result<Vec<PackageSearchHit>, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -828,7 +851,7 @@ impl OciPackagingStrategy {
         name: &str,
         digest: &str,
     ) -> Result<Bytes, PackagingError> {
-        Self::ensure_oci_repository(repository)?;
+        self.ensure_repository(repository)?;
         let targets = if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
             self.resolve_read_targets(repository).await?
         } else {
@@ -973,8 +996,8 @@ fn is_docker_hub(upstream: &Url) -> bool {
     )
 }
 
-fn upstream_image_name(upstream: &Url, name: &str) -> String {
-    if is_docker_hub(upstream) && !name.contains('/') {
+fn upstream_image_name(upstream: &Url, name: &str, ecosystem: PackageEcosystem) -> String {
+    if ecosystem == PackageEcosystem::Oci && is_docker_hub(upstream) && !name.contains('/') {
         format!("library/{name}")
     } else {
         name.to_string()
@@ -1072,12 +1095,15 @@ fn registry_status_error(url: &str, status: u16) -> PackagingError {
     }
 }
 
-fn blob_coordinate(digest: &str) -> Result<PackageCoordinate, PackagingError> {
+fn blob_coordinate(
+    ecosystem: PackageEcosystem,
+    digest: &str,
+) -> Result<PackageCoordinate, PackagingError> {
     let name = PackageName::parse(BLOB_PACKAGE)
         .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
     let version = PackageVersion::parse(digest)
         .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-    Ok(PackageCoordinate::new(PackageEcosystem::Oci, name, version))
+    Ok(PackageCoordinate::new(ecosystem, name, version))
 }
 
 fn parse_artifact_id(value: &str) -> Result<ArtifactId, PackagingError> {
@@ -1189,6 +1215,26 @@ mod tests {
             PackageEcosystem::Oci,
         )
         .unwrap()
+    }
+
+    fn helm_forge(name: &str) -> Repository {
+        Repository::new(
+            RepositoryName::parse(name).unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Helm,
+        )
+        .unwrap()
+    }
+
+    fn helm_strategy() -> OciPackagingStrategy {
+        OciPackagingStrategy::for_ecosystem(
+            PackageEcosystem::Helm,
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            Arc::new(InMemoryHttpClient::default()),
+        )
     }
 
     fn blob(content: &[u8]) -> (String, Bytes) {
@@ -1426,13 +1472,23 @@ mod tests {
     #[test]
     fn docker_hub_official_images_use_the_library_prefix() {
         let hub = Url::parse("https://registry-1.docker.io").unwrap();
-        assert_eq!(upstream_image_name(&hub, "alpine"), "library/alpine");
         assert_eq!(
-            upstream_image_name(&hub, "bitnami/nginx"),
+            upstream_image_name(&hub, "alpine", PackageEcosystem::Oci),
+            "library/alpine"
+        );
+        assert_eq!(
+            upstream_image_name(&hub, "bitnami/nginx", PackageEcosystem::Oci),
             "bitnami/nginx"
         );
         let ghcr = Url::parse("https://ghcr.io").unwrap();
-        assert_eq!(upstream_image_name(&ghcr, "alpine"), "alpine");
+        assert_eq!(
+            upstream_image_name(&ghcr, "alpine", PackageEcosystem::Oci),
+            "alpine"
+        );
+        assert_eq!(
+            upstream_image_name(&hub, "wordpress", PackageEcosystem::Helm),
+            "wordpress"
+        );
     }
 
     #[test]
@@ -1554,5 +1610,74 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, PackagingError::ReadOnlyRepository));
+    }
+
+    #[tokio::test]
+    async fn indexes_a_nested_image_name() {
+        let strategy = strategy();
+        let repository = oci_forge("oci-local");
+        let (config_digest, config) = blob(b"cfg");
+        let (layer_digest, layer) = blob(b"lyr");
+        strategy
+            .put_blob(&repository, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&repository, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_manifest(
+                &repository,
+                "bitnami/nginx",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            strategy
+                .list_tags(&repository, "bitnami/nginx")
+                .await
+                .unwrap(),
+            vec!["latest".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn helm_forge_indexes_charts_under_the_helm_ecosystem() {
+        let helm = helm_strategy();
+        let repository = helm_forge("charts-local");
+        let (config_digest, config) = blob(b"helm-config");
+        let (layer_digest, layer) = blob(b"chart-tgz");
+        helm
+            .put_blob(&repository, &config_digest, config.clone())
+            .await
+            .unwrap();
+        helm
+            .put_blob(&repository, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        helm
+            .put_manifest(
+                &repository,
+                "demo",
+                "0.1.0",
+                "application/vnd.cncf.helm.chart.manifest.v1+json",
+                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+            )
+            .await
+            .unwrap();
+        let pulled = helm
+            .get_manifest(&repository, "demo", "0.1.0")
+            .await
+            .unwrap();
+        assert!(!pulled.body.is_empty());
+        let mismatch = strategy()
+            .get_manifest(&repository, "demo", "0.1.0")
+            .await
+            .unwrap_err();
+        assert!(matches!(mismatch, PackagingError::EcosystemMismatch { .. }));
     }
 }
