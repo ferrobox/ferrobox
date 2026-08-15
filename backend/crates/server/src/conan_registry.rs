@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(body.as_ref(), b"from conan import ConanFile\n");
 
         let (status, _, _) = send(
-            fx.app,
+            fx.app.clone(),
             Request::builder()
                 .method("DELETE")
                 .uri(format!(
@@ -542,5 +542,29 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
+
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!(
+                    "/conan/{}/v2/conans/hello/0.1/_/_/latest",
+                    fx.repo_id
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/conan/{}{recipe}", fx.repo_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_ref(), b"from conan import ConanFile\n");
     }
 }
