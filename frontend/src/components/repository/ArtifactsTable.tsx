@@ -28,7 +28,18 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBytes, truncateMiddle } from "@/lib/format";
 
-function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
+type VersionBucket = {
+  key: string;
+  version: string | null;
+  artifacts: ArtifactResponse[];
+};
+
+type PackageGroup = {
+  name: string;
+  versions: VersionBucket[];
+};
+
+function fallbackFilename(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
   if (artifact.name && artifact.version) {
     const extension =
       ecosystem === "npm"
@@ -48,6 +59,16 @@ function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
   return artifact.id;
 }
 
+function fileLabel(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
+  return artifact.filename ?? fallbackFilename(artifact, ecosystem);
+}
+
+function downloadName(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto): string {
+  const label = fileLabel(artifact, ecosystem);
+  const slash = Math.max(label.lastIndexOf("/"), label.lastIndexOf("\\"));
+  return slash >= 0 ? label.slice(slash + 1) : label;
+}
+
 function displayName(artifact: ArtifactResponse): string {
   return artifact.name ?? "Artefacto sin índice";
 }
@@ -60,6 +81,48 @@ function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
     return version.replace(/@([^:]+):/, "@$1/");
   }
   return version;
+}
+
+function groupArtifacts(
+  data: ArtifactResponse[],
+  ecosystem: PackageEcosystemDto,
+): PackageGroup[] {
+  const byName = new Map<string, ArtifactResponse[]>();
+  for (const artifact of data) {
+    if (artifact.name === "_blob") {
+      continue;
+    }
+    const key = artifact.name ?? artifact.id;
+    const existing = byName.get(key) ?? [];
+    existing.push(artifact);
+    byName.set(key, existing);
+  }
+
+  return [...byName.entries()]
+    .map(([name, artifacts]) => {
+      const byVersion = new Map<string, ArtifactResponse[]>();
+      for (const artifact of artifacts) {
+        const key = artifact.version ?? artifact.id;
+        const existing = byVersion.get(key) ?? [];
+        existing.push(artifact);
+        byVersion.set(key, existing);
+      }
+      const versions = [...byVersion.entries()]
+        .map(([key, files]) => ({
+          key,
+          version: files[0]?.version ?? null,
+          artifacts: files.slice().sort((left, right) =>
+            fileLabel(left, ecosystem).localeCompare(fileLabel(right, ecosystem)),
+          ),
+        }))
+        .sort((left, right) =>
+          (right.version ?? "").localeCompare(left.version ?? "", undefined, {
+            numeric: true,
+          }),
+        );
+      return { name, versions };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function ArtifactsTable({
@@ -90,31 +153,10 @@ export function ArtifactsTable({
       ecosystem === "conan");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
-  const groups = useMemo(() => {
-    if (!data) {
-      return [];
-    }
-    const byName = new Map<string, ArtifactResponse[]>();
-    for (const artifact of data) {
-      if (artifact.name === "_blob") {
-        continue;
-      }
-      const key = artifact.name ?? artifact.id;
-      const existing = byName.get(key) ?? [];
-      existing.push(artifact);
-      byName.set(key, existing);
-    }
-    return [...byName.entries()]
-      .map(([name, artifacts]) => ({
-        name,
-        artifacts: artifacts.slice().sort((left, right) =>
-          (right.version ?? "").localeCompare(left.version ?? "", undefined, {
-            numeric: true,
-          }),
-        ),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
-  }, [data]);
+  const groups = useMemo(
+    () => (data ? groupArtifacts(data, ecosystem) : []),
+    [data, ecosystem],
+  );
 
   async function onDelete(artifactId: string) {
     try {
@@ -137,10 +179,11 @@ export function ArtifactsTable({
         yanked,
         ecosystem,
       });
+      const label = versionLabel(artifact.version, ecosystem);
       toast.success(
         yanked
-          ? `${artifact.name} ${artifact.version} marcado como yanked`
-          : `${artifact.name} ${artifact.version} restaurado`,
+          ? `${artifact.name} ${label} marcado como yanked`
+          : `${artifact.name} ${label} restaurado`,
       );
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo actualizar el yank");
@@ -157,6 +200,16 @@ export function ArtifactsTable({
       }
       return next;
     });
+  }
+
+  function onDownload(artifact: ArtifactResponse) {
+    void downloadArtifact(artifact.id, downloadName(artifact, ecosystem)).catch(
+      (err: unknown) => {
+        toast.error(
+          err instanceof ApiError ? err.message : "No se pudo descargar el artefacto",
+        );
+      },
+    );
   }
 
   if (isPending) {
@@ -247,11 +300,13 @@ export function ArtifactsTable({
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {groups.map((group) => {
         const isCollapsed = collapsed.has(group.name);
-        const latest = group.artifacts[0];
+        const latest = group.versions[0]?.artifacts[0];
         if (!latest) {
           return null;
         }
-        const yankedCount = group.artifacts.filter((artifact) => artifact.yanked).length;
+        const yankedCount = group.versions.filter((bucket) =>
+          bucket.artifacts.some((artifact) => artifact.yanked),
+        ).length;
 
         return (
           <section key={group.name} className="border-b border-border last:border-b-0">
@@ -273,9 +328,9 @@ export function ArtifactsTable({
                   {displayName(latest)}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {group.artifacts.length === 1
+                  {group.versions.length === 1
                     ? "1 versión"
-                    : `${group.artifacts.length} versiones`}
+                    : `${group.versions.length} versiones`}
                   {yankedCount > 0
                     ? ` · ${yankedCount === 1 ? "1 yanked" : `${yankedCount} yanked`}`
                     : null}
@@ -284,116 +339,187 @@ export function ArtifactsTable({
             </button>
             {isCollapsed ? null : (
               <ul className="border-t border-border bg-background/40">
-                {group.artifacts.map((artifact) => {
-                  const memberName =
-                    kind === "alloy"
-                      ? (memberNames[artifact.repository_id] ?? artifact.repository_id)
-                      : null;
-
-                  return (
-                    <li
-                      key={artifact.id}
-                      className="flex items-center gap-3 border-l-2 border-l-orange-500/40 px-4 py-2.5 pl-14 hover:bg-muted/30"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          {artifact.version ? (
-                            <Badge
-                              variant="outline"
-                              className={`font-mono ${artifact.yanked ? "text-muted-foreground line-through" : ""}`}
-                            >
-                              {versionLabel(artifact.version, ecosystem)}
-                            </Badge>
-                          ) : (
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {truncateMiddle(artifact.id)}
-                            </span>
-                          )}
-                          {artifact.yanked ? (
-                            <Badge
-                              variant="outline"
-                              className="border-destructive/40 text-destructive"
-                            >
-                              Yanked
-                            </Badge>
-                          ) : null}
-                          <span className="text-xs text-muted-foreground">
-                            {formatBytes(artifact.size_bytes)}
-                          </span>
-                          {memberName ? (
-                            <NavLink
-                              to={`/repositories/${artifact.repository_id}`}
-                              className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                            >
-                              {memberName}
-                            </NavLink>
-                          ) : null}
-                        </span>
-                        <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                          sha256:{truncateMiddle(artifact.checksum, 6)}
-                        </span>
-                      </span>
-                      <div className="flex shrink-0 gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            void downloadArtifact(
-                              artifact.id,
-                              artifactFilename(artifact, ecosystem),
-                            ).catch(
-                              (err: unknown) => {
-                                toast.error(
-                                  err instanceof ApiError
-                                    ? err.message
-                                    : "No se pudo descargar el artefacto",
-                                );
-                              },
-                            );
-                          }}
-                        >
-                          <Download />
-                          Descargar
-                        </Button>
-                        {canYank && artifact.name && artifact.version ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={setYanked.isPending}
-                            title={
-                              artifact.yanked
-                                ? "Vuelve a ofrecer esta versión en resoluciones nuevas"
-                                : "Deja de usarse en resoluciones nuevas; sigue descargable si ya está fijado"
-                            }
-                            onClick={() => void onSetYanked(artifact, !artifact.yanked)}
-                          >
-                            {artifact.yanked ? <RotateCcw /> : <Ban />}
-                            {artifact.yanked ? "Restaurar" : "Yank"}
-                          </Button>
-                        ) : null}
-                        {canWrite && kind !== "alloy" ? (
-                          <ConfirmDeleteDialog
-                            title={`Eliminar ${artifactFilename(artifact, ecosystem)}`}
-                            description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
-                            pending={deleteArtifact.isPending}
-                            onConfirm={() => onDelete(artifact.id)}
-                            trigger={
-                              <Button variant="ghost" size="sm">
-                                <Trash2 />
-                                Eliminar
-                              </Button>
-                            }
-                          />
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
+                {group.versions.map((bucket) => (
+                  <VersionRows
+                    key={bucket.key}
+                    bucket={bucket}
+                    kind={kind}
+                    ecosystem={ecosystem}
+                    memberNames={memberNames}
+                    canWrite={canWrite}
+                    canYank={canYank}
+                    yankPending={setYanked.isPending}
+                    deletePending={deleteArtifact.isPending}
+                    onDownload={onDownload}
+                    onSetYanked={onSetYanked}
+                    onDelete={onDelete}
+                  />
+                ))}
               </ul>
             )}
           </section>
         );
       })}
     </div>
+  );
+}
+
+function VersionRows({
+  bucket,
+  kind,
+  ecosystem,
+  memberNames,
+  canWrite,
+  canYank,
+  yankPending,
+  deletePending,
+  onDownload,
+  onSetYanked,
+  onDelete,
+}: {
+  bucket: VersionBucket;
+  kind: RepositoryStorageKind;
+  ecosystem: PackageEcosystemDto;
+  memberNames: Readonly<Record<string, string>>;
+  canWrite: boolean;
+  canYank: boolean;
+  yankPending: boolean;
+  deletePending: boolean;
+  onDownload: (artifact: ArtifactResponse) => void;
+  onSetYanked: (artifact: ArtifactResponse, yanked: boolean) => void;
+  onDelete: (artifactId: string) => Promise<void>;
+}) {
+  const representative = bucket.artifacts[0];
+  if (!representative) {
+    return null;
+  }
+  const yanked = bucket.artifacts.some((artifact) => artifact.yanked);
+  const totalBytes = bucket.artifacts.reduce((sum, artifact) => sum + artifact.size_bytes, 0);
+  const nested = bucket.artifacts.length > 1;
+  const memberName =
+    kind === "alloy"
+      ? (memberNames[representative.repository_id] ?? representative.repository_id)
+      : null;
+
+  return (
+    <li className="border-l-2 border-l-orange-500/40">
+      <div className="flex items-center gap-3 px-4 py-2.5 pl-14 hover:bg-muted/30">
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            {bucket.version ? (
+              <Badge
+                variant="outline"
+                className={`font-mono ${yanked ? "text-muted-foreground line-through" : ""}`}
+              >
+                {versionLabel(bucket.version, ecosystem)}
+              </Badge>
+            ) : (
+              <span className="font-mono text-xs text-muted-foreground">
+                {truncateMiddle(representative.id)}
+              </span>
+            )}
+            {yanked ? (
+              <Badge variant="outline" className="border-destructive/40 text-destructive">
+                Yanked
+              </Badge>
+            ) : null}
+            <span className="text-xs text-muted-foreground">
+              {nested
+                ? `${bucket.artifacts.length} ficheros · ${formatBytes(totalBytes)}`
+                : formatBytes(representative.size_bytes)}
+            </span>
+            {memberName ? (
+              <NavLink
+                to={`/repositories/${representative.repository_id}`}
+                className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                {memberName}
+              </NavLink>
+            ) : null}
+          </span>
+          {nested ? null : (
+            <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+              sha256:{truncateMiddle(representative.checksum, 6)}
+            </span>
+          )}
+        </span>
+        <div className="flex shrink-0 gap-1">
+          {nested ? null : (
+            <Button variant="ghost" size="sm" onClick={() => onDownload(representative)}>
+              <Download />
+              Descargar
+            </Button>
+          )}
+          {canYank && representative.name && representative.version ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={yankPending}
+              title={
+                yanked
+                  ? "Vuelve a ofrecer esta versión en resoluciones nuevas"
+                  : "Deja de usarse en resoluciones nuevas; sigue descargable si ya está fijado"
+              }
+              onClick={() => void onSetYanked(representative, !yanked)}
+            >
+              {yanked ? <RotateCcw /> : <Ban />}
+              {yanked ? "Restaurar" : "Yank"}
+            </Button>
+          ) : null}
+          {nested || !canWrite || kind === "alloy" ? null : (
+            <ConfirmDeleteDialog
+              title={`Eliminar ${downloadName(representative, ecosystem)}`}
+              description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
+              pending={deletePending}
+              onConfirm={() => onDelete(representative.id)}
+              trigger={
+                <Button variant="ghost" size="sm">
+                  <Trash2 />
+                  Eliminar
+                </Button>
+              }
+            />
+          )}
+        </div>
+      </div>
+      {nested
+        ? bucket.artifacts.map((artifact) => (
+            <div
+              key={artifact.id}
+              className="flex items-center gap-3 border-t border-border/60 px-4 py-2 pl-20 hover:bg-muted/20"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-mono text-xs text-foreground">
+                  {fileLabel(artifact, ecosystem)}
+                </span>
+                <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                  {formatBytes(artifact.size_bytes)} · sha256:
+                  {truncateMiddle(artifact.checksum, 6)}
+                </span>
+              </span>
+              <div className="flex shrink-0 gap-1">
+                <Button variant="ghost" size="sm" onClick={() => onDownload(artifact)}>
+                  <Download />
+                  Descargar
+                </Button>
+                {canWrite && kind !== "alloy" ? (
+                  <ConfirmDeleteDialog
+                    title={`Eliminar ${downloadName(artifact, ecosystem)}`}
+                    description="Se borrará este fichero del almacenamiento. El resto de la versión no se modifica. Esta acción no se puede deshacer."
+                    pending={deletePending}
+                    onConfirm={() => onDelete(artifact.id)}
+                    trigger={
+                      <Button variant="ghost" size="sm">
+                        <Trash2 />
+                        Eliminar
+                      </Button>
+                    }
+                  />
+                ) : null}
+              </div>
+            </div>
+          ))
+        : null}
+    </li>
   );
 }
