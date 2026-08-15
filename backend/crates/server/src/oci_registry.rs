@@ -225,12 +225,12 @@ async fn put_manifest(
 
 async fn get_blob(
     State(state): State<Arc<AppState>>,
-    Path((repository_id, _name, digest)): Path<(Uuid, String, String)>,
+    Path((repository_id, name, digest)): Path<(Uuid, String, String)>,
     method: Method,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     let repository = load_oci_repository(&state, repository_id).await?;
     let strategy = oci_strategy(&state)?;
-    let body = strategy.download_file(&repository, &digest).await?;
+    let body = strategy.get_blob(&repository, &name, &digest).await?;
     let mut headers = oci_headers();
     headers.insert(
         header::CONTENT_TYPE,
@@ -668,6 +668,8 @@ mod tests {
         app: Router,
         repo_id: Uuid,
         developer_token: String,
+        state: Arc<AppState>,
+        http: Arc<InMemoryHttpClient>,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -700,7 +702,7 @@ mod tests {
                 artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
-                http_client,
+                http_client.clone(),
                 repository_store.clone(),
                 "http://127.0.0.1:3000".to_string(),
             )))
@@ -709,6 +711,7 @@ mod tests {
                 package_index_store.clone(),
                 storage.clone(),
                 repository_store.clone(),
+                http_client.clone(),
             )));
 
         let state = Arc::new(AppState {
@@ -786,9 +789,11 @@ mod tests {
             .unwrap();
 
         Fixture {
-            app: crate::build_router(state),
+            app: crate::build_router(state.clone()),
             repo_id: repo_id.into(),
             developer_token,
+            state,
+            http: http_client,
         }
     }
 
@@ -1001,5 +1006,48 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let tags: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(tags["tags"][0], "latest");
+    }
+
+    #[tokio::test]
+    async fn mirror_pulls_a_manifest_from_upstream() {
+        let fx = fixture().await;
+        let mirror_id = fx
+            .state
+            .create_repository
+            .execute(
+                RepositoryName::parse("oci-hub").unwrap(),
+                PackageEcosystem::Oci,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://registry-1.docker.io".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+            "layers": []
+        });
+        let body = Bytes::from(serde_json::to_vec(&manifest).unwrap());
+        fx.http.stub(
+            "https://registry-1.docker.io/v2/library/alpine/manifests/latest",
+            200,
+            body.clone(),
+        );
+
+        let (status, headers, pulled) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/v2/{mirror_id}/alpine/manifests/latest"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get("content-type").unwrap(),
+            DEFAULT_MANIFEST_MEDIA_TYPE
+        );
+        assert_eq!(pulled, body);
     }
 }

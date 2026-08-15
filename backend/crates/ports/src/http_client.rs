@@ -31,13 +31,33 @@ pub struct HttpResponse {
     pub status: u16,
     /// Cuerpo de la respuesta.
     pub body: Bytes,
+    /// Cabeceras de respuesta. Los nombres se guardan en minúsculas.
+    pub headers: Vec<(String, String)>,
 }
 
 impl HttpResponse {
+    /// Construye una respuesta sin cabeceras.
+    #[must_use]
+    pub fn new(status: u16, body: Bytes) -> Self {
+        Self {
+            status,
+            body,
+            headers: Vec::new(),
+        }
+    }
+
     /// `true` si el código de estado está en el rango 2xx.
     #[must_use]
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
+    }
+
+    /// Primera cabecera cuyo nombre coincide sin distinguir mayúsculas.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find_map(|(key, value)| {
+            key.eq_ignore_ascii_case(name).then_some(value.as_str())
+        })
     }
 }
 
@@ -52,4 +72,17 @@ pub trait HttpClient: Send + Sync {
     /// Devuelve [`HttpClientError`] si la red falla o el remoto
     /// responde fuera de 2xx (según la política del adaptador).
     async fn get(&self, url: &str) -> Result<HttpResponse, HttpClientError>;
+
+    /// `GET` con cabeceras extra. A diferencia de [`get`], devuelve el
+    /// cuerpo y las cabeceras también fuera de 2xx (hace falta para el
+    /// desafío `Bearer` de un registro OCI). Solo falla de transporte.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`HttpClientError::Transport`] si la red o TLS fallan.
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, HttpClientError>;
 }

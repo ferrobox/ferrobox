@@ -248,7 +248,7 @@ fn build_app_state(
             artifact_store.clone(),
             package_index_store.clone(),
             storage.clone(),
-            http_client,
+            http_client.clone(),
             repository_store.clone(),
             config.public_base_url.clone(),
         )))
@@ -257,6 +257,7 @@ fn build_app_state(
             package_index_store.clone(),
             storage.clone(),
             repository_store.clone(),
+            http_client,
         )));
 
     AppState {

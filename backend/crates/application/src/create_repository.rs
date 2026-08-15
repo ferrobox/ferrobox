@@ -12,8 +12,8 @@ use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 /// Motivos por los que crear un repositorio puede fallar.
 #[derive(Debug, Error)]
 pub enum CreateRepositoryError {
-    /// Un `Mirror` solo está soportado para Cargo, npm y `PyPI` en esta versión.
-    #[error("mirror repositories currently require the cargo, npm or pypi ecosystem")]
+    /// Un `Mirror` solo está soportado para Cargo, npm, `PyPI` y OCI.
+    #[error("mirror repositories currently require the cargo, npm, pypi or oci ecosystem")]
     UnsupportedMirrorEcosystem,
 
     /// La URL *upstream* de un `Mirror` no es válida.
@@ -62,7 +62,7 @@ pub enum CreateRepositoryKind {
     /// Réplica cacheada de un *upstream*.
     Mirror {
         /// URL base del registro remoto (índice sparse de Cargo,
-        /// registro npm o índice simple de `PyPI`).
+        /// registro npm, índice simple de `PyPI` o registro OCI).
         upstream: String,
     },
     /// Agregación de otros repositorios `Forge` o `Mirror`.
@@ -110,7 +110,10 @@ impl CreateRepositoryUseCase {
             CreateRepositoryKind::Mirror { upstream } => {
                 if !matches!(
                     ecosystem,
-                    PackageEcosystem::Cargo | PackageEcosystem::Npm | PackageEcosystem::PyPi
+                    PackageEcosystem::Cargo
+                        | PackageEcosystem::Npm
+                        | PackageEcosystem::PyPi
+                        | PackageEcosystem::Oci
                 ) {
                     return Err(CreateRepositoryError::UnsupportedMirrorEcosystem);
                 }
@@ -240,6 +243,32 @@ mod tests {
             other => panic!("expected mirror, got {other:?}"),
         }
         assert_eq!(repository.ecosystem(), PackageEcosystem::PyPi);
+    }
+
+    #[tokio::test]
+    async fn creates_an_oci_mirror_with_upstream() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("oci-proxy").unwrap(),
+                PackageEcosystem::Oci,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://registry-1.docker.io".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(upstream.as_str(), "https://registry-1.docker.io/");
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Oci);
     }
 
     #[tokio::test]

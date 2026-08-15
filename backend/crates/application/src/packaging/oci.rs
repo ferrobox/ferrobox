@@ -4,8 +4,9 @@
 //!
 //! Referencia: <https://github.com/opencontainers/distribution-spec>.
 //!
-//! Cubre **Forge** (blobs, manifiestos, etiquetas y yank) y lecturas en
-//! **Alloy**. Un `Mirror` OCI queda para un corte posterior.
+//! Cubre **Forge** (blobs, manifiestos, etiquetas y yank), **Mirror**
+//! (caché *pull-through* de un registro OCI como Docker Hub) y lecturas
+//! en **Alloy**.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -21,10 +22,12 @@ use ferrobox_domain::package_coordinate::{
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
+use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 use super::{OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
@@ -37,12 +40,15 @@ const BLOB_PACKAGE: &str = "_blob";
 /// Media type por defecto de un manifiesto OCI.
 pub const DEFAULT_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
 
+const MANIFEST_ACCEPT: &str = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.artifact.manifest.v1+json";
+
 /// Estrategia de empaquetado para el ecosistema OCI.
 pub struct OciPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
     repository_store: Arc<dyn RepositoryStore>,
+    http_client: Arc<dyn HttpClient>,
 }
 
 impl OciPackagingStrategy {
@@ -53,12 +59,14 @@ impl OciPackagingStrategy {
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
         repository_store: Arc<dyn RepositoryStore>,
+        http_client: Arc<dyn HttpClient>,
     ) -> Self {
         Self {
             artifact_store,
             package_index_store,
             storage,
             repository_store,
+            http_client,
         }
     }
 
@@ -77,6 +85,13 @@ impl OciPackagingStrategy {
             repository.kind(),
             RepositoryKind::Mirror { .. } | RepositoryKind::Alloy { .. }
         )
+    }
+
+    fn mirror_upstream(repository: &Repository) -> Option<&Url> {
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => Some(upstream),
+            _ => None,
+        }
     }
 
     async fn resolve_read_targets(
@@ -205,7 +220,9 @@ impl OciPackagingStrategy {
                 "manifest digest mismatch: expected {reference}, got {digest}"
             )));
         }
-        self.ensure_referenced_blobs(repository, &body).await?;
+        if !matches!(repository.kind(), RepositoryKind::Mirror { .. }) {
+            self.ensure_referenced_blobs(repository, &body).await?;
+        }
 
         let package_name = PackageName::parse(name.clone())
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
@@ -411,6 +428,129 @@ impl OciPackagingStrategy {
         }
         Ok(hits)
     }
+
+    async fn refresh_manifest_from_upstream(
+        &self,
+        repository: &Repository,
+        name: &str,
+        reference: &str,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        let Some(upstream) = Self::mirror_upstream(repository) else {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        };
+        let local_name = normalize_oci_name(name)?;
+        let reference = normalize_oci_reference(reference)?;
+        let image = upstream_image_name(upstream, &local_name);
+        let url = join_v2_path(upstream, &format!("{image}/manifests/{reference}"));
+        let response = self
+            .registry_get_authed(
+                &url,
+                vec![("Accept".to_string(), MANIFEST_ACCEPT.to_string())],
+            )
+            .await
+            .map_err(|err| match err {
+                PackagingError::FileNotFound(_) => {
+                    PackagingError::PackageNotFound(local_name.clone())
+                }
+                other => other,
+            })?;
+        if response.body.is_empty() {
+            return Err(PackagingError::InvalidUpstream(
+                "upstream manifest is empty".to_string(),
+            ));
+        }
+        let media_type = content_type_of(&response, DEFAULT_MANIFEST_MEDIA_TYPE);
+        let digest = self
+            .put_manifest_one(
+                repository,
+                &local_name,
+                &reference,
+                &media_type,
+                response.body.clone(),
+            )
+            .await?;
+        Ok(OciManifestDocument {
+            media_type,
+            digest,
+            body: response.body,
+        })
+    }
+
+    async fn refresh_blob_from_upstream(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+    ) -> Result<Bytes, PackagingError> {
+        let Some(upstream) = Self::mirror_upstream(repository) else {
+            return Err(PackagingError::FileNotFound(digest.to_string()));
+        };
+        let local_name = normalize_oci_name(name)?;
+        let digest = parse_oci_digest(digest)?;
+        let image = upstream_image_name(upstream, &local_name);
+        let url = join_v2_path(upstream, &format!("{image}/blobs/{digest}"));
+        let response = self.registry_get_authed(&url, Vec::new()).await?;
+        self.put_blob_one(repository, &digest, response.body.clone())
+            .await?;
+        Ok(response.body)
+    }
+
+    async fn registry_get_authed(
+        &self,
+        url: &str,
+        extra_headers: Vec<(String, String)>,
+    ) -> Result<HttpResponse, PackagingError> {
+        let response = self
+            .exchange(url, extra_headers.clone(), None)
+            .await?;
+        if response.is_success() {
+            return Ok(response);
+        }
+        if response.status != 401 {
+            return Err(registry_status_error(url, response.status));
+        }
+        let challenge = bearer_challenge(&response).ok_or_else(|| {
+            PackagingError::InvalidUpstream(
+                "upstream 401 without a Bearer WWW-Authenticate challenge".to_string(),
+            )
+        })?;
+        let token = self.fetch_bearer_token(challenge).await?;
+        let retry = self.exchange(url, extra_headers, Some(&token)).await?;
+        if retry.is_success() {
+            return Ok(retry);
+        }
+        Err(registry_status_error(url, retry.status))
+    }
+
+    async fn exchange(
+        &self,
+        url: &str,
+        extra_headers: Vec<(String, String)>,
+        bearer: Option<&str>,
+    ) -> Result<HttpResponse, PackagingError> {
+        let mut headers = extra_headers;
+        if let Some(token) = bearer {
+            headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        }
+        let refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        Ok(self.http_client.get_with_headers(url, &refs).await?)
+    }
+
+    async fn fetch_bearer_token(&self, challenge: &str) -> Result<String, PackagingError> {
+        let parsed = parse_bearer_challenge(challenge)?;
+        let token_url = token_request_url(&parsed.realm, &parsed.service, parsed.scope.as_deref())?;
+        let response = self.http_client.get_with_headers(&token_url, &[]).await?;
+        if !response.is_success() {
+            return Err(PackagingError::InvalidUpstream(format!(
+                "token endpoint returned HTTP {}",
+                response.status
+            )));
+        }
+        parse_registry_token(&response.body)
+    }
 }
 
 #[async_trait]
@@ -497,7 +637,7 @@ impl PackagingStrategy for OciPackagingStrategy {
         repository: &Repository,
         filename: &str,
     ) -> Result<Bytes, PackagingError> {
-        self.get_blob_from(repository, filename).await
+        self.get_blob_from(repository, "", filename).await
     }
 
     async fn put_blob(
@@ -536,23 +676,48 @@ impl PackagingStrategy for OciPackagingStrategy {
         reference: &str,
     ) -> Result<OciManifestDocument, PackagingError> {
         Self::ensure_oci_repository(repository)?;
-        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
-            let targets = self.resolve_read_targets(repository).await?;
-            let mut last_error = PackagingError::PackageNotFound(name.to_string());
-            for target in &targets {
-                match self.get_manifest_one(target, name, reference).await {
-                    Ok(document) => return Ok(document),
-                    Err(
-                        PackagingError::PackageNotFound(_)
-                        | PackagingError::VersionNotFound(_)
-                        | PackagingError::FileNotFound(_),
-                    ) => {}
-                    Err(error) => last_error = error,
+        let targets = if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            self.resolve_read_targets(repository).await?
+        } else {
+            vec![repository.clone()]
+        };
+        let mut last_error = PackagingError::PackageNotFound(name.to_string());
+        for target in &targets {
+            match self.get_manifest_one(target, name, reference).await {
+                Ok(document) => return Ok(document),
+                Err(
+                    PackagingError::PackageNotFound(_)
+                    | PackagingError::VersionNotFound(_)
+                    | PackagingError::FileNotFound(_),
+                ) => {
+                    if Self::mirror_upstream(target).is_some() {
+                        match self
+                            .refresh_manifest_from_upstream(target, name, reference)
+                            .await
+                        {
+                            Ok(document) => return Ok(document),
+                            Err(
+                                PackagingError::PackageNotFound(_)
+                                | PackagingError::VersionNotFound(_)
+                                | PackagingError::FileNotFound(_),
+                            ) => {}
+                            Err(error) => last_error = error,
+                        }
+                    }
                 }
+                Err(error) => last_error = error,
             }
-            return Err(last_error);
         }
-        self.get_manifest_one(repository, name, reference).await
+        Err(last_error)
+    }
+
+    async fn get_blob(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+    ) -> Result<Bytes, PackagingError> {
+        self.get_blob_from(repository, name, digest).await
     }
 
     async fn list_tags(
@@ -660,22 +825,34 @@ impl OciPackagingStrategy {
     async fn get_blob_from(
         &self,
         repository: &Repository,
+        name: &str,
         digest: &str,
     ) -> Result<Bytes, PackagingError> {
         Self::ensure_oci_repository(repository)?;
-        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
-            let targets = self.resolve_read_targets(repository).await?;
-            let mut last_error = PackagingError::FileNotFound(digest.to_string());
-            for target in &targets {
-                match self.get_blob_one(target, digest).await {
-                    Ok(body) => return Ok(body),
-                    Err(PackagingError::FileNotFound(_) | PackagingError::PackageNotFound(_)) => {}
-                    Err(error) => last_error = error,
+        let targets = if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            self.resolve_read_targets(repository).await?
+        } else {
+            vec![repository.clone()]
+        };
+        let mut last_error = PackagingError::FileNotFound(digest.to_string());
+        for target in &targets {
+            match self.get_blob_one(target, digest).await {
+                Ok(body) => return Ok(body),
+                Err(PackagingError::FileNotFound(_) | PackagingError::PackageNotFound(_)) => {
+                    if !name.is_empty() && Self::mirror_upstream(target).is_some() {
+                        match self.refresh_blob_from_upstream(target, name, digest).await {
+                            Ok(body) => return Ok(body),
+                            Err(
+                                PackagingError::FileNotFound(_) | PackagingError::PackageNotFound(_),
+                            ) => {}
+                            Err(error) => last_error = error,
+                        }
+                    }
                 }
+                Err(error) => last_error = error,
             }
-            return Err(last_error);
         }
-        self.get_blob_one(repository, digest).await
+        Err(last_error)
     }
 }
 
@@ -781,6 +958,120 @@ fn content_digest(body: &[u8]) -> String {
     format!("sha256:{}", sha256_checksum(body))
 }
 
+fn join_v2_path(upstream: &Url, path: &str) -> String {
+    let mut root = upstream.as_str().trim_end_matches('/').to_string();
+    if let Some(stripped) = root.strip_suffix("/v2") {
+        root = stripped.trim_end_matches('/').to_string();
+    }
+    format!("{root}/v2/{path}")
+}
+
+fn is_docker_hub(upstream: &Url) -> bool {
+    matches!(
+        upstream.host_str(),
+        Some("registry-1.docker.io" | "docker.io" | "index.docker.io")
+    )
+}
+
+fn upstream_image_name(upstream: &Url, name: &str) -> String {
+    if is_docker_hub(upstream) && !name.contains('/') {
+        format!("library/{name}")
+    } else {
+        name.to_string()
+    }
+}
+
+fn content_type_of(response: &HttpResponse, fallback: &str) -> String {
+    response
+        .header("content-type")
+        .map(|value| value.split(';').next().unwrap_or(value).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn bearer_challenge(response: &HttpResponse) -> Option<&str> {
+    response.headers.iter().find_map(|(name, value)| {
+        (name.eq_ignore_ascii_case("www-authenticate") && value.trim().starts_with("Bearer"))
+            .then_some(value.as_str())
+    })
+}
+
+struct BearerChallenge {
+    realm: String,
+    service: String,
+    scope: Option<String>,
+}
+
+fn parse_bearer_challenge(header: &str) -> Result<BearerChallenge, PackagingError> {
+    let rest = header
+        .trim()
+        .strip_prefix("Bearer")
+        .ok_or_else(|| {
+            PackagingError::InvalidUpstream("WWW-Authenticate is not a Bearer challenge".to_string())
+        })?
+        .trim();
+    let mut realm = None;
+    let mut service = None;
+    let mut scope = None;
+    for part in rest.split(',') {
+        let part = part.trim();
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        match key.trim() {
+            "realm" => realm = Some(value.to_string()),
+            "service" => service = Some(value.to_string()),
+            "scope" => scope = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    Ok(BearerChallenge {
+        realm: realm.ok_or_else(|| {
+            PackagingError::InvalidUpstream("Bearer challenge is missing realm".to_string())
+        })?,
+        service: service.ok_or_else(|| {
+            PackagingError::InvalidUpstream("Bearer challenge is missing service".to_string())
+        })?,
+        scope,
+    })
+}
+
+fn token_request_url(
+    realm: &str,
+    service: &str,
+    scope: Option<&str>,
+) -> Result<String, PackagingError> {
+    let mut url = Url::parse(realm).map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("service", service);
+        if let Some(scope) = scope {
+            pairs.append_pair("scope", scope);
+        }
+    }
+    Ok(url.to_string())
+}
+
+fn parse_registry_token(body: &[u8]) -> Result<String, PackagingError> {
+    let parsed: RegistryTokenResponse = serde_json::from_slice(body)
+        .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+    parsed.token.or(parsed.access_token).ok_or_else(|| {
+        PackagingError::InvalidUpstream("token response is missing token".to_string())
+    })
+}
+
+fn registry_status_error(url: &str, status: u16) -> PackagingError {
+    if status == 404 {
+        PackagingError::FileNotFound(url.to_string())
+    } else {
+        PackagingError::Upstream(HttpClientError::Status {
+            status,
+            url: url.to_string(),
+        })
+    }
+}
+
 fn blob_coordinate(digest: &str) -> Result<PackageCoordinate, PackagingError> {
     let name = PackageName::parse(BLOB_PACKAGE)
         .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
@@ -846,6 +1137,12 @@ struct LooseDescriptor {
     digest: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RegistryTokenResponse {
+    token: Option<String>,
+    access_token: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -856,15 +1153,21 @@ mod tests {
 
     use super::*;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryRepositoryStore, InMemoryStorage,
     };
 
     fn strategy() -> OciPackagingStrategy {
+        strategy_with_http(Arc::new(InMemoryHttpClient::default()))
+    }
+
+    fn strategy_with_http(http: Arc<InMemoryHttpClient>) -> OciPackagingStrategy {
         OciPackagingStrategy::new(
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryRepositoryStore::default()),
+            http,
         )
     }
 
@@ -872,6 +1175,17 @@ mod tests {
         Repository::new(
             RepositoryName::parse(name).unwrap(),
             RepositoryKind::Forge,
+            PackageEcosystem::Oci,
+        )
+        .unwrap()
+    }
+
+    fn oci_mirror(name: &str, upstream: &str) -> Repository {
+        Repository::new(
+            RepositoryName::parse(name).unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse(upstream).unwrap(),
+            },
             PackageEcosystem::Oci,
         )
         .unwrap()
@@ -1033,6 +1347,7 @@ mod tests {
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
             repository_store,
+            Arc::new(InMemoryHttpClient::default()),
         );
         let (digest, body) = blob(b"nope");
         let error = strategy.put_blob(&alloy, &digest, body).await.unwrap_err();
@@ -1061,6 +1376,7 @@ mod tests {
             package_index_store,
             storage,
             repository_store,
+            Arc::new(InMemoryHttpClient::default()),
         );
         let (config_digest, config) = blob(b"cfg");
         let (layer_digest, layer) = blob(b"lyr");
@@ -1096,5 +1412,147 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(layer_body.as_ref(), b"lyr");
+    }
+
+    #[test]
+    fn join_v2_path_strips_a_trailing_v2_prefix() {
+        let upstream = Url::parse("https://registry-1.docker.io/v2/").unwrap();
+        assert_eq!(
+            join_v2_path(&upstream, "library/alpine/manifests/latest"),
+            "https://registry-1.docker.io/v2/library/alpine/manifests/latest"
+        );
+    }
+
+    #[test]
+    fn docker_hub_official_images_use_the_library_prefix() {
+        let hub = Url::parse("https://registry-1.docker.io").unwrap();
+        assert_eq!(upstream_image_name(&hub, "alpine"), "library/alpine");
+        assert_eq!(
+            upstream_image_name(&hub, "bitnami/nginx"),
+            "bitnami/nginx"
+        );
+        let ghcr = Url::parse("https://ghcr.io").unwrap();
+        assert_eq!(upstream_image_name(&ghcr, "alpine"), "alpine");
+    }
+
+    #[test]
+    fn parse_bearer_challenge_reads_docker_hub_header() {
+        let parsed = parse_bearer_challenge(
+            r#"Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull""#,
+        )
+        .unwrap();
+        assert_eq!(parsed.realm, "https://auth.docker.io/token");
+        assert_eq!(parsed.service, "registry.docker.io");
+        assert_eq!(parsed.scope.as_deref(), Some("repository:library/alpine:pull"));
+    }
+
+    #[tokio::test]
+    async fn mirror_caches_a_manifest_and_blob_from_upstream() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = strategy_with_http(http.clone());
+        let repository = oci_mirror("oci-proxy", "https://registry-1.docker.io");
+        let layer = Bytes::from_static(b"cached-layer");
+        let layer_digest = content_digest(&layer);
+        let manifest = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 2,
+                "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                "config": {
+                    "mediaType": "application/vnd.oci.image.config.v1+json",
+                    "digest": layer_digest,
+                    "size": layer.len()
+                },
+                "layers": []
+            }))
+            .unwrap(),
+        );
+        let manifest_url =
+            "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
+        let blob_url = format!("https://registry-1.docker.io/v2/library/alpine/blobs/{layer_digest}");
+        http.stub(manifest_url, 200, manifest.clone());
+        http.stub(&blob_url, 200, layer.clone());
+
+        let pulled = strategy
+            .get_manifest(&repository, "alpine", "latest")
+            .await
+            .unwrap();
+        assert_eq!(pulled.body, manifest);
+        assert_eq!(
+            strategy.list_tags(&repository, "alpine").await.unwrap(),
+            vec!["latest".to_string()]
+        );
+
+        http.stub(manifest_url, 500, Bytes::from_static(b"should-not-hit"));
+        let cached = strategy
+            .get_manifest(&repository, "alpine", "latest")
+            .await
+            .unwrap();
+        assert_eq!(cached.body, manifest);
+
+        let blob = strategy
+            .get_blob(&repository, "alpine", &layer_digest)
+            .await
+            .unwrap();
+        assert_eq!(blob, layer);
+        http.stub(&blob_url, 500, Bytes::from_static(b"should-not-hit"));
+        let blob_again = strategy
+            .get_blob(&repository, "alpine", &layer_digest)
+            .await
+            .unwrap();
+        assert_eq!(blob_again, layer);
+    }
+
+    #[tokio::test]
+    async fn mirror_follows_a_docker_hub_bearer_challenge() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = strategy_with_http(http.clone());
+        let repository = oci_mirror("oci-proxy", "https://registry-1.docker.io");
+        let manifest = Bytes::from_static(br#"{"schemaVersion":2,"layers":[]}"#);
+        let manifest_url =
+            "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
+        let challenge = r#"Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull""#;
+        let token_url = token_request_url(
+            "https://auth.docker.io/token",
+            "registry.docker.io",
+            Some("repository:library/alpine:pull"),
+        )
+        .unwrap();
+
+        let mut unauthorized = HttpResponse::new(401, Bytes::from_static(b"unauthorized"));
+        unauthorized.headers.push((
+            "www-authenticate".to_string(),
+            challenge.to_string(),
+        ));
+        let mut ok = HttpResponse::new(200, manifest.clone());
+        ok.headers.push((
+            "content-type".to_string(),
+            DEFAULT_MANIFEST_MEDIA_TYPE.to_string(),
+        ));
+        http.stub_sequence(manifest_url, vec![unauthorized, ok]);
+        http.stub(
+            &token_url,
+            200,
+            Bytes::from_static(br#"{"token":"test-token"}"#),
+        );
+
+        let pulled = strategy
+            .get_manifest(&repository, "alpine", "latest")
+            .await
+            .unwrap();
+        assert_eq!(pulled.body, manifest);
+        assert_eq!(pulled.media_type, DEFAULT_MANIFEST_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn rejects_publishing_to_a_mirror() {
+        let error = strategy()
+            .put_blob(
+                &oci_mirror("oci-proxy", "https://registry-1.docker.io"),
+                &content_digest(b"nope"),
+                Bytes::from_static(b"nope"),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::ReadOnlyRepository));
     }
 }
