@@ -40,7 +40,7 @@ impl MirrorQuarantine {
         self.min_age_days > 0
     }
 
-    /// Interpreta un instante RFC 3339 (npm `time`, PyPI `upload_time`).
+    /// Interpreta un instante RFC 3339 (npm `time`, `PyPI` `upload_time`).
     #[must_use]
     pub fn parse_timestamp(value: &str) -> Option<DateTime<Utc>> {
         DateTime::parse_from_rfc3339(value.trim())
