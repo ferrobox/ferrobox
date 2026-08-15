@@ -90,7 +90,9 @@ export function OciRegistryPanel({
                 En HTTP local Docker exige{" "}
                 <code className="font-mono">insecure-registries: [&quot;{registryHost}&quot;]</code>{" "}
                 en <code className="font-mono">/etc/docker/daemon.json</code> y reiniciar el daemon.
-                Copia el UUID completo (8-4-4-4-12).
+                Copia el UUID completo (8-4-4-4-12). Si un <code className="font-mono">login</code>{" "}
+                antiguo no basta para el push, haz{" "}
+                <code className="font-mono">docker logout {registryHost}</code> y vuelve a entrar.
               </p>
             </div>
           )}
