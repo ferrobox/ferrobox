@@ -82,7 +82,11 @@ export function PypiRegistryPanel({
             1. Instala un paquete
           </p>
           <CopyableCodeBlock
-            code={`pip install demo-ferrobox-pypi --index-url ${indexUrl} --trusted-host 127.0.0.1`}
+            code={
+              isMirror
+                ? `pip install requests --index-url ${indexUrl} --trusted-host 127.0.0.1`
+                : `pip install demo-ferrobox-pypi --index-url ${indexUrl} --trusted-host 127.0.0.1`
+            }
           />
           <p className="text-xs text-muted-foreground">
             La barra final de <code className="font-mono">/simple/</code> es obligatoria. En HTTP

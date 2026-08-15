@@ -6,11 +6,11 @@
 //! - índice simple: <https://peps.python.org/pep-0503/>
 //! - subida *legacy*: <https://docs.pypi.org/api/upload/>
 //!
-//! Este primer corte cubre **Forge** (subir sdist/wheel, índice simple,
-//! descarga y yank) y lecturas en **Alloy**. Un `Mirror` de `PyPI` no
-//! está implementado todavía.
+//! Cubre **Forge** (subir sdist/wheel, índice simple, descarga y yank),
+//! **Mirror** (caché *pull-through* de un índice simple como pypi.org)
+//! y lecturas en **Alloy**.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -24,10 +24,12 @@ use ferrobox_domain::package_coordinate::{
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
+use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
@@ -39,6 +41,7 @@ pub struct PypiPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
+    http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
 }
@@ -51,6 +54,7 @@ impl PypiPackagingStrategy {
         artifact_store: Arc<dyn ArtifactStore>,
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
+        http_client: Arc<dyn HttpClient>,
         repository_store: Arc<dyn RepositoryStore>,
         public_base_url: String,
     ) -> Self {
@@ -58,6 +62,7 @@ impl PypiPackagingStrategy {
             artifact_store,
             package_index_store,
             storage,
+            http_client,
             repository_store,
             public_base_url,
         }
@@ -78,6 +83,13 @@ impl PypiPackagingStrategy {
             repository.kind(),
             RepositoryKind::Mirror { .. } | RepositoryKind::Alloy { .. }
         )
+    }
+
+    fn mirror_upstream(repository: &Repository) -> Option<&Url> {
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => Some(upstream),
+            RepositoryKind::Forge | RepositoryKind::Alloy { .. } => None,
+        }
     }
 
     async fn resolve_read_targets(
@@ -139,6 +151,19 @@ impl PypiPackagingStrategy {
         source: &Repository,
         name: &PackageName,
     ) -> Result<Bytes, PackagingError> {
+        if let Some(upstream) = Self::mirror_upstream(source) {
+            match self
+                .refresh_simple_from_upstream(source, upstream, name)
+                .await
+            {
+                Ok(()) => {}
+                Err(PackagingError::Upstream(HttpClientError::Status { status: 404, .. })) => {
+                    return Err(PackagingError::PackageNotFound(name.to_string()));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
         let entries = self
             .package_index_store
             .entries_for_package(source.id(), PackageEcosystem::PyPi, name)
@@ -149,6 +174,144 @@ impl PypiPackagingStrategy {
         simple_project_page(name.as_str(), &entries, |filename| {
             self.file_url(serving, filename)
         })
+    }
+
+    async fn refresh_simple_from_upstream(
+        &self,
+        repository: &Repository,
+        upstream: &Url,
+        name: &PackageName,
+    ) -> Result<(), PackagingError> {
+        let normalized = normalize_pypi_name(name.as_str());
+        let page_url = join_upstream(upstream, &format!("{normalized}/"));
+        let response = self.http_client.get(&page_url).await?;
+        let html = std::str::from_utf8(&response.body)
+            .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+        let links = parse_simple_links(html, &page_url)?;
+        if links.is_empty() {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        }
+
+        let mut existing_files = HashMap::new();
+        for entry_bytes in self
+            .package_index_store
+            .entries_for_package(repository.id(), PackageEcosystem::PyPi, name)
+            .await?
+        {
+            let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            for file in entry.files {
+                existing_files.insert(file.filename.clone(), file);
+            }
+        }
+
+        let mut by_version: BTreeMap<String, VersionEntry> = BTreeMap::new();
+        for link in links {
+            let Some(version) = version_from_filename(&link.filename, name.as_str()) else {
+                continue;
+            };
+            if PackageVersion::parse(version.clone()).is_err() {
+                continue;
+            }
+
+            let mut file = FileEntry {
+                filename: link.filename,
+                sha256: link.sha256,
+                artifact_id: String::new(),
+                yanked: link.yanked,
+                url: Some(link.url),
+                requires_python: link.requires_python,
+            };
+            if let Some(cached) = existing_files.get(&file.filename) {
+                file.artifact_id.clone_from(&cached.artifact_id);
+                if file.sha256.is_empty() {
+                    file.sha256.clone_from(&cached.sha256);
+                }
+            }
+
+            let entry = by_version.entry(version.clone()).or_insert_with(|| VersionEntry {
+                name: normalized.clone(),
+                version,
+                yanked: false,
+                files: Vec::new(),
+            });
+            entry.files.push(file);
+        }
+
+        if by_version.is_empty() {
+            return Err(PackagingError::InvalidUpstream(format!(
+                "upstream simple page for '{name}' has no recognizable distribution files"
+            )));
+        }
+
+        for entry in by_version.into_values() {
+            let package_name = PackageName::parse(entry.name.clone())
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            let package_version = PackageVersion::parse(entry.version.clone())
+                .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+            let coordinate =
+                PackageCoordinate::new(PackageEcosystem::PyPi, package_name, package_version);
+            let cached_id = entry
+                .files
+                .iter()
+                .rev()
+                .find_map(|file| parse_artifact_id(&file.artifact_id).ok());
+            let entry_bytes = Bytes::from(
+                serde_json::to_vec(&entry).expect("a VersionEntry always serializes to valid JSON"),
+            );
+            self.package_index_store
+                .upsert_entry(repository.id(), &coordinate, cached_id, entry_bytes)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn cache_file_from_upstream(
+        &self,
+        repository: &Repository,
+        entry: &mut VersionEntry,
+        file_index: usize,
+        url: &str,
+    ) -> Result<Bytes, PackagingError> {
+        let response = self.http_client.get(url).await?;
+        let content = response.body;
+        let checksum = sha256_checksum(&content);
+        let expected = entry.files[file_index].sha256.clone();
+        if !expected.is_empty() && expected.to_ascii_lowercase() != checksum.as_str() {
+            return Err(PackagingError::InvalidUpstream(format!(
+                "sha256 mismatch for '{}': expected {expected}, got {checksum}",
+                entry.files[file_index].filename
+            )));
+        }
+
+        let artifact = Artifact::new(repository.id(), checksum.clone(), content.len() as u64);
+        self.storage
+            .put(&storage_key_for(artifact.id()), content.clone())
+            .await?;
+        self.artifact_store.save(&artifact).await?;
+
+        entry.files[file_index].artifact_id = artifact.id().to_string();
+        entry.files[file_index].sha256 = checksum.to_string();
+
+        let name = PackageName::parse(entry.name.clone())
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+        let version = PackageVersion::parse(entry.version.clone())
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+        let coordinate = PackageCoordinate::new(PackageEcosystem::PyPi, name, version);
+        let entry_bytes = Bytes::from(
+            serde_json::to_vec(entry).expect("a VersionEntry always serializes to valid JSON"),
+        );
+        self.package_index_store
+            .upsert_entry(
+                repository.id(),
+                &coordinate,
+                Some(artifact.id()),
+                entry_bytes,
+            )
+            .await?;
+
+        Ok(content)
     }
 
     async fn search_one(
@@ -278,6 +441,8 @@ impl PackagingStrategy for PypiPackagingStrategy {
             sha256: checksum.to_string(),
             artifact_id: artifact.id().to_string(),
             yanked: false,
+            url: None,
+            requires_python: None,
         });
 
         let entry_bytes = Bytes::from(
@@ -373,12 +538,29 @@ impl PackagingStrategy for PypiPackagingStrategy {
             .entries_for_repository(repository.id(), PackageEcosystem::PyPi)
             .await?;
         for entry_bytes in entries {
-            let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
+            let mut entry: VersionEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-            if let Some(file) = entry.files.iter().find(|file| file.filename == filename) {
-                let artifact_id = parse_artifact_id(&file.artifact_id)?;
+            let Some(file_index) = entry
+                .files
+                .iter()
+                .position(|file| file.filename == filename)
+            else {
+                continue;
+            };
+
+            if !entry.files[file_index].artifact_id.is_empty()
+                && let Ok(artifact_id) = parse_artifact_id(&entry.files[file_index].artifact_id)
+            {
                 return self.download_stored(artifact_id).await;
             }
+
+            if let Some(url) = entry.files[file_index].url.clone() {
+                return self
+                    .cache_file_from_upstream(repository, &mut entry, file_index, &url)
+                    .await;
+            }
+
+            return Err(PackagingError::FileNotFound(filename.to_string()));
         }
         Err(PackagingError::FileNotFound(filename.to_string()))
     }
@@ -550,11 +732,20 @@ fn simple_file_link(url: &str, file: &FileEntry, yanked: bool) -> String {
     } else {
         ""
     };
+    let requires_attr = file.requires_python.as_ref().map_or(String::new(), |value| {
+        format!(" data-requires-python=\"{}\"", escape_html(value))
+    });
+    let hash = if file.sha256.is_empty() {
+        String::new()
+    } else {
+        format!("#sha256={}", escape_html(&file.sha256))
+    };
     format!(
-        "<a href=\"{}#sha256={}\"{}>{}</a>",
+        "<a href=\"{}{}\"{}{}>{}</a>",
         escape_html(url),
-        escape_html(&file.sha256),
+        hash,
         yanked_attr,
+        requires_attr,
         escape_html(&file.filename)
     )
 }
@@ -578,6 +769,156 @@ fn escape_html(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+fn unescape_html(text: &str) -> String {
+    text.replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&gt;", ">")
+        .replace("&#62;", ">")
+        .replace("&lt;", "<")
+        .replace("&#60;", "<")
+        .replace("&amp;", "&")
+}
+
+fn join_upstream(upstream: &Url, relative: &str) -> String {
+    let base = upstream.as_str().trim_end_matches('/');
+    let relative = relative.trim_start_matches('/');
+    format!("{base}/{relative}")
+}
+
+struct ParsedSimpleLink {
+    filename: String,
+    url: String,
+    sha256: String,
+    yanked: bool,
+    requires_python: Option<String>,
+}
+
+fn parse_simple_links(html: &str, page_url: &str) -> Result<Vec<ParsedSimpleLink>, PackagingError> {
+    let page = Url::parse(page_url)
+        .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+    let lower = html.to_ascii_lowercase();
+    let mut links = Vec::new();
+    let mut search_from = 0;
+
+    while let Some(rel) = lower[search_from..].find("<a ") {
+        let start = search_from + rel;
+        let Some(tag_end_rel) = html[start..].find('>') else {
+            break;
+        };
+        let tag_end = start + tag_end_rel;
+        let tag = &html[start..=tag_end];
+        let close_needle = "</a>";
+        let Some(close_rel) = lower[tag_end + 1..].find(close_needle) else {
+            break;
+        };
+        let inner_start = tag_end + 1;
+        let inner_end = tag_end + 1 + close_rel;
+        let inner = html[inner_start..inner_end].trim();
+        search_from = inner_end + close_needle.len();
+
+        let Some(href) = attr_value(tag, "href") else {
+            continue;
+        };
+        let href = unescape_html(&href);
+        let (href_path, fragment) = href.split_once('#').map_or((href.as_str(), ""), |(path, frag)| (path, frag));
+        let resolved = page
+            .join(href_path)
+            .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+        let mut url = resolved;
+        url.set_fragment(None);
+
+        let sha256 = fragment
+            .split('&')
+            .find_map(|part| {
+                let (key, value) = part.split_once('=')?;
+                key.eq_ignore_ascii_case("sha256")
+                    .then_some(value.to_ascii_lowercase())
+            })
+            .unwrap_or_default();
+
+        let filename = if inner.is_empty() {
+            url.path_segments()
+                .and_then(std::iter::Iterator::last)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            unescape_html(inner)
+        };
+        if filename.is_empty() || filename.contains('/') || filename.contains('\\') {
+            continue;
+        }
+
+        links.push(ParsedSimpleLink {
+            filename,
+            url: url.to_string(),
+            sha256,
+            yanked: has_attr(tag, "data-yanked"),
+            requires_python: attr_value(tag, "data-requires-python").map(|value| unescape_html(&value)),
+        });
+    }
+
+    Ok(links)
+}
+
+fn attr_value(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{name}=");
+    let pos = lower.find(&needle)?;
+    let rest = &tag[pos + needle.len()..];
+    let quote = rest.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let inner = rest.get(1..)?;
+    let end = inner.find(quote)?;
+    Some(inner[..end].to_string())
+}
+
+fn has_attr(tag: &str, name: &str) -> bool {
+    tag.to_ascii_lowercase().contains(&name.to_ascii_lowercase())
+}
+
+fn version_from_filename(filename: &str, project: &str) -> Option<String> {
+    if let Some(stem) = filename.strip_suffix(".whl") {
+        let parts: Vec<&str> = stem.split('-').collect();
+        if parts.len() >= 5 {
+            return Some(parts[1].replace('_', "-"));
+        }
+        return None;
+    }
+
+    let stem = filename
+        .strip_suffix(".tar.gz")
+        .or_else(|| filename.strip_suffix(".tar.bz2"))
+        .or_else(|| filename.strip_suffix(".tar.xz"))
+        .or_else(|| filename.strip_suffix(".tgz"))
+        .or_else(|| filename.strip_suffix(".zip"))?;
+
+    let candidates = [
+        project.to_string(),
+        project.replace('-', "_"),
+        normalize_pypi_name(project),
+        normalize_pypi_name(project).replace('-', "_"),
+    ];
+    for prefix in candidates {
+        let prefix = format!("{prefix}-");
+        if let Some(rest) = strip_prefix_ignore_ascii_case(stem, &prefix) {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    if value.len() < prefix.len() {
+        return None;
+    }
+    value
+        .get(..prefix.len())?
+        .eq_ignore_ascii_case(prefix)
+        .then(|| &value[prefix.len()..])
 }
 
 /// Página raíz PEP 503 (`/simple/`) a partir de coincidencias de búsqueda.
@@ -608,9 +949,14 @@ struct VersionEntry {
 struct FileEntry {
     filename: String,
     sha256: String,
+    #[serde(default)]
     artifact_id: String,
     #[serde(default)]
     yanked: bool,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    requires_python: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -635,13 +981,16 @@ struct ParsedPublish {
 mod tests {
     use std::sync::Arc;
 
-    use ferrobox_domain::package_coordinate::{PackageEcosystem, PackageName};
+    use ferrobox_domain::package_coordinate::{
+        PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+    };
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryRepositoryStore, InMemoryStorage,
     };
 
     fn strategy() -> PypiPackagingStrategy {
@@ -649,6 +998,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
             Arc::new(InMemoryRepositoryStore::default()),
             "http://127.0.0.1:3000".to_string(),
         )
@@ -825,6 +1175,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
             repository_store.clone(),
             "http://127.0.0.1:3000".to_string(),
         );
@@ -899,5 +1250,211 @@ mod tests {
         let html = std::str::from_utf8(&root).unwrap();
         assert!(html.contains("href=\"demo-pkg/\""));
         assert!(html.contains(">demo-pkg</a>"));
+    }
+
+    fn pypi_mirror(name: &str, upstream: &str) -> Repository {
+        Repository::new(
+            RepositoryName::parse(name).unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse(upstream).unwrap(),
+            },
+            PackageEcosystem::PyPi,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn version_from_filename_reads_wheels_and_sdists() {
+        assert_eq!(
+            version_from_filename("requests-2.32.3-py3-none-any.whl", "requests").as_deref(),
+            Some("2.32.3")
+        );
+        assert_eq!(
+            version_from_filename("requests-2.32.3.tar.gz", "requests").as_deref(),
+            Some("2.32.3")
+        );
+        assert_eq!(
+            version_from_filename(
+                "demo_ferrobox_pypi-1.0.0.tar.gz",
+                "demo-ferrobox-pypi"
+            )
+            .as_deref(),
+            Some("1.0.0")
+        );
+        assert_eq!(
+            version_from_filename("pkg-1.0.0-1-py3-none-any.whl", "pkg").as_deref(),
+            Some("1.0.0")
+        );
+    }
+
+    #[tokio::test]
+    async fn yanking_on_a_mirror_is_rejected() {
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::PyPi,
+            PackageName::parse("demo-pypi").unwrap(),
+            PackageVersion::parse("1.0.0").unwrap(),
+        );
+        let err = strategy()
+            .set_yanked(&repository, &coordinate, true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PackagingError::ReadOnlyRepository));
+    }
+
+    #[tokio::test]
+    async fn mirror_indexes_and_caches_a_file_from_upstream() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let filename = "demo_pypi-1.0.0-py3-none-any.whl";
+        let content = Bytes::from_static(b"cached-wheel");
+        let checksum = crate::content_hash::sha256_checksum(&content);
+        let file_url = "https://files.example/packages/demo_pypi-1.0.0-py3-none-any.whl";
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<html><body><a href=\"{file_url}#sha256={checksum}\" data-requires-python=\"&gt;=3.9\">{filename}</a></body></html>"
+            )),
+        );
+        http.stub(file_url, 200, content.clone());
+
+        let page = strategy
+            .index(&repository, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&page).unwrap();
+        assert!(html.contains(filename));
+        assert!(html.contains(&format!(
+            "http://127.0.0.1:3000/pypi/{}/packages/{filename}",
+            repository.id()
+        )));
+        assert!(!html.contains("files.example"));
+        assert!(html.contains("data-requires-python=\">=3.9\"") || html.contains("data-requires-python=\"&gt;=3.9\""));
+
+        let downloaded = strategy.download_file(&repository, filename).await.unwrap();
+        assert_eq!(downloaded, content);
+        let downloaded_again = strategy.download_file(&repository, filename).await.unwrap();
+        assert_eq!(downloaded_again, content);
+    }
+
+    #[tokio::test]
+    async fn mirror_download_refreshes_the_simple_page_when_indexed_first() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let filename = "demo_pypi-1.0.0.tar.gz";
+        let content = Bytes::from_static(b"lazy-sdist");
+        let checksum = crate::content_hash::sha256_checksum(&content);
+        let file_url = "https://files.example/packages/demo_pypi-1.0.0.tar.gz";
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<a href=\"{file_url}#sha256={checksum}\">{filename}</a>"
+            )),
+        );
+        http.stub(file_url, 200, content.clone());
+
+        strategy
+            .index(&repository, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let downloaded = strategy.download_file(&repository, filename).await.unwrap();
+        assert_eq!(downloaded, content);
+    }
+
+    #[tokio::test]
+    async fn mirror_marks_upstream_yanked_files() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+        let repository = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let filename = "demo_pypi-1.0.0.tar.gz";
+        let content = b"yanked-sdist";
+        let checksum = crate::content_hash::sha256_checksum(content);
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<a href=\"https://files.example/{filename}#sha256={checksum}\" data-yanked=\"use 2.x\">{filename}</a>"
+            )),
+        );
+
+        let page = strategy
+            .index(&repository, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&page).unwrap();
+        assert!(html.contains("data-yanked"));
+    }
+
+    #[tokio::test]
+    async fn alloy_index_and_download_see_packages_from_a_mirror_member() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let strategy = PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            repository_store.clone(),
+            "http://127.0.0.1:3000".to_string(),
+        );
+        let mirror = pypi_mirror("pypi-proxy", "https://pypi.example/simple/");
+        let alloy = Repository::new(
+            RepositoryName::parse("pypi-all").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![mirror.id()],
+            },
+            PackageEcosystem::PyPi,
+        )
+        .unwrap();
+        repository_store.save(&mirror).await.unwrap();
+        repository_store.save(&alloy).await.unwrap();
+
+        let filename = "demo_pypi-1.0.0.tar.gz";
+        let content = Bytes::from_static(b"from-mirror");
+        let checksum = crate::content_hash::sha256_checksum(&content);
+        let file_url = "https://files.example/packages/demo_pypi-1.0.0.tar.gz";
+        http.stub(
+            "https://pypi.example/simple/demo-pypi/",
+            200,
+            Bytes::from(format!(
+                "<a href=\"{file_url}#sha256={checksum}\">{filename}</a>"
+            )),
+        );
+        http.stub(file_url, 200, content.clone());
+
+        let page = strategy
+            .index(&alloy, &PackageName::parse("demo-pypi").unwrap())
+            .await
+            .unwrap();
+        let html = std::str::from_utf8(&page).unwrap();
+        assert!(html.contains(&alloy.id().to_string()));
+
+        let downloaded = strategy.download_file(&alloy, filename).await.unwrap();
+        assert_eq!(downloaded, content);
     }
 }
