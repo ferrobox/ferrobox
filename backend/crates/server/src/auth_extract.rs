@@ -1,4 +1,4 @@
-//! Extractor y middleware de autenticación Bearer / Token.
+//! Extractor y middleware de autenticación Bearer / Token / Basic.
 
 use std::sync::Arc;
 
@@ -8,6 +8,8 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::user::User;
 
@@ -32,7 +34,7 @@ pub(crate) enum AuthError {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let message = match self {
-            Self::Missing => "missing Authorization bearer token",
+            Self::Missing => "missing Authorization credentials",
             Self::Invalid => "invalid or revoked API token",
         };
 
@@ -43,9 +45,13 @@ impl IntoResponse for AuthError {
             }),
         )
             .into_response();
-        response.headers_mut().insert(
+        response.headers_mut().append(
             header::WWW_AUTHENTICATE,
             HeaderValue::from_static(r#"Bearer realm="ferrobox""#),
+        );
+        response.headers_mut().append(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static(r#"Basic realm="ferrobox""#),
         );
         response
     }
@@ -92,7 +98,8 @@ pub(crate) async fn require_auth(
 /// Extrae el secreto de `Authorization`.
 ///
 /// `cargo publish` envía el token **tal cual** (`Authorization: fb_…`),
-/// sin esquema. La UI y curl suelen usar `Bearer` o `Token`.
+/// sin esquema. La UI y curl suelen usar `Bearer` o `Token`. `twine`
+/// envía HTTP Basic (`__token__` / `fb_…`): se usa la contraseña.
 pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
     if value.is_empty() {
@@ -101,13 +108,28 @@ pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 
     let secret = strip_auth_scheme(value, "Bearer")
         .or_else(|| strip_auth_scheme(value, "Token"))
-        .unwrap_or(value)
-        .trim();
+        .map(str::trim)
+        .map(ToOwned::to_owned)
+        .or_else(|| extract_basic_password(value))
+        .unwrap_or_else(|| value.trim().to_string());
 
     if secret.is_empty() {
         None
     } else {
-        Some(secret.to_string())
+        Some(secret)
+    }
+}
+
+fn extract_basic_password(value: &str) -> Option<String> {
+    let encoded = strip_auth_scheme(value, "Basic")?.trim();
+    let decoded = BASE64.decode(encoded.as_bytes()).ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    let (_username, password) = decoded.split_once(':')?;
+    let password = password.trim();
+    if password.is_empty() {
+        None
+    } else {
+        Some(password.to_string())
     }
 }
 
@@ -157,5 +179,14 @@ mod tests {
     fn missing_or_blank_authorization_is_none() {
         assert_eq!(extract_bearer_token(&HeaderMap::new()), None);
         assert_eq!(extract_bearer_token(&headers("   ")), None);
+    }
+
+    #[test]
+    fn extracts_basic_auth_password_as_token() {
+        let encoded = BASE64.encode("__token__:fb_secret");
+        assert_eq!(
+            extract_bearer_token(&headers(&format!("Basic {encoded}"))).as_deref(),
+            Some("fb_secret")
+        );
     }
 }

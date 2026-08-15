@@ -143,6 +143,11 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankNpm(repositoryId, name, version)
           : api.unyankNpm(repositoryId, name, version);
       }
+      if (ecosystem === "pypi") {
+        return yanked
+          ? api.yankPypi(repositoryId, name, version)
+          : api.unyankPypi(repositoryId, name, version);
+      }
       return yanked
         ? api.yankCrate(repositoryId, name, version)
         : api.unyankCrate(repositoryId, name, version);

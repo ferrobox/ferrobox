@@ -35,6 +35,10 @@ pub mod cargo;
 /// `npm install`) del patrón Strategy.
 pub mod npm;
 
+/// La implementación de PyPI (`twine upload` / `pip install`, índice
+/// simple PEP 503) del patrón Strategy.
+pub mod pypi;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -70,6 +74,11 @@ pub enum PackagingError {
     /// publicada.
     #[error("{0} was not found")]
     VersionNotFound(PackageCoordinate),
+
+    /// No existe un fichero con ese nombre en el índice del repositorio
+    /// (p. ej. un wheel o sdist concreto de PyPI).
+    #[error("file '{0}' was not found in this repository")]
+    FileNotFound(String),
 
     /// Fallo al subir o descargar el contenido binario del paquete.
     #[error(transparent)]
@@ -182,6 +191,22 @@ pub trait PackagingStrategy: Send + Sync {
         coordinate: &PackageCoordinate,
     ) -> Result<Bytes, PackagingError>;
 
+    /// Descarga un fichero del repositorio por su nombre de archivo
+    /// (p. ej. un wheel o sdist de PyPI). La implementación por defecto
+    /// indica que el ecosistema no resuelve artefactos por nombre.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::FileNotFound`] si el ecosistema no
+    /// soporta esta operación o el fichero no existe.
+    async fn download_file(
+        &self,
+        _repository: &Repository,
+        filename: &str,
+    ) -> Result<Bytes, PackagingError> {
+        Err(PackagingError::FileNotFound(filename.to_string()))
+    }
+
     /// Marca (o desmarca) una versión ya publicada como *yanked*. No
     /// borra el binario: `cargo` sigue pudiendo descargarlo si está
     /// fijado en un `Cargo.lock`, pero deja de considerarlo para
@@ -265,6 +290,7 @@ mod tests {
 
     use super::cargo::CargoPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
+    use super::pypi::PypiPackagingStrategy;
     use super::*;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
@@ -292,14 +318,26 @@ mod tests {
         ))
     }
 
+    fn pypi_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(PypiPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
             .register(cargo_strategy())
-            .register(npm_strategy());
+            .register(npm_strategy())
+            .register(pypi_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::PyPi).is_some());
     }
 
     #[test]

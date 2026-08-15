@@ -148,7 +148,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {repository.ecosystem === "cargo" || repository.ecosystem === "npm" ? (
+            {repository.ecosystem === "cargo" ||
+            repository.ecosystem === "npm" ||
+            repository.ecosystem === "pypi" ? (
               <SetMeUpDialog
                 repositoryId={repositoryId}
                 kind={repository.kind.type}

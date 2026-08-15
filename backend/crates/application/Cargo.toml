@@ -20,6 +20,7 @@ password-hash.workspace = true
 url.workspace = true
 base64.workspace = true
 sha1.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

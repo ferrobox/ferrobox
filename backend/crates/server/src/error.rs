@@ -146,9 +146,9 @@ impl From<PackagingError> for ApiError {
             | PackagingError::ReadOnlyRepository
             | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
-            PackagingError::PackageNotFound(_) | PackagingError::VersionNotFound(_) => {
-                Self::NotFound(err.to_string())
-            }
+            PackagingError::PackageNotFound(_)
+            | PackagingError::VersionNotFound(_)
+            | PackagingError::FileNotFound(_) => Self::NotFound(err.to_string()),
             PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
                 status: 404,
                 ..
