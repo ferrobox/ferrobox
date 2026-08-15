@@ -153,6 +153,11 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankOci(repositoryId, name, version)
           : api.unyankOci(repositoryId, name, version);
       }
+      if (ecosystem === "conan") {
+        return yanked
+          ? api.yankConan(repositoryId, name, version)
+          : api.unyankConan(repositoryId, name, version);
+      }
       return yanked
         ? api.yankCrate(repositoryId, name, version)
         : api.unyankCrate(repositoryId, name, version);

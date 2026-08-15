@@ -301,6 +301,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creates_a_conan_forge() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("conan-local").unwrap(),
+                PackageEcosystem::Conan,
+                CreateRepositoryKind::Forge,
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        assert!(matches!(repository.kind(), RepositoryKind::Forge));
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Conan);
+    }
+
+    #[tokio::test]
     async fn rejects_a_generic_ecosystem_mirror() {
         let use_case = CreateRepositoryUseCase::new(Arc::new(InMemoryRepositoryStore::default()));
 

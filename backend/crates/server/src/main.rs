@@ -6,6 +6,7 @@ mod auth;
 mod auth_extract;
 mod authz;
 mod cargo_registry;
+mod conan_registry;
 mod config;
 mod dto;
 mod error;
@@ -51,6 +52,7 @@ use ferrobox_application::manage_users::{
 };
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
+use ferrobox_application::packaging::conan::ConanPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
@@ -139,7 +141,8 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .merge(cargo_registry::public_router())
         .merge(npm_registry::public_router())
         .merge(pypi_registry::public_router())
-        .merge(oci_registry::public_router());
+        .merge(oci_registry::public_router())
+        .merge(conan_registry::public_router());
 
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
@@ -181,6 +184,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .merge(npm_registry::write_router())
         .merge(pypi_registry::write_router())
         .merge(oci_registry::write_router())
+        .merge(conan_registry::write_router())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_extract::require_auth,
@@ -267,6 +271,12 @@ fn build_app_state(
             storage.clone(),
             repository_store.clone(),
             http_client,
+        )))
+        .register(Arc::new(ConanPackagingStrategy::new(
+            artifact_store.clone(),
+            package_index_store.clone(),
+            storage.clone(),
+            repository_store.clone(),
         )));
 
     AppState {

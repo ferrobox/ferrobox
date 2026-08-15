@@ -35,6 +35,8 @@ pub(crate) enum PackageEcosystemDto {
     Oci,
     /// Helm Charts.
     Helm,
+    /// Paquetes C/C++ de Conan.
+    Conan,
 }
 
 impl From<PackageEcosystem> for PackageEcosystemDto {
@@ -46,6 +48,7 @@ impl From<PackageEcosystem> for PackageEcosystemDto {
             PackageEcosystem::PyPi => Self::Pypi,
             PackageEcosystem::Oci => Self::Oci,
             PackageEcosystem::Helm => Self::Helm,
+            PackageEcosystem::Conan => Self::Conan,
         }
     }
 }
@@ -59,6 +62,7 @@ impl From<PackageEcosystemDto> for PackageEcosystem {
             PackageEcosystemDto::Pypi => Self::PyPi,
             PackageEcosystemDto::Oci => Self::Oci,
             PackageEcosystemDto::Helm => Self::Helm,
+            PackageEcosystemDto::Conan => Self::Conan,
         }
     }
 }
