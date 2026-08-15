@@ -1,6 +1,7 @@
 import { Terminal } from "lucide-react";
 
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
+import { HelmRegistryPanel } from "@/components/repository/HelmRegistryPanel";
 import { NpmRegistryPanel } from "@/components/repository/NpmRegistryPanel";
 import { OciRegistryPanel } from "@/components/repository/OciRegistryPanel";
 import { PypiRegistryPanel } from "@/components/repository/PypiRegistryPanel";
@@ -22,7 +23,7 @@ export function SetMeUpDialog({
 }: {
   repositoryId: string;
   kind?: RepositoryStorageKind;
-  ecosystem?: "cargo" | "npm" | "pypi" | "oci";
+  ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm";
 }) {
   const description =
     ecosystem === "npm" ? (
@@ -40,6 +41,11 @@ export function SetMeUpDialog({
       <>
         Copia estos fragmentos para <code className="font-mono">docker login</code> /{" "}
         <code className="font-mono">docker push</code>. El token se crea en Seguridad.
+      </>
+    ) : ecosystem === "helm" ? (
+      <>
+        Copia estos fragmentos para <code className="font-mono">helm registry login</code> /{" "}
+        <code className="font-mono">helm push</code>. El token se crea en Seguridad.
       </>
     ) : (
       <>
@@ -66,6 +72,8 @@ export function SetMeUpDialog({
           <PypiRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : ecosystem === "oci" ? (
           <OciRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
+        ) : ecosystem === "helm" ? (
+          <HelmRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : (
           <CargoRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         )}

@@ -151,7 +151,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             {repository.ecosystem === "cargo" ||
             repository.ecosystem === "npm" ||
             repository.ecosystem === "pypi" ||
-            repository.ecosystem === "oci" ? (
+            repository.ecosystem === "oci" ||
+            repository.ecosystem === "helm" ? (
               <SetMeUpDialog
                 repositoryId={repositoryId}
                 kind={repository.kind.type}
@@ -165,7 +166,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
                 members={repository.kind.members}
               />
             ) : null}
-            {canWrite && !isReadOnly && repository.ecosystem !== "oci" ? (
+            {canWrite && !isReadOnly && repository.ecosystem !== "oci" && repository.ecosystem !== "helm" ? (
               <UploadArtifactButton repositoryId={repositoryId} />
             ) : null}
             {canWrite ? (

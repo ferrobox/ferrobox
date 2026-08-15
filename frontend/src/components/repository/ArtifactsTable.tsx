@@ -35,7 +35,7 @@ function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
         ? "tgz"
         : ecosystem === "pypi"
           ? "tar.gz"
-          : ecosystem === "oci"
+          : ecosystem === "oci" || ecosystem === "helm"
             ? "json"
             : "crate";
     const base = artifact.name.includes("/")
@@ -77,7 +77,8 @@ export function ArtifactsTable({
     (ecosystem === "cargo" ||
       ecosystem === "npm" ||
       ecosystem === "pypi" ||
-      ecosystem === "oci");
+      ecosystem === "oci" ||
+      ecosystem === "helm");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -192,7 +193,9 @@ export function ArtifactsTable({
                 ? "Los paquetes se cachean la primera vez que pip install los resuelve contra este Mirror."
                 : ecosystem === "oci"
                   ? "Las imágenes se cachean la primera vez que docker pull las resuelve contra este Mirror."
-                  : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+                  : ecosystem === "helm"
+                    ? "Los charts se cachean la primera vez que helm pull los resuelve contra este Mirror."
+                    : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
@@ -206,6 +209,11 @@ export function ArtifactsTable({
           ) : ecosystem === "oci" ? (
             <>
               Publica una imagen con <code className="font-mono">docker push</code> apuntando a este
+              registro.
+            </>
+          ) : ecosystem === "helm" ? (
+            <>
+              Publica un chart con <code className="font-mono">helm push</code> apuntando a este
               registro.
             </>
           ) : (

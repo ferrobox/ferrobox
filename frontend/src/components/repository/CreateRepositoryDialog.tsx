@@ -30,19 +30,26 @@ import {
 } from "@/components/ui/select";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
-const MIRROR_ECOSYSTEMS: readonly PackageEcosystemDto[] = ["cargo", "npm", "pypi", "oci"];
+const MIRROR_ECOSYSTEMS: readonly PackageEcosystemDto[] = [
+  "cargo",
+  "npm",
+  "pypi",
+  "oci",
+  "helm",
+];
 const DEFAULT_UPSTREAM = {
   cargo: "https://index.crates.io/",
   npm: "https://registry.npmjs.org/",
   pypi: "https://pypi.org/simple/",
   oci: "https://registry-1.docker.io",
+  helm: "https://registry-1.docker.io",
 } as const;
 
 type KindChoice = "forge" | "mirror" | "alloy";
 
 function isMirrorEcosystem(
   ecosystem: PackageEcosystemDto,
-): ecosystem is "cargo" | "npm" | "pypi" | "oci" {
+): ecosystem is "cargo" | "npm" | "pypi" | "oci" | "helm" {
   return MIRROR_ECOSYSTEMS.includes(ecosystem);
 }
 
@@ -56,6 +63,9 @@ function defaultUpstreamFor(ecosystem: PackageEcosystemDto): string {
   if (ecosystem === "oci") {
     return DEFAULT_UPSTREAM.oci;
   }
+  if (ecosystem === "helm") {
+    return DEFAULT_UPSTREAM.helm;
+  }
   return DEFAULT_UPSTREAM.cargo;
 }
 
@@ -66,7 +76,8 @@ function isKnownDefaultUpstream(value: string): boolean {
     trimmed === DEFAULT_UPSTREAM.cargo ||
     trimmed === DEFAULT_UPSTREAM.npm ||
     trimmed === DEFAULT_UPSTREAM.pypi ||
-    trimmed === DEFAULT_UPSTREAM.oci
+    trimmed === DEFAULT_UPSTREAM.oci ||
+    trimmed === DEFAULT_UPSTREAM.helm
   );
 }
 
@@ -110,7 +121,7 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
 
     if (kind === "mirror") {
       if (!isMirrorEcosystem(ecosystem)) {
-        setValidationError("Los Mirror están disponibles para Cargo, npm, PyPI y OCI.");
+        setValidationError("Los Mirror están disponibles para Cargo, npm, PyPI, OCI y Helm.");
         return;
       }
       try {
@@ -175,8 +186,9 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
             <DialogTitle>Crear repositorio</DialogTitle>
             <DialogDescription>
               Un Forge guarda artefactos que publicas tú. Un Mirror cachea un
-              registro externo (crates.io, registry.npmjs.org, pypi.org o Docker Hub). Un Alloy
-              agrega Forges y/o Mirrors del mismo ecosistema en una sola URL.
+              registro externo (crates.io, registry.npmjs.org, pypi.org, Docker Hub
+              o charts OCI). Un Alloy agrega Forges y/o Mirrors del mismo ecosistema
+              en una sola URL.
             </DialogDescription>
           </DialogHeader>
 
@@ -261,7 +273,9 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                       ? "Upstream (índice simple PyPI)"
                       : ecosystem === "oci"
                         ? "Upstream (registro OCI)"
-                        : "Upstream (índice disperso)"}
+                        : ecosystem === "helm"
+                          ? "Upstream (registro OCI de charts)"
+                          : "Upstream (índice disperso)"}
                 </Label>
                 <Input
                   id="repository-upstream"
@@ -286,6 +300,13 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                       <code className="font-mono">https://registry-1.docker.io</code>
                       ). Las imágenes oficiales de Docker Hub se resuelven como{" "}
                       <code className="font-mono">library/&lt;nombre&gt;</code>.
+                    </>
+                  ) : ecosystem === "helm" ? (
+                    <>
+                      URL del registro OCI de charts (por ejemplo{" "}
+                      <code className="font-mono">https://registry-1.docker.io</code>
+                      ). Usa el nombre completo, como{" "}
+                      <code className="font-mono">bitnami/nginx</code>.
                     </>
                   ) : (
                     <>

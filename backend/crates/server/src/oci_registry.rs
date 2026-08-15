@@ -8,8 +8,12 @@
 //! de API (`Bearer`, `Token` o Basic) y rol de escritura.
 //!
 //! El registro vive en la raíz del host (`/v2/`). El primer componente
-//! del nombre de imagen es el UUID del repositorio `FerroBox`:
-//! `127.0.0.1:3000/<UUID>/demo:latest`.
+//! del nombre de imagen es el UUID del repositorio `FerroBox`; el resto
+//! puede incluir barras: `127.0.0.1:3000/<UUID>/demo:latest` o
+//! `127.0.0.1:3000/<UUID>/bitnami/nginx:latest`.
+//!
+//! Los repositorios **Helm** usan las mismas rutas: los charts son
+//! artefactos OCI (`helm push` / `helm pull`).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -17,7 +21,7 @@ use std::sync::{Mutex, OnceLock};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Json, Router};
 use ferrobox_application::packaging::PackagingStrategy;
 use ferrobox_application::packaging::oci::DEFAULT_MANIFEST_MEDIA_TYPE;
@@ -52,16 +56,8 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         .route("/v2/token", get(issue_token).post(issue_token))
         .route("/v2/token/", get(issue_token).post(issue_token))
         .route(
-            "/v2/{repository_id}/{name}/manifests/{reference}",
-            get(get_manifest).head(get_manifest),
-        )
-        .route(
-            "/v2/{repository_id}/{name}/blobs/{digest}",
-            get(get_blob).head(get_blob),
-        )
-        .route(
-            "/v2/{repository_id}/{name}/tags/list",
-            get(list_tags),
+            "/v2/{repository_id}/{*rest}",
+            get(dispatch_read).head(dispatch_read),
         )
 }
 
@@ -69,20 +65,10 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/v2/{repository_id}/{name}/manifests/{reference}",
-            axum::routing::put(put_manifest),
-        )
-        .route(
-            "/v2/{repository_id}/{name}/blobs/uploads/",
-            post(start_or_monolithic_upload),
-        )
-        .route(
-            "/v2/{repository_id}/{name}/blobs/uploads",
-            post(start_or_monolithic_upload),
-        )
-        .route(
-            "/v2/{repository_id}/{name}/blobs/uploads/{upload_id}",
-            axum::routing::patch(patch_upload).put(finish_upload),
+            "/v2/{repository_id}/{*rest}",
+            axum::routing::put(dispatch_write)
+                .post(dispatch_write)
+                .patch(dispatch_write),
         )
         .route(
             "/oci/{repository_id}/{name}/{reference}/yank",
@@ -95,14 +81,28 @@ pub(crate) fn write_router() -> Router<Arc<AppState>> {
         .layer(DefaultBodyLimit::max(OCI_UPLOAD_LIMIT))
 }
 
-fn oci_strategy(state: &AppState) -> Result<Arc<dyn PackagingStrategy>, ApiError> {
-    state
-        .packaging
-        .strategy_for(PackageEcosystem::Oci)
-        .ok_or_else(|| ApiError::Internal("no oci packaging strategy is registered".to_string()))
+fn distribution_strategy(
+    state: &AppState,
+    repository: &ferrobox_domain::repository::Repository,
+) -> Result<Arc<dyn PackagingStrategy>, ApiError> {
+    match repository.ecosystem() {
+        PackageEcosystem::Oci | PackageEcosystem::Helm => state
+            .packaging
+            .strategy_for(repository.ecosystem())
+            .ok_or_else(|| {
+                ApiError::Internal(format!(
+                    "no {} packaging strategy is registered",
+                    repository.ecosystem().label()
+                ))
+            }),
+        other => Err(ApiError::BadRequest(format!(
+            "repository is configured for ecosystem '{}', not 'oci' or 'helm'",
+            other.label()
+        ))),
+    }
 }
 
-async fn load_oci_repository(
+async fn load_distribution_repository(
     state: &AppState,
     repository_id: Uuid,
 ) -> Result<ferrobox_domain::repository::Repository, ApiError> {
@@ -110,13 +110,142 @@ async fn load_oci_repository(
         .get_repository
         .execute(RepositoryId::from(repository_id))
         .await?;
-    if repository.ecosystem() != PackageEcosystem::Oci {
-        return Err(ApiError::BadRequest(format!(
-            "repository is configured for ecosystem '{}', not 'oci'",
-            repository.ecosystem().label()
-        )));
+    match repository.ecosystem() {
+        PackageEcosystem::Oci | PackageEcosystem::Helm => Ok(repository),
+        other => Err(ApiError::BadRequest(format!(
+            "repository is configured for ecosystem '{}', not 'oci' or 'helm'",
+            other.label()
+        ))),
     }
-    Ok(repository)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DistributionPath {
+    Manifest { name: String, reference: String },
+    Blob { name: String, digest: String },
+    Tags { name: String },
+    StartUpload { name: String },
+    Upload { name: String, upload_id: Uuid },
+}
+
+fn parse_distribution_path(rest: &str) -> Result<DistributionPath, OciApiError> {
+    let trimmed = rest.trim_start_matches('/').trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(OciApiError::from_code(
+            StatusCode::NOT_FOUND,
+            "NAME_UNKNOWN",
+            "empty OCI image name",
+        ));
+    }
+    if let Some(name) = trimmed.strip_suffix("/tags/list") {
+        return require_image_name(name).map(|name| DistributionPath::Tags { name });
+    }
+    if let Some((name, reference)) = trimmed.rsplit_once("/manifests/") {
+        if reference.is_empty() {
+            return Err(OciApiError::from_code(
+                StatusCode::NOT_FOUND,
+                "MANIFEST_UNKNOWN",
+                "missing manifest reference",
+            ));
+        }
+        return require_image_name(name).map(|name| DistributionPath::Manifest {
+            name,
+            reference: reference.to_string(),
+        });
+    }
+    if let Some((name, upload_rest)) = trimmed.split_once("/blobs/uploads") {
+        let upload_rest = upload_rest.trim_start_matches('/');
+        if upload_rest.is_empty() {
+            return require_image_name(name).map(|name| DistributionPath::StartUpload { name });
+        }
+        let upload_id = Uuid::parse_str(upload_rest).map_err(|_| {
+            OciApiError::from_code(
+                StatusCode::BAD_REQUEST,
+                "BLOB_UPLOAD_UNKNOWN",
+                "invalid upload id",
+            )
+        })?;
+        return require_image_name(name).map(|name| DistributionPath::Upload { name, upload_id });
+    }
+    if let Some((name, digest)) = trimmed.rsplit_once("/blobs/")
+        && !digest.is_empty()
+        && digest != "uploads"
+    {
+        return require_image_name(name).map(|name| DistributionPath::Blob {
+            name,
+            digest: digest.to_string(),
+        });
+    }
+    Err(OciApiError::from_code(
+        StatusCode::NOT_FOUND,
+        "NAME_UNKNOWN",
+        format!("unknown OCI path '{rest}'"),
+    ))
+}
+
+fn require_image_name(name: &str) -> Result<String, OciApiError> {
+    let name = name.trim_matches('/');
+    if name.is_empty() {
+        return Err(OciApiError::from_code(
+            StatusCode::NOT_FOUND,
+            "NAME_UNKNOWN",
+            "empty OCI image name",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+fn method_not_allowed() -> OciApiError {
+    OciApiError::from_code(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "UNSUPPORTED",
+        "method is not supported for this OCI path",
+    )
+}
+
+async fn dispatch_read(
+    State(state): State<Arc<AppState>>,
+    Path((repository_id, rest)): Path<(Uuid, String)>,
+    method: Method,
+) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    match parse_distribution_path(&rest)? {
+        DistributionPath::Manifest { name, reference } => {
+            get_manifest(&state, repository_id, &name, &reference, method).await
+        }
+        DistributionPath::Blob { name, digest } => {
+            get_blob(&state, repository_id, &name, &digest, method).await
+        }
+        DistributionPath::Tags { name } => list_tags(&state, repository_id, &name).await,
+        DistributionPath::StartUpload { .. } | DistributionPath::Upload { .. } => {
+            Err(method_not_allowed())
+        }
+    }
+}
+
+async fn dispatch_write(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+    Path((repository_id, rest)): Path<(Uuid, String)>,
+    method: Method,
+    headers: HeaderMap,
+    Query(query): Query<DigestQuery>,
+    body: Bytes,
+) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    match (method, parse_distribution_path(&rest)?) {
+        (Method::PUT, DistributionPath::Manifest { name, reference }) => {
+            put_manifest(&state, user, repository_id, &name, &reference, headers, body).await
+        }
+        (Method::POST, DistributionPath::StartUpload { name }) => {
+            start_or_monolithic_upload(&state, user, repository_id, &name, query, body).await
+        }
+        (Method::PATCH, DistributionPath::Upload { name, upload_id }) => {
+            patch_upload(user, repository_id, &name, upload_id, &body)
+        }
+        (Method::PUT, DistributionPath::Upload { name, upload_id }) => {
+            finish_upload(&state, user, repository_id, &name, upload_id, query, body).await
+        }
+        _ => Err(method_not_allowed()),
+    }
 }
 
 async fn version_check(
@@ -160,14 +289,16 @@ async fn issue_token(
 }
 
 async fn get_manifest(
-    State(state): State<Arc<AppState>>,
-    Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
+    state: &AppState,
+    repository_id: Uuid,
+    name: &str,
+    reference: &str,
     method: Method,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    let repository = load_oci_repository(&state, repository_id).await?;
-    let strategy = oci_strategy(&state)?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
     let document = strategy
-        .get_manifest(&repository, &name, &reference)
+        .get_manifest(&repository, name, reference)
         .await?;
     let mut headers = oci_headers();
     headers.insert(
@@ -194,21 +325,23 @@ async fn get_manifest(
 }
 
 async fn put_manifest(
-    State(state): State<Arc<AppState>>,
+    state: &AppState,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
+    repository_id: Uuid,
+    name: &str,
+    reference: &str,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     require_write_artifacts(&user)?;
-    let repository = load_oci_repository(&state, repository_id).await?;
-    let strategy = oci_strategy(&state)?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
     let media_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .unwrap_or(DEFAULT_MANIFEST_MEDIA_TYPE);
     let digest = strategy
-        .put_manifest(&repository, &name, &reference, media_type, body)
+        .put_manifest(&repository, name, reference, media_type, body)
         .await?;
     let location = format!("/v2/{repository_id}/{name}/manifests/{digest}");
     let mut response_headers = oci_headers();
@@ -218,19 +351,21 @@ async fn put_manifest(
     );
     response_headers.insert(
         DOCKER_CONTENT_DIGEST.clone(),
-        HeaderValue::from_str(&digest).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+        HeaderValue::from_str(digest.as_str()).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
     );
     Ok((StatusCode::CREATED, response_headers, Bytes::new()))
 }
 
 async fn get_blob(
-    State(state): State<Arc<AppState>>,
-    Path((repository_id, name, digest)): Path<(Uuid, String, String)>,
+    state: &AppState,
+    repository_id: Uuid,
+    name: &str,
+    digest: &str,
     method: Method,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    let repository = load_oci_repository(&state, repository_id).await?;
-    let strategy = oci_strategy(&state)?;
-    let body = strategy.get_blob(&repository, &name, &digest).await?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
+    let body = strategy.get_blob(&repository, name, digest).await?;
     let mut headers = oci_headers();
     headers.insert(
         header::CONTENT_TYPE,
@@ -243,7 +378,7 @@ async fn get_blob(
     );
     headers.insert(
         DOCKER_CONTENT_DIGEST.clone(),
-        HeaderValue::from_str(&digest).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+        HeaderValue::from_str(digest).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
     );
     let body = if method == Method::HEAD {
         Bytes::new()
@@ -259,18 +394,19 @@ struct DigestQuery {
 }
 
 async fn start_or_monolithic_upload(
-    State(state): State<Arc<AppState>>,
+    state: &AppState,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path((repository_id, name)): Path<(Uuid, String)>,
-    Query(query): Query<DigestQuery>,
+    repository_id: Uuid,
+    name: &str,
+    query: DigestQuery,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     require_write_artifacts(&user)?;
-    let repository = load_oci_repository(&state, repository_id).await?;
+    let repository = load_distribution_repository(state, repository_id).await?;
     if let Some(digest) = query.digest {
-        let strategy = oci_strategy(&state)?;
+        let strategy = distribution_strategy(state, &repository)?;
         strategy.put_blob(&repository, &digest, body).await?;
-        return Ok(blob_created(repository_id, &name, &digest));
+        return Ok(blob_created(repository_id, name, &digest));
     }
 
     let upload_id = Uuid::now_v7();
@@ -278,28 +414,32 @@ async fn start_or_monolithic_upload(
         upload_id,
         UploadSession {
             repository_id,
-            name: name.clone(),
+            name: name.to_string(),
             body: Vec::new(),
         },
     );
-    Ok(upload_accepted(repository_id, &name, upload_id, 0))
+    Ok(upload_accepted(repository_id, name, upload_id, 0))
 }
 
-async fn patch_upload(
+fn patch_upload(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path((repository_id, name, upload_id)): Path<(Uuid, String, Uuid)>,
-    body: Bytes,
+    repository_id: Uuid,
+    name: &str,
+    upload_id: Uuid,
+    body: &Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     require_write_artifacts(&user)?;
-    let size = uploads().append(upload_id, repository_id, &name, &body)?;
-    Ok(upload_accepted(repository_id, &name, upload_id, size))
+    let size = uploads().append(upload_id, repository_id, name, body)?;
+    Ok(upload_accepted(repository_id, name, upload_id, size))
 }
 
 async fn finish_upload(
-    State(state): State<Arc<AppState>>,
+    state: &AppState,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path((repository_id, name, upload_id)): Path<(Uuid, String, Uuid)>,
-    Query(query): Query<DigestQuery>,
+    repository_id: Uuid,
+    name: &str,
+    upload_id: Uuid,
+    query: DigestQuery,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     require_write_artifacts(&user)?;
@@ -310,23 +450,24 @@ async fn finish_upload(
             "missing digest query parameter",
         )
     })?;
-    let mut session = uploads().take(upload_id, repository_id, &name)?;
+    let mut session = uploads().take(upload_id, repository_id, name)?;
     session.extend_from_slice(&body);
-    let repository = load_oci_repository(&state, repository_id).await?;
-    let strategy = oci_strategy(&state)?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
     strategy
         .put_blob(&repository, &digest, Bytes::from(session))
         .await?;
-    Ok(blob_created(repository_id, &name, &digest))
+    Ok(blob_created(repository_id, name, &digest))
 }
 
 async fn list_tags(
-    State(state): State<Arc<AppState>>,
-    Path((repository_id, name)): Path<(Uuid, String)>,
+    state: &AppState,
+    repository_id: Uuid,
+    name: &str,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    let repository = load_oci_repository(&state, repository_id).await?;
-    let strategy = oci_strategy(&state)?;
-    let tags = strategy.list_tags(&repository, &name).await?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
+    let tags = strategy.list_tags(&repository, name).await?;
     let payload = serde_json::to_vec(&serde_json::json!({ "name": name, "tags": tags }))
         .map_err(|err| ApiError::Internal(err.to_string()))?;
     Ok(oci_json(StatusCode::OK, &payload))
@@ -364,12 +505,12 @@ async fn set_yanked(
     reference: &str,
     yanked: bool,
 ) -> Result<(), ApiError> {
-    let repository = load_oci_repository(state, repository_id).await?;
-    let strategy = oci_strategy(state)?;
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
     let name = PackageName::parse(name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let version =
         PackageVersion::parse(reference).map_err(|err| ApiError::BadRequest(err.to_string()))?;
-    let coordinate = PackageCoordinate::new(PackageEcosystem::Oci, name, version);
+    let coordinate = PackageCoordinate::new(repository.ecosystem(), name, version);
     strategy
         .set_yanked(&repository, &coordinate, yanked)
         .await?;
@@ -663,6 +804,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::AppState;
+    use super::{DistributionPath, parse_distribution_path};
 
     struct Fixture {
         app: Router,
@@ -707,6 +849,14 @@ mod tests {
                 "http://127.0.0.1:3000".to_string(),
             )))
             .register(Arc::new(OciPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                repository_store.clone(),
+                http_client.clone(),
+            )))
+            .register(Arc::new(OciPackagingStrategy::for_ecosystem(
+                PackageEcosystem::Helm,
                 artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
@@ -1049,5 +1199,183 @@ mod tests {
             DEFAULT_MANIFEST_MEDIA_TYPE
         );
         assert_eq!(pulled, body);
+    }
+
+    #[test]
+    fn parse_distribution_path_accepts_nested_names() {
+        assert_eq!(
+            parse_distribution_path("bitnami/nginx/manifests/latest").ok(),
+            Some(DistributionPath::Manifest {
+                name: "bitnami/nginx".to_string(),
+                reference: "latest".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_distribution_path("bitnami/nginx/blobs/sha256:abc").ok(),
+            Some(DistributionPath::Blob {
+                name: "bitnami/nginx".to_string(),
+                digest: "sha256:abc".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_distribution_path("demo/blobs/uploads/").ok(),
+            Some(DistributionPath::StartUpload {
+                name: "demo".to_string(),
+            })
+        );
+        let upload_id = Uuid::now_v7();
+        assert_eq!(
+            parse_distribution_path(&format!("demo/blobs/uploads/{upload_id}")).ok(),
+            Some(DistributionPath::Upload {
+                name: "demo".to_string(),
+                upload_id,
+            })
+        );
+        assert_eq!(
+            parse_distribution_path("demo/tags/list").ok(),
+            Some(DistributionPath::Tags {
+                name: "demo".to_string(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn push_then_pull_a_nested_image_name() {
+        let fx = fixture().await;
+        let token = format!("Bearer {}", fx.developer_token);
+        let layer = b"nested-layer";
+        let layer_digest = digest_of(layer);
+        let (status, headers, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v2/{}/bitnami/nginx/blobs/uploads/", fx.repo_id))
+                .header("Authorization", token.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let location = headers.get("location").unwrap().to_str().unwrap();
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("{location}?digest={layer_digest}"))
+                .header("Authorization", token.clone())
+                .body(Body::from(layer.to_vec()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": layer_digest,
+                "size": layer.len()
+            }]
+        });
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v2/{}/bitnami/nginx/manifests/latest", fx.repo_id))
+                .header("Authorization", token)
+                .header("Content-Type", DEFAULT_MANIFEST_MEDIA_TYPE)
+                .body(Body::from(serde_json::to_vec(&manifest).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/v2/{}/bitnami/nginx/manifests/latest", fx.repo_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let pulled: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pulled["layers"][0]["digest"], layer_digest);
+    }
+
+    #[tokio::test]
+    async fn helm_repository_serves_the_distribution_api() {
+        let fx = fixture().await;
+        let helm_id = fx
+            .state
+            .create_repository
+            .execute(
+                RepositoryName::parse("charts-local").unwrap(),
+                PackageEcosystem::Helm,
+                CreateRepositoryKind::Forge,
+            )
+            .await
+            .unwrap();
+        let token = format!("Bearer {}", fx.developer_token);
+        let chart = b"chart-bytes";
+        let digest = digest_of(chart);
+        let (status, headers, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v2/{helm_id}/demo/blobs/uploads/"))
+                .header("Authorization", token.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let location = headers.get("location").unwrap().to_str().unwrap();
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("{location}?digest={digest}"))
+                .header("Authorization", token.clone())
+                .body(Body::from(chart.to_vec()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.cncf.helm.chart.manifest.v1+json",
+            "layers": [{
+                "mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+                "digest": digest,
+                "size": chart.len()
+            }]
+        });
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v2/{helm_id}/demo/manifests/0.1.0"))
+                .header("Authorization", token)
+                .header("Content-Type", "application/vnd.cncf.helm.chart.manifest.v1+json")
+                .body(Body::from(serde_json::to_vec(&manifest).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/v2/{helm_id}/demo/manifests/0.1.0"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let pulled: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pulled["layers"][0]["digest"], digest);
     }
 }
