@@ -3,9 +3,12 @@
 //! Referencia: <https://github.com/opencontainers/distribution-spec>.
 //!
 //! Las lecturas de manifiestos, blobs y etiquetas son públicas. `GET /v2/`
-//! desafía a Docker con un `Bearer` cuyo `realm` apunta a `/v2/token`.
-//! Las escrituras (subida de blobs y manifiestos, yank) exigen un token
-//! de API (`Bearer`, `Token` o Basic) y rol de escritura.
+//! responde 200 sin desafío: Helm/ORAS (3.18+) hace ping sin credenciales y,
+//! si recibe 401, cachea el token anónimo de `/v2/token` y lo reutiliza en
+//! `helm push` sin reintentar. Las escrituras (subida de blobs y
+//! manifiestos, yank) exigen un token de API (`Bearer`, `Token` o Basic)
+//! y rol de escritura. Un `scope` con `push` en `/v2/token` no emite el
+//! token anónimo.
 //!
 //! El registro vive en la raíz del host (`/v2/`). El primer componente
 //! del nombre de imagen es el UUID del repositorio `FerroBox`; el resto
@@ -20,7 +23,7 @@ use std::sync::{Mutex, OnceLock};
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::routing::get;
 use axum::{Json, Router};
 use ferrobox_application::packaging::PackagingStrategy;
@@ -248,29 +251,26 @@ async fn dispatch_write(
     }
 }
 
-async fn version_check(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    match extract_bearer_token(&headers) {
-        None => Err(OciApiError::unauthorized(&state.public_base_url, "/v2/")),
-        Some(secret) if secret == OCI_ANONYMOUS_TOKEN => Ok(oci_json(StatusCode::OK, b"{}")),
-        Some(secret) => {
-            state
-                .authenticate_token
-                .execute(&secret)
-                .await
-                .map_err(|_| OciApiError::unauthorized(&state.public_base_url, "/v2/"))?;
-            Ok(oci_json(StatusCode::OK, b"{}"))
-        }
-    }
+async fn version_check() -> (StatusCode, HeaderMap, Bytes) {
+    oci_json(StatusCode::OK, b"{}")
 }
 
 async fn issue_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    let query = uri.query().unwrap_or("");
+    let form = std::str::from_utf8(&body).unwrap_or("");
+    let wants_push = token_query_requests_push(query) || token_query_requests_push(form);
     let token = match extract_bearer_token(&headers) {
+        None if wants_push => {
+            return Err(OciApiError::unauthorized(
+                &state.public_base_url,
+                "/v2/token",
+            ));
+        }
         None => OCI_ANONYMOUS_TOKEN.to_string(),
         Some(secret) => {
             state.authenticate_token.execute(&secret).await.map_err(|_| {
@@ -286,6 +286,57 @@ async fn issue_token(
     });
     let body = serde_json::to_vec(&payload).map_err(|err| ApiError::Internal(err.to_string()))?;
     Ok(oci_json(StatusCode::OK, &body))
+}
+
+/// `scope=repository:<name>:<actions>` puede repetirse. `push` exige
+/// credenciales reales: un token anónimo aquí es lo que Helm/ORAS cachea
+/// tras el ping y reutiliza en el POST de blobs.
+fn token_query_requests_push(query: &str) -> bool {
+    query.split('&').any(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if !key.eq_ignore_ascii_case("scope") {
+            return false;
+        }
+        token_scope_includes_push(&percent_decode_www_form(value))
+    })
+}
+
+fn token_scope_includes_push(scope: &str) -> bool {
+    scope
+        .rsplit_once(':')
+        .map_or(scope, |(_, actions)| actions)
+        .split(',')
+        .any(|action| action.eq_ignore_ascii_case("push"))
+}
+
+fn percent_decode_www_form(value: &str) -> String {
+    let plus = value.replace('+', " ");
+    let bytes = plus.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) =
+                (from_hex_digit(bytes[i + 1]), from_hex_digit(bytes[i + 2]))
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn from_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 async fn get_manifest(
@@ -804,7 +855,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::AppState;
-    use super::{DistributionPath, parse_distribution_path};
+    use super::{DistributionPath, parse_distribution_path, token_query_requests_push};
 
     struct Fixture {
         app: Router,
@@ -962,25 +1013,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn version_check_challenges_unauthenticated_clients() {
+    async fn version_check_is_public_so_oras_does_not_cache_anonymous() {
         let fx = fixture().await;
-        let (status, headers, _) = send(
+        let (status, headers, body) = send(
             fx.app,
             Request::builder().uri("/v2/").body(Body::empty()).unwrap(),
         )
         .await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        let challenges: Vec<_> = headers
-            .get_all("www-authenticate")
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .collect();
-        assert!(
-            challenges
-                .iter()
-                .any(|value| value.contains(r#"realm="http://127.0.0.1:3000/v2/token""#))
-        );
-        assert!(challenges.iter().any(|value| value.contains("Basic")));
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_ref(), b"{}");
+        assert!(headers.get("www-authenticate").is_none());
         assert_eq!(
             headers.get("docker-distribution-api-version").unwrap(),
             "registry/2.0"
@@ -1002,11 +1044,45 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["token"], "anonymous");
 
+        let pull_scope = format!(
+            "/v2/token?service=ferrobox&scope=repository:{}/demo:pull",
+            fx.repo_id
+        );
+        let (status, _, body) = send(
+            fx.app.clone(),
+            Request::builder().uri(&pull_scope).body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["token"], "anonymous");
+
+        let push_scope = format!(
+            "/v2/token?service=ferrobox&scope=repository:{}/demo:pull,push",
+            fx.repo_id
+        );
+        let (status, headers, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri(&push_scope)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenge = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(challenge.contains("/v2/token"));
+
         let basic = BASE64.encode(format!("__token__:{}", fx.developer_token));
         let (status, _, body) = send(
             fx.app.clone(),
             Request::builder()
-                .uri("/v2/token?service=ferrobox&scope=repository:demo:pull,push")
+                .uri(&push_scope)
                 .header("Authorization", format!("Basic {basic}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -1027,6 +1103,30 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body.as_ref(), b"{}");
+    }
+
+    #[tokio::test]
+    async fn anonymous_bearer_cannot_start_a_blob_upload() {
+        let fx = fixture().await;
+        let (status, headers, _) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v2/{}/demo/blobs/uploads/", fx.repo_id))
+                .header("Authorization", "Bearer anonymous")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenge = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(challenge.contains("/v2/token"));
+        assert!(challenge.contains(&format!("repository:{}/demo:pull,push", fx.repo_id)));
     }
 
     #[tokio::test]
@@ -1237,6 +1337,24 @@ mod tests {
                 name: "demo".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn token_query_detects_push_action_in_scope() {
+        assert!(!token_query_requests_push(""));
+        assert!(!token_query_requests_push("service=ferrobox"));
+        assert!(!token_query_requests_push(
+            "service=ferrobox&scope=repository:demo:pull"
+        ));
+        assert!(token_query_requests_push(
+            "service=ferrobox&scope=repository:demo:pull,push"
+        ));
+        assert!(token_query_requests_push(
+            "scope=repository%3A01a005cb-1139-7921-b251-acffa5ad2cb1%2Fdemo%3Apull%2Cpush"
+        ));
+        assert!(token_query_requests_push(
+            "scope=repository:a:pull&scope=repository:b:pull,push"
+        ));
     }
 
     #[tokio::test]
