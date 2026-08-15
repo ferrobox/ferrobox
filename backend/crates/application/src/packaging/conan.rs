@@ -1165,10 +1165,7 @@ impl PackagingStrategy for ConanPackagingStrategy {
                 if entry.yanked {
                     continue;
                 }
-                let reference = format!(
-                    "{}/{}@{}/{}",
-                    entry.name, entry.version, entry.user, entry.channel
-                );
+                let reference = recipe_reference(&entry);
                 if !needle.is_empty() && !reference.to_ascii_lowercase().contains(&needle) {
                     continue;
                 }
