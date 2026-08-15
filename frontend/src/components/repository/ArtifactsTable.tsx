@@ -37,7 +37,9 @@ function artifactFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
           ? "tar.gz"
           : ecosystem === "oci" || ecosystem === "helm"
             ? "json"
-            : "crate";
+            : ecosystem === "conan"
+              ? "tgz"
+              : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -51,7 +53,13 @@ function displayName(artifact: ArtifactResponse): string {
 }
 
 function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
-  return ecosystem === "cargo" ? `v${version}` : version;
+  if (ecosystem === "cargo") {
+    return `v${version}`;
+  }
+  if (ecosystem === "conan") {
+    return version.replace(/@([^:]+):/, "@$1/");
+  }
+  return version;
 }
 
 export function ArtifactsTable({
@@ -78,7 +86,8 @@ export function ArtifactsTable({
       ecosystem === "npm" ||
       ecosystem === "pypi" ||
       ecosystem === "oci" ||
-      ecosystem === "helm");
+      ecosystem === "helm" ||
+      ecosystem === "conan");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const groups = useMemo(() => {
@@ -195,7 +204,9 @@ export function ArtifactsTable({
                   ? "Las imágenes se cachean la primera vez que docker pull las resuelve contra este Mirror."
                   : ecosystem === "helm"
                     ? "Los charts se cachean la primera vez que helm pull los resuelve contra este Mirror."
-                    : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
+                    : ecosystem === "conan"
+                      ? "Los paquetes se cachean la primera vez que conan install los resuelve contra este Mirror."
+                      : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
           ) : ecosystem === "npm" ? (
             <>
               Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
@@ -215,6 +226,11 @@ export function ArtifactsTable({
             <>
               Publica un chart con <code className="font-mono">helm push</code> apuntando a este
               registro.
+            </>
+          ) : ecosystem === "conan" ? (
+            <>
+              Publica un paquete con <code className="font-mono">conan upload</code> apuntando a
+              este registro.
             </>
           ) : (
             <>

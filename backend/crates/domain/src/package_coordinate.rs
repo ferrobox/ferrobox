@@ -26,6 +26,8 @@ pub enum PackageEcosystem {
     Oci,
     /// Helm Charts, empaquetados como artefactos OCI.
     Helm,
+    /// Paquetes C/C++ del gestor Conan (API v2 con revisiones).
+    Conan,
 }
 
 impl PackageEcosystem {
@@ -39,6 +41,7 @@ impl PackageEcosystem {
             Self::PyPi => "pypi",
             Self::Oci => "oci",
             Self::Helm => "helm",
+            Self::Conan => "conan",
         }
     }
 }

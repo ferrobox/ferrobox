@@ -17,6 +17,7 @@ pub(crate) fn to_column(ecosystem: PackageEcosystem) -> &'static str {
         PackageEcosystem::PyPi => "pypi",
         PackageEcosystem::Oci => "oci",
         PackageEcosystem::Helm => "helm",
+        PackageEcosystem::Conan => "conan",
     }
 }
 
@@ -36,6 +37,7 @@ pub(crate) fn from_column(ecosystem: &str) -> Result<PackageEcosystem, String> {
         "pypi" => Ok(PackageEcosystem::PyPi),
         "oci" => Ok(PackageEcosystem::Oci),
         "helm" => Ok(PackageEcosystem::Helm),
+        "conan" => Ok(PackageEcosystem::Conan),
         other => Err(format!("unknown package ecosystem: {other}")),
     }
 }

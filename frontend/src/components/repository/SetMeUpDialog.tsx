@@ -1,6 +1,7 @@
 import { Terminal } from "lucide-react";
 
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
+import { ConanRegistryPanel } from "@/components/repository/ConanRegistryPanel";
 import { HelmRegistryPanel } from "@/components/repository/HelmRegistryPanel";
 import { NpmRegistryPanel } from "@/components/repository/NpmRegistryPanel";
 import { OciRegistryPanel } from "@/components/repository/OciRegistryPanel";
@@ -23,7 +24,7 @@ export function SetMeUpDialog({
 }: {
   repositoryId: string;
   kind?: RepositoryStorageKind;
-  ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm";
+  ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan";
 }) {
   const description =
     ecosystem === "npm" ? (
@@ -46,6 +47,11 @@ export function SetMeUpDialog({
       <>
         Copia estos fragmentos para <code className="font-mono">helm registry login</code> /{" "}
         <code className="font-mono">helm push</code>. El token se crea en Seguridad.
+      </>
+    ) : ecosystem === "conan" ? (
+      <>
+        Copia estos fragmentos para <code className="font-mono">conan remote</code> /{" "}
+        <code className="font-mono">conan upload</code>. El token se crea en Seguridad.
       </>
     ) : (
       <>
@@ -74,6 +80,8 @@ export function SetMeUpDialog({
           <OciRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : ecosystem === "helm" ? (
           <HelmRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
+        ) : ecosystem === "conan" ? (
+          <ConanRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : (
           <CargoRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         )}

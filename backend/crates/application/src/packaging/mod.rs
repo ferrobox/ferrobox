@@ -43,6 +43,10 @@ pub mod pypi;
 /// `docker pull`) del patrón Strategy.
 pub mod oci;
 
+/// La implementación de Conan (API v2 con revisiones: `conan upload` /
+/// `conan install`) del patrón Strategy.
+pub mod conan;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -222,6 +226,52 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::FileNotFound(filename.to_string()))
     }
 
+    /// Sube un fichero identificado por la ruta relativa del protocolo
+    /// nativo (p. ej. receta o paquete Conan).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
+    /// acepta este tipo de subida.
+    async fn put_protocol_file(
+        &self,
+        _repository: &Repository,
+        _path: &str,
+        _body: Bytes,
+    ) -> Result<(), PackagingError> {
+        Err(PackagingError::InvalidPayload(
+            "this ecosystem does not accept protocol file uploads".to_string(),
+        ))
+    }
+
+    /// Descarga un fichero identificado por la ruta relativa del
+    /// protocolo nativo.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::FileNotFound`] si no existe.
+    async fn get_protocol_file(
+        &self,
+        _repository: &Repository,
+        path: &str,
+    ) -> Result<Bytes, PackagingError> {
+        Err(PackagingError::FileNotFound(path.to_string()))
+    }
+
+    /// Metadatos JSON del protocolo nativo para `path` (latest,
+    /// revisiones, listado de ficheros, búsqueda de binarios).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::PackageNotFound`] si no hay datos.
+    async fn protocol_metadata(
+        &self,
+        _repository: &Repository,
+        path: &str,
+    ) -> Result<Bytes, PackagingError> {
+        Err(PackagingError::PackageNotFound(path.to_string()))
+    }
+
     /// Almacena un blob OCI identificado por su digest `sha256:…`.
     /// La implementación por defecto indica que el ecosistema no usa blobs.
     ///
@@ -384,6 +434,7 @@ mod tests {
     use ferrobox_domain::package_coordinate::PackageEcosystem;
 
     use super::cargo::CargoPackagingStrategy;
+    use super::conan::ConanPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
     use super::oci::OciPackagingStrategy;
     use super::pypi::PypiPackagingStrategy;
@@ -446,6 +497,15 @@ mod tests {
         ))
     }
 
+    fn conan_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(ConanPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
@@ -453,13 +513,15 @@ mod tests {
             .register(npm_strategy())
             .register(pypi_strategy())
             .register(oci_strategy())
-            .register(helm_strategy());
+            .register(helm_strategy())
+            .register(conan_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
         assert!(registry.strategy_for(PackageEcosystem::PyPi).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Oci).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Helm).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Conan).is_some());
     }
 
     #[test]

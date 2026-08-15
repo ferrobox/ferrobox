@@ -1,4 +1,4 @@
-import { Box, Container, FileArchive, Package, Ship, Sparkle } from "lucide-react";
+import { Box, Container, FileArchive, Package, Ship, Sparkle, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
@@ -37,6 +37,11 @@ const ECOSYSTEM_META: Record<
     label: "Helm",
     icon: Ship,
     className: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
+  },
+  conan: {
+    label: "Conan",
+    icon: Wrench,
+    className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
   },
 };
 
