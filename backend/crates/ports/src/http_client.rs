@@ -85,4 +85,19 @@ pub trait HttpClient: Send + Sync {
         url: &str,
         headers: &[(&str, &str)],
     ) -> Result<HttpResponse, HttpClientError>;
+
+    /// Realiza una petición `POST` con cuerpo y `Content-Type`.
+    ///
+    /// Como [`get`], solo devuelve `Ok` en el rango 2xx.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`HttpClientError`] si la red falla o el remoto responde
+    /// fuera de 2xx.
+    async fn post(
+        &self,
+        url: &str,
+        body: Bytes,
+        content_type: &str,
+    ) -> Result<HttpResponse, HttpClientError>;
 }

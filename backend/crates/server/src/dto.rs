@@ -353,3 +353,174 @@ pub(crate) struct ApiTokenCreatedResponse {
     /// Secreto en claro. Solo se expone en esta respuesta.
     pub(crate) token: String,
 }
+
+/// Estado de un ensaye.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AssayStatusDto {
+    /// Inventario y consulta completados.
+    Ready,
+    /// Falló la consulta de vulnerabilidades.
+    Failed,
+    /// El ecosistema todavía no admite ensaye.
+    Unsupported,
+}
+
+impl From<ferrobox_domain::assay::AssayStatus> for AssayStatusDto {
+    fn from(status: ferrobox_domain::assay::AssayStatus) -> Self {
+        match status {
+            ferrobox_domain::assay::AssayStatus::Ready => Self::Ready,
+            ferrobox_domain::assay::AssayStatus::Failed => Self::Failed,
+            ferrobox_domain::assay::AssayStatus::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
+/// Severidad de un hallazgo del ensaye.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AssaySeverityDto {
+    /// Crítica.
+    Critical,
+    /// Alta.
+    High,
+    /// Media.
+    Medium,
+    /// Baja.
+    Low,
+    /// Sin puntuación.
+    Unknown,
+}
+
+impl From<ferrobox_domain::assay::AssaySeverity> for AssaySeverityDto {
+    fn from(severity: ferrobox_domain::assay::AssaySeverity) -> Self {
+        match severity {
+            ferrobox_domain::assay::AssaySeverity::Critical => Self::Critical,
+            ferrobox_domain::assay::AssaySeverity::High => Self::High,
+            ferrobox_domain::assay::AssaySeverity::Medium => Self::Medium,
+            ferrobox_domain::assay::AssaySeverity::Low => Self::Low,
+            ferrobox_domain::assay::AssaySeverity::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Recuento de hallazgos por severidad.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayCountsDto {
+    #[ts(type = "number")]
+    pub(crate) critical: u32,
+    #[ts(type = "number")]
+    pub(crate) high: u32,
+    #[ts(type = "number")]
+    pub(crate) medium: u32,
+    #[ts(type = "number")]
+    pub(crate) low: u32,
+    #[ts(type = "number")]
+    pub(crate) unknown: u32,
+}
+
+impl From<ferrobox_domain::assay::AssayCounts> for AssayCountsDto {
+    fn from(counts: ferrobox_domain::assay::AssayCounts) -> Self {
+        Self {
+            critical: counts.critical,
+            high: counts.high,
+            medium: counts.medium,
+            low: counts.low,
+            unknown: counts.unknown,
+        }
+    }
+}
+
+/// Componente del inventario de un ensaye.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayComponentResponse {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) purl: Option<String>,
+    /// `root` es el paquete ensayado; `direct` una dependencia declarada.
+    pub(crate) kind: String,
+}
+
+/// Hallazgo (impureza) de un ensaye.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayFindingResponse {
+    pub(crate) vulnerability_id: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) title: String,
+    pub(crate) severity: AssaySeverityDto,
+    pub(crate) component_name: String,
+    pub(crate) component_version: String,
+    pub(crate) fixed_version: Option<String>,
+    pub(crate) details_url: Option<String>,
+}
+
+/// Ensaye completo de una versión de paquete.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayResponse {
+    pub(crate) id: String,
+    pub(crate) repository_id: String,
+    pub(crate) ecosystem: PackageEcosystemDto,
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) status: AssayStatusDto,
+    pub(crate) scanned_at: Option<String>,
+    pub(crate) error_message: Option<String>,
+    pub(crate) counts: AssayCountsDto,
+    pub(crate) components: Vec<AssayComponentResponse>,
+    pub(crate) findings: Vec<AssayFindingResponse>,
+}
+
+impl From<&ferrobox_domain::assay::Assay> for AssayResponse {
+    fn from(assay: &ferrobox_domain::assay::Assay) -> Self {
+        Self {
+            id: assay.id().to_string(),
+            repository_id: assay.repository_id().to_string(),
+            ecosystem: assay.coordinate().ecosystem().into(),
+            name: assay.coordinate().name().as_str().to_string(),
+            version: assay.coordinate().version().as_str().to_string(),
+            status: assay.status().into(),
+            scanned_at: assay.scanned_at().map(ToOwned::to_owned),
+            error_message: assay.error_message().map(ToOwned::to_owned),
+            counts: assay.counts().into(),
+            components: assay
+                .components()
+                .iter()
+                .map(|component| AssayComponentResponse {
+                    name: component.name().to_string(),
+                    version: component.version().to_string(),
+                    purl: component.purl().map(ToOwned::to_owned),
+                    kind: component.kind().as_str().to_string(),
+                })
+                .collect(),
+            findings: assay
+                .findings()
+                .iter()
+                .map(|finding| AssayFindingResponse {
+                    vulnerability_id: finding.vulnerability_id().to_string(),
+                    aliases: finding.aliases().to_vec(),
+                    title: finding.title().to_string(),
+                    severity: finding.severity().into(),
+                    component_name: finding.component_name().to_string(),
+                    component_version: finding.component_version().to_string(),
+                    fixed_version: finding.fixed_version().map(ToOwned::to_owned),
+                    details_url: finding.details_url().map(ToOwned::to_owned),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Coordenada a ensayar, en el cuerpo o en la query.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayLookupRequest {
+    pub(crate) ecosystem: PackageEcosystemDto,
+    pub(crate) name: String,
+    pub(crate) version: String,
+}

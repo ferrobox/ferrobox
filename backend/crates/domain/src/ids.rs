@@ -154,6 +154,42 @@ impl From<ApiTokenId> for Uuid {
     }
 }
 
+/// Identificador único de un ensaye (`Assay`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AssayId(Uuid);
+
+impl AssayId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for AssayId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for AssayId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for AssayId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AssayId> for Uuid {
+    fn from(value: AssayId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +218,7 @@ mod tests {
 
         assert_eq!(UserId::from(Uuid::from(user_id)), user_id);
         assert_eq!(ApiTokenId::from(Uuid::from(token_id)), token_id);
+        let assay_id = AssayId::new();
+        assert_eq!(AssayId::from(Uuid::from(assay_id)), assay_id);
     }
 }

@@ -2,6 +2,7 @@
 //! conoce todas las implementaciones concretas de cada puerto.
 
 mod artifacts;
+mod assays;
 mod auth;
 mod auth_extract;
 mod authz;
@@ -29,10 +30,12 @@ use config::Config;
 use ferrobox_adapter_http::ReqwestHttpClient;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
+use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
+use ferrobox_application::assay::AssayService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
 use ferrobox_application::change_password::ChangePasswordUseCase;
@@ -74,6 +77,7 @@ struct AppState {
     delete_repository: DeleteRepositoryUseCase,
     delete_artifact: DeleteArtifactUseCase,
     packaging: PackagingRegistry,
+    assays: AssayService,
     public_base_url: String,
     login: LoginUseCase,
     change_password: ChangePasswordUseCase,
@@ -104,6 +108,7 @@ async fn main() {
     let repository_store = Arc::new(PostgresRepositoryStore::new(pool.clone()));
     let artifact_store = Arc::new(PostgresArtifactStore::new(pool.clone()));
     let package_index_store = Arc::new(PostgresPackageIndexStore::new(pool.clone()));
+    let assay_store = Arc::new(PostgresAssayStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
@@ -116,6 +121,7 @@ async fn main() {
         repository_store,
         artifact_store,
         package_index_store,
+        assay_store,
         user_store,
         api_token_store,
         storage,
@@ -180,6 +186,17 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/artifacts/{artifact_id}",
             get(artifacts::download_artifact),
         )
+        .route("/assays", get(assays::list_all))
+        .route("/assays/{assay_id}", get(assays::get_by_id))
+        .route("/assays/{assay_id}/sbom", get(assays::download_sbom))
+        .route(
+            "/repositories/{repository_id}/assays",
+            get(assays::list_for_repository).post(assays::run),
+        )
+        .route(
+            "/repositories/{repository_id}/assay",
+            get(assays::get_or_run),
+        )
         .merge(cargo_registry::write_router())
         .merge(npm_registry::write_router())
         .merge(pypi_registry::write_router())
@@ -228,6 +245,7 @@ fn build_app_state(
     repository_store: Arc<PostgresRepositoryStore>,
     artifact_store: Arc<PostgresArtifactStore>,
     package_index_store: Arc<PostgresPackageIndexStore>,
+    assay_store: Arc<PostgresAssayStore>,
     user_store: Arc<PostgresUserStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     storage: Arc<S3StorageAdapter>,
@@ -270,7 +288,7 @@ fn build_app_state(
             package_index_store.clone(),
             storage.clone(),
             repository_store.clone(),
-            http_client,
+            http_client.clone(),
         )))
         .register(Arc::new(ConanPackagingStrategy::new(
             artifact_store.clone(),
@@ -302,12 +320,18 @@ fn build_app_state(
             storage.clone(),
         ),
         delete_artifact: DeleteArtifactUseCase::new(
-            repository_store,
+            repository_store.clone(),
             artifact_store,
-            package_index_store,
+            package_index_store.clone(),
             storage,
         ),
         packaging,
+        assays: AssayService::new(
+            assay_store,
+            package_index_store,
+            repository_store,
+            http_client,
+        ),
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),

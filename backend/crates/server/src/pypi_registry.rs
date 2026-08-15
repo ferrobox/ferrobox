@@ -396,7 +396,7 @@ mod tests {
     use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage, InMemoryUserStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
@@ -445,7 +445,7 @@ mod tests {
                 artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
-                http_client,
+                http_client.clone(),
                 repository_store.clone(),
                 "http://127.0.0.1:3000".to_string(),
             )));
@@ -478,10 +478,16 @@ mod tests {
             delete_artifact: DeleteArtifactUseCase::new(
                 repository_store.clone(),
                 artifact_store,
-                package_index_store,
+                package_index_store.clone(),
                 storage,
             ),
             packaging,
+            assays: ferrobox_application::assay::AssayService::new(
+                Arc::new(InMemoryAssayStore::default()),
+                package_index_store.clone(),
+                repository_store.clone(),
+                http_client.clone(),
+            ),
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
             change_password: ChangePasswordUseCase::new(user_store.clone()),

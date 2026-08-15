@@ -16,4 +16,7 @@ pub mod user_store;
 /// Adaptador de `ApiTokenStore`.
 pub mod api_token_store;
 
+/// Adaptador de `AssayStore`.
+pub mod assay_store;
+
 mod ecosystem_column;

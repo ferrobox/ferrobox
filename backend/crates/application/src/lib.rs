@@ -64,5 +64,8 @@ pub mod manage_users;
 /// Caso de uso: resolver un secreto Bearer a un principal autenticado.
 pub mod authenticate_token;
 
+/// Ensaye de paquetes: inventario y vulnerabilidades conocidas.
+pub mod assay;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;

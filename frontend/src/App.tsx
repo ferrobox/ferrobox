@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LoginPage } from "@/pages/LoginPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import { AssaysPage } from "@/pages/AssaysPage";
 import { RepositoriesLayout } from "@/pages/RepositoriesLayout";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailPage } from "@/pages/RepositoryDetailPage";
@@ -44,6 +45,7 @@ export default function App() {
                       <Route path=":repositoryId" element={<RepositoryDetailPage />} />
                     </Route>
                     <Route element={<PageContainer />}>
+                      <Route path="assays" element={<AssaysPage />} />
                       <Route path="security" element={<SecurityPage />} />
                       <Route path="users" element={<UsersPage />} />
                       <Route path="settings" element={<SettingsPage />} />
