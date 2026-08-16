@@ -16,6 +16,7 @@ import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
+import type { SearchResponse } from "@/api/generated/SearchResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
@@ -407,6 +408,18 @@ export function runAssay(
 
 export function rerunAllAssays(): Promise<AssayRerunResponse> {
   return request<AssayRerunResponse>("/assays/rerun", { method: "POST" });
+}
+
+export function searchPackages(query: string, limit?: number): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  if (query.trim().length > 0) {
+    params.set("q", query.trim());
+  }
+  if (limit != null) {
+    params.set("limit", String(limit));
+  }
+  const suffix = params.toString();
+  return request<SearchResponse>(suffix.length > 0 ? `/search?${suffix}` : "/search");
 }
 
 export function getQuota(repositoryId: string): Promise<QuotaResponse> {

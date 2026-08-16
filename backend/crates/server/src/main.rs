@@ -17,6 +17,7 @@ mod pypi_registry;
 mod quota;
 mod repositories;
 mod retention;
+mod search;
 mod settings;
 mod users;
 
@@ -66,6 +67,7 @@ use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::quota::QuotaService;
 use ferrobox_application::retention::RetentionService;
+use ferrobox_application::search_packages::SearchPackagesUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
@@ -86,6 +88,7 @@ struct AppState {
     assays: AssayService,
     retention: RetentionService,
     quota: QuotaService,
+    search_packages: SearchPackagesUseCase,
     public_base_url: String,
     login: LoginUseCase,
     change_password: ChangePasswordUseCase,
@@ -198,6 +201,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/artifacts/{artifact_id}",
             get(artifacts::download_artifact),
         )
+        .route("/search", get(search::search_packages))
         .route("/assays", get(assays::list_all))
         .route("/assays/rerun", post(assays::rerun_all))
         .route("/assays/{assay_id}", get(assays::get_by_id))
@@ -310,6 +314,10 @@ fn build_app_state(
         &assays,
         quota.clone(),
     );
+    let search_packages = SearchPackagesUseCase::new(
+        repository_store.clone(),
+        package_index_store.clone(),
+    );
     let retention = RetentionService::new(
         repository_store.clone(),
         artifact_store.clone(),
@@ -352,6 +360,7 @@ fn build_app_state(
         assays,
         retention,
         quota,
+        search_packages,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),

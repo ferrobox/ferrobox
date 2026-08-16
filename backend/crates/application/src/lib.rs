@@ -73,5 +73,8 @@ pub mod retention;
 /// Cuota de almacenamiento por repositorio.
 pub mod quota;
 
+/// Búsqueda de paquetes en el catálogo de la instancia.
+pub mod search_packages;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;
