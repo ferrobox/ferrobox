@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { AlertCircle, Search } from "lucide-react";
 import { NavLink, useSearchParams } from "react-router-dom";
 
@@ -23,25 +23,19 @@ import {
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
   const urlQuery = params.get("q") ?? "";
-  const [draft, setDraft] = useState(urlQuery);
   const { data, isPending, isError, error, isFetching } = usePackageSearch(urlQuery);
-
-  useEffect(() => {
-    setDraft(urlQuery);
-  }, [urlQuery]);
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const next = draft.trim();
-    if (next.length === 0) {
-      setParams({}, { replace: true });
-      return;
-    }
-    setParams({ q: next }, { replace: true });
-  }
 
   const hits = data?.hits ?? [];
   const searching = urlQuery.trim().length > 0;
+
+  function onSearch(next: string) {
+    const trimmed = next.trim();
+    if (trimmed.length === 0) {
+      setParams({}, { replace: true });
+      return;
+    }
+    setParams({ q: trimmed }, { replace: true });
+  }
 
   return (
     <div>
@@ -50,18 +44,7 @@ export function SearchPage() {
         description="Encuentra paquetes ya indexados en Forge y Mirror sin recorrer la barra de repositorios. Un Mirror solo muestra lo que alguien ha resuelto o cacheado; no consulta el upstream."
       />
 
-      <form onSubmit={onSubmit} className="mb-6 flex max-w-xl gap-2">
-        <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Nombre del paquete"
-          aria-label="Nombre del paquete"
-        />
-        <Button type="submit" variant="outline">
-          <Search />
-          Buscar
-        </Button>
-      </form>
+      <SearchForm key={urlQuery} initial={urlQuery} onSearch={onSearch} />
 
       {!searching ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
@@ -146,5 +129,35 @@ export function SearchPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SearchForm({
+  initial,
+  onSearch,
+}: {
+  initial: string;
+  onSearch: (query: string) => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSearch(draft);
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="mb-6 flex max-w-xl gap-2">
+      <Input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="Nombre del paquete"
+        aria-label="Nombre del paquete"
+      />
+      <Button type="submit" variant="outline">
+        <Search />
+        Buscar
+      </Button>
+    </form>
   );
 }
