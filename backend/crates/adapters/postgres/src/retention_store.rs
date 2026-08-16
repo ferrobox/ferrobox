@@ -27,10 +27,10 @@ fn backend_error(message: impl Into<String>) -> RetentionStoreError {
     RetentionStoreError::Backend(Box::new(RowConversionError(message.into())))
 }
 
-fn map_sqlx(err: sqlx::Error) -> RetentionStoreError {
+fn map_sqlx(err: &sqlx::Error) -> RetentionStoreError {
     let undefined_table = err
         .as_database_error()
-        .and_then(|error| error.code())
+        .and_then(sqlx::error::DatabaseError::code)
         .is_some_and(|code| code == "42P01");
     if undefined_table {
         return RetentionStoreError::MissingSchema;
@@ -68,12 +68,11 @@ impl RetentionStore for PostgresRetentionStore {
         .bind(repository_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx);
+        .map_err(|err| map_sqlx(&err));
 
         match row {
-            Err(RetentionStoreError::MissingSchema) => Ok(RetentionPolicy::keep_all()),
+            Err(RetentionStoreError::MissingSchema) | Ok(None) => Ok(RetentionPolicy::keep_all()),
             Err(err) => Err(err),
-            Ok(None) => Ok(RetentionPolicy::keep_all()),
             Ok(Some(row)) => {
                 let keep_last: Option<i32> = sqlx::Row::try_get(&row, "keep_last")
                     .map_err(|err| backend_error(err.to_string()))?;
@@ -114,7 +113,7 @@ impl RetentionStore for PostgresRetentionStore {
         .bind(keep_days)
         .execute(&self.pool)
         .await
-        .map_err(map_sqlx)?;
+        .map_err(|err| map_sqlx(&err))?;
         Ok(())
     }
 }

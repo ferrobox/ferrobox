@@ -1,6 +1,6 @@
 //! Retención de versiones y recolección de basura (GC) de un repositorio.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -271,7 +271,7 @@ impl RetentionService {
             .artifact_store
             .find_by_repository_id(repository_id)
             .await?;
-        let sizes: BTreeMap<ArtifactId, u64> = artifacts
+        let sizes: HashMap<ArtifactId, u64> = artifacts
             .iter()
             .map(|artifact| (artifact.id(), artifact.size_bytes()))
             .collect();
@@ -547,7 +547,7 @@ fn remember_artifact(record: &PackageIndexRecord, ids: &mut HashSet<ArtifactId>)
 
 fn item_from_record(
     record: &PackageIndexRecord,
-    sizes: &BTreeMap<ArtifactId, u64>,
+    sizes: &HashMap<ArtifactId, u64>,
     reason: String,
 ) -> CleanupItem {
     let size_bytes = record
@@ -562,7 +562,7 @@ fn item_from_record(
     }
 }
 
-fn drop_reason(policy: RetentionPolicy, rank: u32, age_days: u64) -> String {
+fn drop_reason(policy: RetentionPolicy, _rank: u32, age_days: u64) -> String {
     match (policy.keep_last(), policy.keep_days()) {
         (Some(limit), None) => {
             format!("fuera de las {limit} versiones más recientes")
@@ -574,32 +574,6 @@ fn drop_reason(policy: RetentionPolicy, rank: u32, age_days: u64) -> String {
             format!("fuera de las {limit} más recientes y con más de {days} días")
         }
         (None, None) => "fuera de la política".to_string(),
-    }
-}
-
-#[derive(Default)]
-struct PreviewAccumulator {
-    items: Vec<CleanupItem>,
-    report: CleanupReport,
-    seen_blobs: HashSet<String>,
-}
-
-impl PreviewAccumulator {
-    fn push(
-        &mut self,
-        artifacts: &dyn ArtifactStore,
-        rec: &PackageIndexRecord,
-        reason: String,
-        cache: &mut HashMap<String, ArtifactRecord>,
-    ) {
-        remember_artifact(artifacts, rec, cache);
-        self.items.push(item_from_record(rec, reason, cache));
-        self.report.deleted_versions += 1;
-        if let Some(art) = cache.get(&rec.sha256) {
-            if self.seen_blobs.insert(rec.sha256.clone()) {
-                self.report.deleted_bytes += art.size_bytes;
-            }
-        }
     }
 }
 
