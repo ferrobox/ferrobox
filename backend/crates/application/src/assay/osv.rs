@@ -9,7 +9,7 @@ use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::extract::{is_exact_version, osv_ecosystem};
+use super::extract::osv_query_target;
 
 const OSV_QUERYBATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
 const OSV_VULN_URL: &str = "https://api.osv.dev/v1/vulns";
@@ -29,23 +29,17 @@ pub async fn query_findings(
     ecosystem: PackageEcosystem,
     components: &[AssayComponent],
 ) -> Result<Vec<AssayFinding>, HttpClientError> {
-    let Some(osv_eco) = osv_ecosystem(ecosystem) else {
-        return Ok(Vec::new());
-    };
-
     let mut queries = Vec::new();
     let mut queried_packages = Vec::new();
     for component in components {
-        if component.kind() != ferrobox_domain::assay::AssayComponentKind::Root
-            && !is_exact_version(component.version())
-        {
+        let Some((osv_eco, name, version)) = osv_query_target(component, ecosystem) else {
             continue;
-        }
+        };
         queries.push(json!({
-            "package": { "name": component.name(), "ecosystem": osv_eco },
-            "version": component.version(),
+            "package": { "name": name, "ecosystem": osv_eco },
+            "version": version,
         }));
-        queried_packages.push((component.name().to_string(), component.version().to_string()));
+        queried_packages.push((name, version));
     }
 
     if queries.is_empty() {

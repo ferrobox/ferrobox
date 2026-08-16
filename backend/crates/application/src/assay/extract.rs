@@ -62,6 +62,47 @@ pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
     }
 }
 
+/// Ecosistema de OSV a consultar para un componente concreto.
+///
+/// Los paquetes de distro (Alpine, Debian, Ubuntu) van en el `purl`;
+/// npm / `PyPI` / Cargo usan el ecosistema del repositorio.
+#[must_use]
+pub fn osv_query_target(
+    component: &AssayComponent,
+    repository_ecosystem: PackageEcosystem,
+) -> Option<(&'static str, String, String)> {
+    if let Some(purl) = component.purl()
+        && let Some(ecosystem) = ecosystem_from_purl(purl)
+    {
+        return Some((
+            ecosystem,
+            component.name().to_string(),
+            component.version().to_string(),
+        ));
+    }
+    let ecosystem = osv_ecosystem(repository_ecosystem)?;
+    if component.kind() != AssayComponentKind::Root && !is_exact_version(component.version()) {
+        return None;
+    }
+    Some((
+        ecosystem,
+        component.name().to_string(),
+        component.version().to_string(),
+    ))
+}
+
+fn ecosystem_from_purl(purl: &str) -> Option<&'static str> {
+    if purl.starts_with("pkg:apk/") {
+        Some("Alpine")
+    } else if purl.starts_with("pkg:deb/ubuntu/") {
+        Some("Ubuntu")
+    } else if purl.starts_with("pkg:deb/") {
+        Some("Debian")
+    } else {
+        None
+    }
+}
+
 /// Inventario a partir de la entrada de índice del ecosistema.
 #[must_use]
 pub fn extract_components(

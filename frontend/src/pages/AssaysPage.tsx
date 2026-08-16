@@ -73,8 +73,9 @@ export function AssaysPage() {
           <FlaskConical className="mx-auto size-8 text-muted-foreground" />
           <p className="mt-3 font-medium text-foreground">Todavía no hay ensayes</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Abre un paquete npm, PyPI o Cargo y pulsa Assay. El inventario se consulta contra OSV
-            (Open Source Vulnerabilities).
+            Abre un paquete npm, PyPI, Cargo o una imagen OCI y pulsa Assay. El inventario se
+            consulta contra OSV (Open Source Vulnerabilities). Helm y Conan muestran composición
+            si hay Chart.yaml o requires; OSV no los indexa.
           </p>
         </div>
       ) : null}

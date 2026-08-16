@@ -120,9 +120,10 @@ impl From<AssayError> for ApiError {
             | AssayError::AssayNotFound(_)
             | AssayError::PackageNotFound(_) => Self::NotFound(err.to_string()),
             AssayError::InvalidCoordinate(_) => Self::BadRequest(err.to_string()),
-            AssayError::Persistence(_) | AssayError::Index(_) | AssayError::Repositories(_) => {
-                Self::Internal(err.to_string())
-            }
+            AssayError::Persistence(_)
+            | AssayError::Index(_)
+            | AssayError::Repositories(_)
+            | AssayError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
 }
@@ -209,13 +210,14 @@ mod tests {
                 repository_store.clone(),
                 artifact_store,
                 package_index_store.clone(),
-                storage,
+                storage.clone(),
             ),
             packaging,
             assays: ferrobox_application::assay::AssayService::new(
                 Arc::new(InMemoryAssayStore::default()),
                 package_index_store,
                 repository_store.clone(),
+                storage,
                 http_client,
             ),
             public_base_url: "http://127.0.0.1:3000".to_string(),
