@@ -303,4 +303,29 @@ impl AssayStore for PostgresAssayStore {
             .map_err(|err| backend_error(err.to_string()))?;
         rows.iter().map(row_to_assay).collect()
     }
+
+    async fn delete_by_coordinate(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<(), AssayStoreError> {
+        let repository_id: Uuid = repository_id.into();
+        query(
+            r"
+            DELETE FROM assays
+            WHERE repository_id = $1
+              AND ecosystem = $2
+              AND lower(package_name) = lower($3)
+              AND package_version = $4
+            ",
+        )
+        .bind(repository_id)
+        .bind(ecosystem_column::to_column(coordinate.ecosystem()))
+        .bind(coordinate.name().as_str())
+        .bind(coordinate.version().as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        Ok(())
+    }
 }

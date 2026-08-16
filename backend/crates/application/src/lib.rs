@@ -67,5 +67,8 @@ pub mod authenticate_token;
 /// Ensaye de paquetes: inventario y vulnerabilidades conocidas.
 pub mod assay;
 
+/// Retención de versiones y recolección de basura.
+pub mod retention;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;

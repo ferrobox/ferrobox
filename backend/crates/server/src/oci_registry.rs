@@ -843,7 +843,8 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
-        InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage,
+        InMemoryUserStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -942,7 +943,7 @@ mod tests {
             ),
             delete_artifact: DeleteArtifactUseCase::new(
                 repository_store.clone(),
-                artifact_store,
+                artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
             ),
@@ -953,6 +954,14 @@ mod tests {
                 repository_store.clone(),
                 storage.clone(),
                 http_client.clone(),
+            ),
+            retention: ferrobox_application::retention::RetentionService::new(
+                repository_store.clone(),
+                artifact_store,
+                package_index_store,
+                storage,
+                Arc::new(InMemoryAssayStore::default()),
+                Arc::new(InMemoryRetentionStore::default()),
             ),
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),

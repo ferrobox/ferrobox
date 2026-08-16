@@ -56,4 +56,15 @@ pub trait AssayStore: Send + Sync {
     ///
     /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
     async fn find_all(&self) -> Result<Vec<Assay>, AssayStoreError>;
+
+    /// Elimina el ensaye de una coordenada. No es un error si no existe.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    async fn delete_by_coordinate(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<(), AssayStoreError>;
 }

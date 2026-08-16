@@ -5,7 +5,7 @@ use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
 };
 use ferrobox_ports::package_index_store::{
-    IndexedArtifact, PackageIndexStore, PackageIndexStoreError,
+    IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
 };
 use sqlx::{PgPool, Row};
 use thiserror::Error;
@@ -266,6 +266,91 @@ impl PackageIndexStore for PostgresPackageIndexStore {
                 })
             })
             .collect()
+    }
+
+    async fn list_entries(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<PackageIndexRecord>, PackageIndexStoreError> {
+        let repository_id: Uuid = repository_id.into();
+        let rows = sqlx::query(
+            r"
+            SELECT artifact_id, ecosystem, package_name, package_version, entry, created_at
+            FROM package_index_entries
+            WHERE repository_id = $1
+            ORDER BY created_at
+            ",
+        )
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| {
+                let artifact_id: Option<Uuid> = row
+                    .try_get("artifact_id")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let ecosystem: String = row
+                    .try_get("ecosystem")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let package_name: String = row
+                    .try_get("package_name")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let package_version: String = row
+                    .try_get("package_version")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let entry: serde_json::Value = row
+                    .try_get("entry")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let created_at: chrono::DateTime<chrono::Utc> = row
+                    .try_get("created_at")
+                    .map_err(|err| backend_error(err.to_string()))?;
+
+                let ecosystem =
+                    ecosystem_column::from_column(&ecosystem).map_err(backend_error)?;
+                let name =
+                    PackageName::parse(package_name).map_err(|err| backend_error(err.to_string()))?;
+                let version = PackageVersion::parse(package_version)
+                    .map_err(|err| backend_error(err.to_string()))?;
+                let entry = serde_json::to_vec(&entry)
+                    .map(Bytes::from)
+                    .map_err(|err| backend_error(err.to_string()))?;
+
+                Ok(PackageIndexRecord {
+                    artifact_id: artifact_id.map(ArtifactId::from),
+                    coordinate: PackageCoordinate::new(ecosystem, name, version),
+                    entry,
+                    created_at_rfc3339: created_at.to_rfc3339(),
+                })
+            })
+            .collect()
+    }
+
+    async fn delete_by_coordinate(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<(), PackageIndexStoreError> {
+        let repository_id: Uuid = repository_id.into();
+        let ecosystem = ecosystem_column::to_column(coordinate.ecosystem());
+        sqlx::query(
+            r"
+            DELETE FROM package_index_entries
+            WHERE repository_id = $1
+              AND ecosystem = $2
+              AND lower(package_name) = lower($3)
+              AND package_version = $4
+            ",
+        )
+        .bind(repository_id)
+        .bind(ecosystem)
+        .bind(coordinate.name().as_str())
+        .bind(coordinate.version().as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        Ok(())
     }
 }
 

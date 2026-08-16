@@ -26,5 +26,8 @@ pub mod api_token_store;
 /// El puerto de persistencia de la entidad `Assay`.
 pub mod assay_store;
 
+/// El puerto de persistencia de la política de retención.
+pub mod retention_store;
+
 /// El puerto de cliente HTTP saliente.
 pub mod http_client;

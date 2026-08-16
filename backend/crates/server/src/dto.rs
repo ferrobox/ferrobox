@@ -533,3 +533,61 @@ pub(crate) struct AssayRerunResponse {
     /// Número de coordenadas distintas encoladas para reensayar.
     pub(crate) scheduled: u32,
 }
+
+/// Política de retención enviada al guardar.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct RetentionPolicyRequest {
+    /// Conservar las N versiones más recientes de cada paquete.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) keep_last: Option<u32>,
+    /// Conservar versiones indexadas en los últimos N días.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) keep_days: Option<u32>,
+}
+
+/// Política de retención de un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct RetentionPolicyResponse {
+    /// Conservar las N versiones más recientes de cada paquete.
+    pub(crate) keep_last: Option<u32>,
+    /// Conservar versiones indexadas en los últimos N días.
+    pub(crate) keep_days: Option<u32>,
+}
+
+impl From<ferrobox_domain::retention::RetentionPolicy> for RetentionPolicyResponse {
+    fn from(policy: ferrobox_domain::retention::RetentionPolicy) -> Self {
+        Self {
+            keep_last: policy.keep_last(),
+            keep_days: policy.keep_days(),
+        }
+    }
+}
+
+/// Resultado de aplicar retención o recolectar basura.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CleanupReportResponse {
+    /// Versiones o etiquetas eliminadas del índice.
+    #[ts(type = "number")]
+    pub(crate) dropped_versions: u64,
+    /// Binarios borrados.
+    #[ts(type = "number")]
+    pub(crate) deleted_artifacts: u64,
+    /// Bytes liberados en almacenamiento.
+    #[ts(type = "number")]
+    pub(crate) freed_bytes: u64,
+}
+
+impl From<ferrobox_application::retention::CleanupReport> for CleanupReportResponse {
+    fn from(report: ferrobox_application::retention::CleanupReport) -> Self {
+        Self {
+            dropped_versions: report.dropped_versions,
+            deleted_artifacts: report.deleted_artifacts,
+            freed_bytes: report.freed_bytes,
+        }
+    }
+}

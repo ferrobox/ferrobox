@@ -9,6 +9,7 @@ import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
+import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
@@ -19,6 +20,7 @@ export const queryKeys = {
   settings: ["settings"] as const,
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
+  repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
 };
 
 export function useRepositories() {
@@ -311,6 +313,58 @@ export function useRerunAllAssays() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
       void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+    },
+  });
+}
+
+export function useRetentionPolicy(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryRetention(repositoryId),
+    queryFn: () => api.getRetentionPolicy(repositoryId),
+    enabled,
+  });
+}
+
+export function useSaveRetentionPolicy(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: RetentionPolicyRequest) =>
+      api.saveRetentionPolicy(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryRetention(repositoryId),
+      });
+    },
+  });
+}
+
+export function useApplyRetention(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.applyRetention(repositoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAssays(repositoryId),
+      });
+    },
+  });
+}
+
+export function useCollectGarbage(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.collectGarbage(repositoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
     },
   });
 }

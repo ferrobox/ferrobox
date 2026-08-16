@@ -14,6 +14,9 @@ import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
+import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
+import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { SettingsResponse } from "@/api/generated/SettingsResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
@@ -401,6 +404,32 @@ export function runAssay(
 
 export function rerunAllAssays(): Promise<AssayRerunResponse> {
   return request<AssayRerunResponse>("/assays/rerun", { method: "POST" });
+}
+
+export function getRetentionPolicy(repositoryId: string): Promise<RetentionPolicyResponse> {
+  return request<RetentionPolicyResponse>(`/repositories/${repositoryId}/retention`);
+}
+
+export function saveRetentionPolicy(
+  repositoryId: string,
+  payload: RetentionPolicyRequest,
+): Promise<RetentionPolicyResponse> {
+  return request<RetentionPolicyResponse>(`/repositories/${repositoryId}/retention`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function applyRetention(repositoryId: string): Promise<CleanupReportResponse> {
+  return request<CleanupReportResponse>(`/repositories/${repositoryId}/retention/apply`, {
+    method: "POST",
+  });
+}
+
+export function collectGarbage(repositoryId: string): Promise<CleanupReportResponse> {
+  return request<CleanupReportResponse>(`/repositories/${repositoryId}/gc`, {
+    method: "POST",
+  });
 }
 
 export async function downloadAssaySbom(assayId: string, filename: string): Promise<void> {
