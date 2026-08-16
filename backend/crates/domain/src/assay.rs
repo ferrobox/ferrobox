@@ -103,6 +103,8 @@ pub enum AssayComponentKind {
     Root,
     /// Dependencia declarada de primer nivel.
     Direct,
+    /// Dependencia resuelta desde un lockfile (no declarada en el manifiesto).
+    Transitive,
 }
 
 impl AssayComponentKind {
@@ -112,6 +114,7 @@ impl AssayComponentKind {
         match self {
             Self::Root => "root",
             Self::Direct => "direct",
+            Self::Transitive => "transitive",
         }
     }
 
@@ -120,6 +123,7 @@ impl AssayComponentKind {
     pub fn parse(value: &str) -> Self {
         match value {
             "root" => Self::Root,
+            "transitive" => Self::Transitive,
             _ => Self::Direct,
         }
     }

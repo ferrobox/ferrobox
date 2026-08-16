@@ -441,7 +441,8 @@ pub(crate) struct AssayComponentResponse {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) purl: Option<String>,
-    /// `root` es el paquete ensayado; `direct` una dependencia declarada.
+    /// `root` es el paquete ensayado; `direct` una dependencia declarada;
+    /// `transitive` una resuelta desde lockfile.
     pub(crate) kind: String,
 }
 

@@ -48,7 +48,7 @@ export function AssaysPage() {
     <div>
       <PageHeader
         title="Assays"
-        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. Se lanzan solos al publicar o al cachear en un Mirror; no bloquean install ni publish."
+        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. Incluyen lockfiles, paquetes de distro e imágenes declaradas en Helm. Se lanzan solos al publicar o al cachear; no bloquean install ni publish."
         actions={
           canWrite && data && data.length > 0 ? (
             <Button

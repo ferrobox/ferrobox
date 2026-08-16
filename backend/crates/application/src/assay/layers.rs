@@ -14,7 +14,8 @@ use serde::Deserialize;
 use tar::Archive;
 use uuid::Uuid;
 
-use super::extract::extract_components;
+use super::extract::{extract_components, merge_component};
+use super::lockfiles::append_from_stored_package;
 use crate::storage_key::storage_key_for;
 
 const BLOB_PACKAGE: &str = "_blob";
@@ -80,6 +81,9 @@ struct LayerFiles {
     os_release: Option<String>,
     chart_yaml: Option<String>,
     helm_config: Option<String>,
+    values_yaml: Option<String>,
+    rpm_manifest: Option<String>,
+    pacman_descs: Vec<String>,
 }
 
 /// Inventario del paquete, incluyendo capas o receta cuando aplica.
@@ -92,12 +96,22 @@ pub async fn extract_inventory(
 ) -> Vec<AssayComponent> {
     match coordinate.ecosystem() {
         PackageEcosystem::Npm | PackageEcosystem::PyPi | PackageEcosystem::Cargo => {
-            extract_components(
+            let mut components = extract_components(
                 coordinate.ecosystem(),
                 coordinate.name().as_str(),
                 coordinate.version().as_str(),
                 entry,
+            );
+            append_from_stored_package(
+                storage,
+                index,
+                repository_id,
+                coordinate,
+                entry,
+                &mut components,
             )
+            .await;
+            components
         }
         PackageEcosystem::Oci | PackageEcosystem::Helm => {
             extract_oci(storage, index, repository_id, coordinate, entry).await
@@ -149,6 +163,7 @@ async fn extract_oci(
 
     append_os_packages(&mut components, &files);
     append_helm_chart(&mut components, &files);
+    append_helm_images(&mut components, &files);
     components
 }
 
@@ -302,23 +317,23 @@ async fn load_artifact(storage: &dyn StoragePort, artifact_id: &str) -> Option<B
 
 fn merge_layer(files: &mut LayerFiles, body: &[u8]) {
     let entries = read_layer_files(body);
-    if let Some(text) = entries.get("lib/apk/db/installed") {
-        files.apk_installed = Some(text.clone());
-    }
-    if let Some(text) = entries.get("var/lib/dpkg/status") {
-        files.dpkg_status = Some(text.clone());
-    }
-    if let Some(text) = entries
-        .get("etc/os-release")
-        .or_else(|| entries.get("usr/lib/os-release"))
-    {
-        files.os_release = Some(text.clone());
-    }
-    if let Some((_, text)) = entries
-        .iter()
-        .find(|(path, _)| path.ends_with("Chart.yaml") || path.ends_with("Chart.yml"))
-    {
-        files.chart_yaml = Some(text.clone());
+    for (path, text) in entries {
+        match path.as_str() {
+            "lib/apk/db/installed" => files.apk_installed = Some(text),
+            "var/lib/dpkg/status" => files.dpkg_status = Some(text),
+            "etc/os-release" | "usr/lib/os-release" => files.os_release = Some(text),
+            "var/lib/rpmmanifest/container-manifest-2" => files.rpm_manifest = Some(text),
+            other if other.ends_with("Chart.yaml") || other.ends_with("Chart.yml") => {
+                files.chart_yaml = Some(text);
+            }
+            other if other.ends_with("values.yaml") || other.ends_with("values.yml") => {
+                files.values_yaml = Some(text);
+            }
+            other if other.contains("var/lib/pacman/local/") && other.ends_with("/desc") => {
+                files.pacman_descs.push(text);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -358,31 +373,61 @@ fn is_interesting_path(path: &str) -> bool {
             | "var/lib/dpkg/status"
             | "etc/os-release"
             | "usr/lib/os-release"
+            | "var/lib/rpmmanifest/container-manifest-2"
     ) || path.ends_with("Chart.yaml")
         || path.ends_with("Chart.yml")
+        || path.ends_with("values.yaml")
+        || path.ends_with("values.yml")
+        || (path.contains("var/lib/pacman/local/") && path.ends_with("/desc"))
 }
 
 fn append_os_packages(components: &mut Vec<AssayComponent>, files: &LayerFiles) {
     let distro = os_release_id(files.os_release.as_deref());
     if let Some(text) = &files.apk_installed {
+        let namespace = apk_purl_namespace(&distro);
         for (name, version) in parse_apk_installed(text) {
-            components.push(AssayComponent::new(
+            merge_component(
+                components,
                 name.clone(),
                 version.clone(),
-                Some(format!("pkg:apk/alpine/{name}@{version}")),
                 AssayComponentKind::Direct,
-            ));
+                Some(format!("pkg:apk/{namespace}/{name}@{version}")),
+            );
         }
     }
     if let Some(text) = &files.dpkg_status {
         let namespace = if distro == "ubuntu" { "ubuntu" } else { "debian" };
         for (name, version) in parse_dpkg_status(text) {
-            components.push(AssayComponent::new(
+            merge_component(
+                components,
                 name.clone(),
                 version.clone(),
-                Some(format!("pkg:deb/{namespace}/{name}@{version}")),
                 AssayComponentKind::Direct,
-            ));
+                Some(format!("pkg:deb/{namespace}/{name}@{version}")),
+            );
+        }
+    }
+    if let Some(text) = &files.rpm_manifest {
+        let namespace = rpm_purl_namespace(&distro);
+        for (name, version) in parse_rpm_manifest(text) {
+            merge_component(
+                components,
+                name.clone(),
+                version.clone(),
+                AssayComponentKind::Direct,
+                Some(format!("pkg:rpm/{namespace}/{name}@{version}")),
+            );
+        }
+    }
+    for text in &files.pacman_descs {
+        if let Some((name, version)) = parse_pacman_desc(text) {
+            merge_component(
+                components,
+                name.clone(),
+                version.clone(),
+                AssayComponentKind::Direct,
+                Some(format!("pkg:alpm/arch/{name}@{version}")),
+            );
         }
     }
 }
@@ -396,12 +441,59 @@ fn append_helm_chart(components: &mut Vec<AssayComponent>, files: &LayerFiles) {
         return;
     };
     for (name, version) in parse_chart_dependencies(text) {
-        components.push(AssayComponent::new(
+        merge_component(
+            components,
             name.clone(),
             version.clone(),
-            Some(format!("pkg:helm/{name}@{version}")),
             AssayComponentKind::Direct,
-        ));
+            Some(format!("pkg:helm/{name}@{version}")),
+        );
+    }
+}
+
+fn append_helm_images(components: &mut Vec<AssayComponent>, files: &LayerFiles) {
+    let mut images = Vec::new();
+    if let Some(text) = files.chart_yaml.as_deref() {
+        images.extend(parse_helm_images(text));
+    }
+    if let Some(text) = files.values_yaml.as_deref() {
+        images.extend(parse_helm_images(text));
+    }
+    if let Some(text) = files.helm_config.as_deref() {
+        images.extend(parse_helm_images(text));
+    }
+    for (name, version) in images {
+        let purl = Some(format!("pkg:oci/{name}@{version}"));
+        merge_component(
+            components,
+            name,
+            version,
+            AssayComponentKind::Direct,
+            purl,
+        );
+    }
+}
+
+fn apk_purl_namespace(distro: &str) -> &'static str {
+    match distro {
+        "wolfi" => "wolfi",
+        "chainguard" => "chainguard",
+        "alpaquita" => "alpaquita",
+        "minimos" => "minimos",
+        _ => "alpine",
+    }
+}
+
+fn rpm_purl_namespace(distro: &str) -> &str {
+    match distro {
+        "rhel" | "centos" | "ol" | "redhat" | "debian" | "ubuntu" | "alpine" | "wolfi" => "rhel",
+        "rocky" => "rocky",
+        "almalinux" | "alma" => "almalinux",
+        "azurelinux" | "mariner" => "azurelinux",
+        "opensuse" | "opensuse-leap" | "opensuse-tumbleweed" => "opensuse",
+        "sles" | "suse" => "suse",
+        "photon" => "photon",
+        other => other,
     }
 }
 
@@ -518,6 +610,128 @@ fn unquote(value: &str) -> String {
     value.trim().trim_matches('"').trim_matches('\'').to_string()
 }
 
+fn parse_rpm_manifest(text: &str) -> Vec<(String, String)> {
+    let mut packages = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let name = parts[0].trim();
+        if name.is_empty() || name == "gpg-pubkey" {
+            continue;
+        }
+        let epoch = parts[1].trim();
+        let version = parts[2].trim();
+        let release = parts[3].trim();
+        if version.is_empty() {
+            continue;
+        }
+        let full = if epoch.is_empty() || epoch == "0" {
+            format!("{version}-{release}")
+        } else {
+            format!("{epoch}:{version}-{release}")
+        };
+        packages.push((name.to_string(), full));
+    }
+    packages
+}
+
+fn parse_pacman_desc(text: &str) -> Option<(String, String)> {
+    let mut name = None;
+    let mut version = None;
+    let mut section = "";
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('%') && trimmed.ends_with('%') {
+            section = trimmed;
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        match section {
+            "%NAME%" => name = Some(trimmed.to_string()),
+            "%VERSION%" => version = Some(trimmed.to_string()),
+            _ => {}
+        }
+    }
+    match (name, version) {
+        (Some(name), Some(version)) if !name.is_empty() && !version.is_empty() => {
+            Some((name, version))
+        }
+        _ => None,
+    }
+}
+
+fn parse_helm_images(text: &str) -> Vec<(String, String)> {
+    let mut images = Vec::new();
+    let mut pending_repository: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim().trim_start_matches('-').trim();
+        if trimmed.contains("{{") || trimmed.contains("${") {
+            pending_repository = None;
+            continue;
+        }
+        if let Some(value) = trimmed
+            .strip_prefix("image:")
+            .or_else(|| trimmed.strip_prefix("image :"))
+        {
+            if let Some(pair) = split_image_ref(&unquote(value)) {
+                images.push(pair);
+            }
+            pending_repository = None;
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("repository:") {
+            pending_repository = Some(unquote(value));
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("tag:")
+            && let Some(repository) = pending_repository.take()
+        {
+            let tag = unquote(value);
+            if let Some(pair) = image_from_repository_tag(&repository, &tag) {
+                images.push(pair);
+            }
+        }
+    }
+    images
+}
+
+fn split_image_ref(raw: &str) -> Option<(String, String)> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.contains(' ') || raw.starts_with('{') {
+        return None;
+    }
+    let without_digest = raw.split('@').next().unwrap_or(raw);
+    let (repo, tag) = without_digest.rsplit_once(':')?;
+    image_from_repository_tag(repo, tag)
+}
+
+fn image_from_repository_tag(repository: &str, tag: &str) -> Option<(String, String)> {
+    let repository = repository
+        .trim()
+        .trim_start_matches("docker.io/")
+        .trim_start_matches("library/");
+    let tag = tag.trim();
+    if repository.is_empty() || tag.is_empty() || tag.contains(['{', '/', ' ']) {
+        return None;
+    }
+    if repository.contains('{') {
+        return None;
+    }
+    let name = repository.rsplit('/').next().unwrap_or(repository);
+    if name.is_empty() {
+        return None;
+    }
+    Some((name.to_string(), tag.to_string()))
+}
+
 fn parse_conanfile_txt(text: &str) -> Vec<(String, String)> {
     let mut in_requires = false;
     let mut deps = Vec::new();
@@ -622,5 +836,35 @@ mod tests {
             parse_conanfile_py(text),
             vec![("zlib".to_string(), "1.2.13".to_string())]
         );
+    }
+
+    #[test]
+    fn rpm_manifest_skips_gpg_and_joins_epoch() {
+        let text = "gpg-pubkey|0|abc|1|x86_64\nopenssl|1|1.1.1k|1.el8|x86_64\ncurl|0|7.61.1|14.el8|x86_64\n";
+        assert_eq!(
+            parse_rpm_manifest(text),
+            vec![
+                ("openssl".to_string(), "1:1.1.1k-1.el8".to_string()),
+                ("curl".to_string(), "7.61.1-14.el8".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn pacman_desc_reads_name_and_version() {
+        let text = "%NAME%\nlinux\n\n%VERSION%\n6.6.1-1\n";
+        assert_eq!(
+            parse_pacman_desc(text),
+            Some(("linux".to_string(), "6.6.1-1".to_string()))
+        );
+    }
+
+    #[test]
+    fn helm_values_collect_image_and_repository_tag() {
+        let text = "image: nginx:1.25.3\napp:\n  repository: bitnami/postgresql\n  tag: \"16.1.0\"\nignored: \"{{ .Values.image }}\"\n";
+        let images = parse_helm_images(text);
+        assert!(images.contains(&("nginx".to_string(), "1.25.3".to_string())));
+        assert!(images.contains(&("postgresql".to_string(), "16.1.0".to_string())));
+        assert!(!images.iter().any(|(name, _)| name.contains('{')));
     }
 }

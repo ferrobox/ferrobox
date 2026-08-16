@@ -228,7 +228,11 @@ function AssayBody({
                   <span className="ml-2 font-mono text-muted-foreground">{component.version}</span>
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {component.kind === "root" ? "ensayado" : "dependencia"}
+                  {component.kind === "root"
+                    ? "ensayado"
+                    : component.kind === "transitive"
+                      ? "transitiva"
+                      : "dependencia"}
                 </span>
               </li>
             ))}

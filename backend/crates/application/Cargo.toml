@@ -24,6 +24,7 @@ uuid.workspace = true
 chrono.workspace = true
 flate2.workspace = true
 tar.workspace = true
+zip.workspace = true
 tokio = { workspace = true, features = ["time"] }
 
 [features]
