@@ -14,6 +14,8 @@ import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { QuotaRequest } from "@/api/generated/QuotaRequest";
+import type { QuotaResponse } from "@/api/generated/QuotaResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
@@ -405,6 +407,17 @@ export function runAssay(
 
 export function rerunAllAssays(): Promise<AssayRerunResponse> {
   return request<AssayRerunResponse>("/assays/rerun", { method: "POST" });
+}
+
+export function getQuota(repositoryId: string): Promise<QuotaResponse> {
+  return request<QuotaResponse>(`/repositories/${repositoryId}/quota`);
+}
+
+export function saveQuota(repositoryId: string, payload: QuotaRequest): Promise<QuotaResponse> {
+  return request<QuotaResponse>(`/repositories/${repositoryId}/quota`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getRetentionPolicy(repositoryId: string): Promise<RetentionPolicyResponse> {

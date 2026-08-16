@@ -22,4 +22,7 @@ pub mod assay_store;
 /// Adaptador de `RetentionStore`.
 pub mod retention_store;
 
+/// Adaptador de `QuotaStore`.
+pub mod quota_store;
+
 mod ecosystem_column;

@@ -20,8 +20,10 @@ use ferrobox_application::manage_users::{
 };
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
+use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
+use ferrobox_domain::quota::StorageQuotaError;
 use ferrobox_domain::retention::RetentionPolicyError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
@@ -96,6 +98,7 @@ impl From<PublishArtifactError> for ApiError {
         match err {
             PublishArtifactError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
             PublishArtifactError::ReadOnlyRepository => Self::BadRequest(err.to_string()),
+            PublishArtifactError::Quota(inner) => inner.into(),
             other => Self::Internal(other.to_string()),
         }
     }
@@ -148,6 +151,7 @@ impl From<PackagingError> for ApiError {
             | PackagingError::ReadOnlyRepository
             | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
+            PackagingError::Quota(inner) => inner.into(),
             PackagingError::PackageNotFound(_)
             | PackagingError::VersionNotFound(_)
             | PackagingError::FileNotFound(_) => {
@@ -293,6 +297,27 @@ impl From<ChangePasswordError> for ApiError {
 impl From<RetentionPolicyError> for ApiError {
     fn from(err: RetentionPolicyError) -> Self {
         Self::BadRequest(err.to_string())
+    }
+}
+
+impl From<StorageQuotaError> for ApiError {
+    fn from(err: StorageQuotaError) -> Self {
+        Self::BadRequest(err.to_string())
+    }
+}
+
+impl From<QuotaError> for ApiError {
+    fn from(err: QuotaError) -> Self {
+        match err {
+            QuotaError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            QuotaError::AlloyRepository
+            | QuotaError::InvalidQuota(_)
+            | QuotaError::MissingSchema => Self::BadRequest(err.to_string()),
+            QuotaError::Exceeded { .. } => Self::Conflict(err.to_string()),
+            QuotaError::Repositories(_) | QuotaError::Artifacts(_) | QuotaError::Policy(_) => {
+                Self::Internal(err.to_string())
+            }
+        }
     }
 }
 

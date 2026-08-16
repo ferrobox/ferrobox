@@ -130,6 +130,10 @@ pub enum PackagingError {
     /// La respuesta del *upstream* no tiene el formato esperado.
     #[error("invalid upstream response: {0}")]
     InvalidUpstream(String),
+
+    /// El binario no cabe en la cuota de almacenamiento del repositorio.
+    #[error(transparent)]
+    Quota(#[from] crate::quota::QuotaError),
 }
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.
@@ -400,6 +404,17 @@ pub(crate) fn notify_assay(
     if let Some(assays) = assays {
         assays.schedule(repository_id, coordinate.clone());
     }
+}
+
+pub(crate) async fn ensure_quota(
+    quota: Option<&crate::quota::QuotaService>,
+    repository_id: RepositoryId,
+    additional_bytes: u64,
+) -> Result<(), PackagingError> {
+    if let Some(quota) = quota {
+        quota.ensure_can_store(repository_id, additional_bytes).await?;
+    }
+    Ok(())
 }
 
 /// Selecciona, en tiempo de ejecución, la [`PackagingStrategy`] adecuada

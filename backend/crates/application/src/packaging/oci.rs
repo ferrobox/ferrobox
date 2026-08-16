@@ -32,10 +32,11 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    notify_assay, OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy,
-    PublishOutcome,
+    ensure_quota, notify_assay, OciManifestDocument, PackageSearchHit, PackagingError,
+    PackagingStrategy, PublishOutcome,
 };
 use crate::assay::AssayService;
+use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -56,6 +57,7 @@ pub struct OciPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     ecosystem: PackageEcosystem,
     assays: Option<AssayService>,
+    quota: Option<QuotaService>,
 }
 
 impl OciPackagingStrategy {
@@ -96,6 +98,7 @@ impl OciPackagingStrategy {
             http_client,
             ecosystem,
             assays: None,
+            quota: None,
         }
     }
 
@@ -103,6 +106,13 @@ impl OciPackagingStrategy {
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
+        self
+    }
+
+    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    #[must_use]
+    pub fn with_quota(mut self, quota: QuotaService) -> Self {
+        self.quota = Some(quota);
         self
     }
 
@@ -184,6 +194,7 @@ impl OciPackagingStrategy {
 
         let checksum = sha256_checksum(&body);
         let artifact = Artifact::new(repository.id(), checksum, body.len() as u64);
+        ensure_quota(self.quota.as_ref(), repository.id(), body.len() as u64).await?;
         self.storage
             .put(&storage_key_for(artifact.id()), body.clone())
             .await?;
@@ -269,6 +280,7 @@ impl OciPackagingStrategy {
 
         let checksum = sha256_checksum(&body);
         let artifact = Artifact::new(repository.id(), checksum, body.len() as u64);
+        ensure_quota(self.quota.as_ref(), repository.id(), body.len() as u64).await?;
         self.storage
             .put(&storage_key_for(artifact.id()), body.clone())
             .await?;

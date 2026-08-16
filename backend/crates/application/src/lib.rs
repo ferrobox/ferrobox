@@ -70,5 +70,8 @@ pub mod assay;
 /// Retención de versiones y recolección de basura.
 pub mod retention;
 
+/// Cuota de almacenamiento por repositorio.
+pub mod quota;
+
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_support;
