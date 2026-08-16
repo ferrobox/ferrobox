@@ -4,4 +4,9 @@ import type { RoleDto } from "./RoleDto";
 /**
  * Representación de un usuario en las respuestas de la API.
  */
-export type UserResponse = { id: string, username: string, role: RoleDto, };
+export type UserResponse = { id: string, username: string, 
+/**
+ * Correo de la cuenta, o `null` si el administrador de arranque
+ * no tiene uno.
+ */
+email: string | null, role: RoleDto, };

@@ -16,7 +16,7 @@ use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
 use ferrobox_application::manage_users::{
-    ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError,
+    ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
@@ -217,8 +217,10 @@ impl From<AuthenticateTokenError> for ApiError {
 impl From<CreateUserError> for ApiError {
     fn from(err: CreateUserError) -> Self {
         match &err {
+            CreateUserError::InvalidPassword(_) => Self::BadRequest(err.to_string()),
             CreateUserError::Persistence(
-                ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_),
+                ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_)
+                | ferrobox_ports::user_store::UserStoreError::DuplicateEmail(_),
             ) => Self::Conflict(err.to_string()),
             CreateUserError::PasswordHashing(_)
             | CreateUserError::Persistence(ferrobox_ports::user_store::UserStoreError::Backend(
@@ -284,11 +286,23 @@ impl From<ChangeUserRoleError> for ApiError {
 impl From<ChangePasswordError> for ApiError {
     fn from(err: ChangePasswordError) -> Self {
         match err {
-            ChangePasswordError::EmptyPassword | ChangePasswordError::InvalidCurrentPassword => {
-                Self::BadRequest(err.to_string())
-            }
+            ChangePasswordError::InvalidPassword(_)
+            | ChangePasswordError::InvalidCurrentPassword => Self::BadRequest(err.to_string()),
             ChangePasswordError::NotFound => Self::NotFound(err.to_string()),
             ChangePasswordError::PasswordHashing(_) | ChangePasswordError::Persistence(_) => {
+                Self::Internal(err.to_string())
+            }
+        }
+    }
+}
+
+impl From<ResetUserPasswordError> for ApiError {
+    fn from(err: ResetUserPasswordError) -> Self {
+        match err {
+            ResetUserPasswordError::InvalidPassword(_) => Self::BadRequest(err.to_string()),
+            ResetUserPasswordError::CannotResetSelf => Self::Conflict(err.to_string()),
+            ResetUserPasswordError::NotFound => Self::NotFound(err.to_string()),
+            ResetUserPasswordError::PasswordHashing(_) | ResetUserPasswordError::Persistence(_) => {
                 Self::Internal(err.to_string())
             }
         }

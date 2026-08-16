@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, username, password_hash, role\n            FROM users\n            WHERE username = $1\n            ",
+  "query": "\n            SELECT id, username, password_hash, role, email\n            FROM users\n            WHERE username = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "role",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "email",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "8c1469d42113192e947c1f3cabb9efff4827f8c67411b365a3f510e00c87efc6"
+  "hash": "2ec956c68013e8f5bfb2911b7cbb17ae8ca608a845fbb2bab1919e4021923e94"
 }

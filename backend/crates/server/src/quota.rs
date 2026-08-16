@@ -62,6 +62,7 @@ mod tests {
     };
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
+        ResetUserPasswordUseCase,
     };
     use ferrobox_application::packaging::PackagingRegistry;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
@@ -76,7 +77,7 @@ mod tests {
     use ferrobox_domain::api_token::ApiTokenName;
     use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::RepositoryName;
-    use ferrobox_domain::user::{Role, Username};
+    use ferrobox_domain::user::Role;
     use serde_json::Value;
     use std::sync::Arc;
     use tower::ServiceExt;
@@ -164,15 +165,12 @@ mod tests {
             list_users: ListUsersUseCase::new(user_store.clone()),
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
+            reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
         });
 
         let developer = state
             .create_user
-            .execute(
-                Username::parse("developer").unwrap(),
-                "secret",
-                Role::Developer,
-            )
+            .seed("developer", Role::Developer)
             .await
             .unwrap();
         let token = state
@@ -183,7 +181,7 @@ mod tests {
             .plaintext_secret;
         let reader = state
             .create_user
-            .execute(Username::parse("reader").unwrap(), "secret", Role::Reader)
+            .seed("reader", Role::Reader)
             .await
             .unwrap();
         let reader_token = state

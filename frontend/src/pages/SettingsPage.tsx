@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ApiError } from "@/api/client";
 import { useChangePassword, useSettings } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
+import { PASSWORD_POLICY_HINT, passwordMeetsPolicy } from "@/auth/passwordPolicy";
 import { roleLabel } from "@/auth/roles";
 import { GarbageCollectionCard } from "@/components/cleanup/GarbageCollectionCard";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -30,6 +31,11 @@ export function SettingsPage() {
 
     if (newPassword !== confirmPassword) {
       toast.error("La nueva contraseña y su confirmación no coinciden");
+      return;
+    }
+
+    if (!passwordMeetsPolicy(newPassword)) {
+      toast.error(PASSWORD_POLICY_HINT);
       return;
     }
 
@@ -83,6 +89,10 @@ export function SettingsPage() {
                 <dd className="mt-1 font-medium text-foreground">{user?.username ?? "—"}</dd>
               </div>
               <div>
+                <dt className="text-muted-foreground">Correo</dt>
+                <dd className="mt-1 font-medium text-foreground">{user?.email ?? "—"}</dd>
+              </div>
+              <div>
                 <dt className="text-muted-foreground">Rol</dt>
                 <dd className="mt-1">
                   {user ? <Badge variant="outline">{roleLabel(user.role)}</Badge> : "—"}
@@ -112,6 +122,7 @@ export function SettingsPage() {
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
                 />
+                <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_HINT}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirmar nueva contraseña</Label>
@@ -128,6 +139,10 @@ export function SettingsPage() {
                 <KeyRound />
                 {changePassword.isPending ? "Guardando…" : "Cambiar contraseña"}
               </Button>
+              <p className="text-xs text-muted-foreground">
+                Si olvidaste la contraseña, pide a un administrador que la restablezca. No se
+                envían correos de recuperación.
+              </p>
             </form>
           </CardContent>
         </Card>

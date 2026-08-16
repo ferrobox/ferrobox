@@ -57,6 +57,7 @@ use ferrobox_application::manage_api_tokens::{
 };
 use ferrobox_application::manage_users::{
     ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
+    ResetUserPasswordUseCase,
 };
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
@@ -100,6 +101,7 @@ struct AppState {
     list_users: ListUsersUseCase,
     delete_user: DeleteUserUseCase,
     change_user_role: ChangeUserRoleUseCase,
+    reset_user_password: ResetUserPasswordUseCase,
 }
 
 #[tokio::main]
@@ -178,6 +180,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .route(
             "/users/{user_id}",
             patch(users::update_user_role).delete(users::delete_user),
+        )
+        .route(
+            "/users/{user_id}/password",
+            post(users::reset_user_password),
         )
         .route(
             "/repositories",
@@ -374,7 +380,8 @@ fn build_app_state(
         create_user: CreateUserUseCase::new(user_store.clone()),
         list_users: ListUsersUseCase::new(user_store.clone()),
         delete_user: DeleteUserUseCase::new(user_store.clone()),
-        change_user_role: ChangeUserRoleUseCase::new(user_store),
+        change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
+        reset_user_password: ResetUserPasswordUseCase::new(user_store),
     }
 }
 

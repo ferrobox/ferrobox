@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ferrobox_domain::user::Username;
+use ferrobox_domain::user::{Username, validate_password_policy};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use thiserror::Error;
 
@@ -9,9 +9,9 @@ use crate::auth_crypto::{PasswordHashError, hash_password, verify_password};
 /// Motivos por los que cambiar la contraseña puede fallar.
 #[derive(Debug, Error)]
 pub enum ChangePasswordError {
-    /// La nueva contraseña está vacía.
-    #[error("password cannot be empty")]
-    EmptyPassword,
+    /// La nueva contraseña no cumple la política de la instancia.
+    #[error(transparent)]
+    InvalidPassword(#[from] ferrobox_domain::user::PasswordPolicyError),
 
     /// La contraseña actual no coincide.
     #[error("current password is incorrect")]
@@ -46,18 +46,16 @@ impl ChangePasswordUseCase {
     ///
     /// # Errors
     ///
-    /// Devuelve [`ChangePasswordError`] si la nueva contraseña está
-    /// vacía, la actual no coincide, el usuario no existe, o fallan el
-    /// hashing o la persistencia.
+    /// Devuelve [`ChangePasswordError`] si la nueva contraseña no
+    /// cumple la política, la actual no coincide, el usuario no
+    /// existe, o fallan el hashing o la persistencia.
     pub async fn execute(
         &self,
         username: &Username,
         current_password: &str,
         new_password: &str,
     ) -> Result<(), ChangePasswordError> {
-        if new_password.is_empty() {
-            return Err(ChangePasswordError::EmptyPassword);
-        }
+        validate_password_policy(new_password)?;
 
         let Some((user, password_hash)) = self
             .user_store
@@ -109,13 +107,13 @@ mod tests {
         let api_token_store = Arc::new(InMemoryApiTokenStore::default());
 
         ChangePasswordUseCase::new(user_store.clone())
-            .execute(&username, "old-secret", "new-secret")
+            .execute(&username, "old-secret", "NewSecret1")
             .await
             .unwrap();
 
         let login = LoginUseCase::new(user_store, api_token_store);
         login
-            .execute(username.clone(), "new-secret")
+            .execute(username.clone(), "NewSecret1")
             .await
             .unwrap();
 
@@ -128,7 +126,7 @@ mod tests {
         let (user_store, username) = seeded_user("old-secret").await;
 
         let err = ChangePasswordUseCase::new(user_store.clone())
-            .execute(&username, "nope", "new-secret")
+            .execute(&username, "nope", "NewSecret1")
             .await
             .unwrap_err();
 
@@ -142,7 +140,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_new_password_is_rejected() {
+    async fn weak_new_password_is_rejected() {
         let (user_store, username) = seeded_user("old-secret").await;
 
         let err = ChangePasswordUseCase::new(user_store)
@@ -150,7 +148,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, ChangePasswordError::EmptyPassword));
+        assert!(matches!(err, ChangePasswordError::InvalidPassword(_)));
     }
 
     #[tokio::test]
