@@ -2,6 +2,7 @@
 
 mod cyclonedx;
 mod extract;
+mod layers;
 mod osv;
 
 use std::sync::Arc;
@@ -18,9 +19,11 @@ use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
+use ferrobox_ports::storage::{StorageError, StoragePort};
 use thiserror::Error;
 
-use self::extract::{extract_components, osv_ecosystem};
+use self::extract::osv_query_target;
+use self::layers::extract_inventory;
 use self::osv::query_findings;
 
 pub use self::cyclonedx::to_cyclonedx;
@@ -56,6 +59,10 @@ pub enum AssayError {
     /// Fallo al leer repositorios.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
+
+    /// Fallo al leer blobs o manifiestos del almacenamiento.
+    #[error(transparent)]
+    Storage(#[from] StorageError),
 }
 
 /// Caso de uso: listar, obtener y ejecutar ensayes.
@@ -63,6 +70,7 @@ pub struct AssayService {
     assays: Arc<dyn AssayStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     repository_store: Arc<dyn RepositoryStore>,
+    storage: Arc<dyn StoragePort>,
     http_client: Arc<dyn HttpClient>,
 }
 
@@ -73,12 +81,14 @@ impl AssayService {
         assays: Arc<dyn AssayStore>,
         package_index_store: Arc<dyn PackageIndexStore>,
         repository_store: Arc<dyn RepositoryStore>,
+        storage: Arc<dyn StoragePort>,
         http_client: Arc<dyn HttpClient>,
     ) -> Self {
         Self {
             assays,
             package_index_store,
             repository_store,
+            storage,
             http_client,
         }
     }
@@ -186,28 +196,20 @@ impl AssayService {
             .await?
             .map_or_else(AssayId::new, |assay| assay.id());
 
-        let components = extract_components(
-            coordinate.ecosystem(),
-            coordinate.name().as_str(),
-            coordinate.version().as_str(),
+        let components = extract_inventory(
+            self.storage.as_ref(),
+            self.package_index_store.as_ref(),
+            repository_id,
+            coordinate,
             &entry,
-        );
+        )
+        .await;
         let scanned_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+        let can_query = components
+            .iter()
+            .any(|component| osv_query_target(component, coordinate.ecosystem()).is_some());
 
-        let assay = if osv_ecosystem(coordinate.ecosystem()).is_none() {
-            Assay::from_parts(
-                existing_id,
-                repository_id,
-                coordinate.clone(),
-                AssayStatus::Unsupported,
-                Some(scanned_at),
-                Some(
-                    "Assay cubre npm, PyPI y Cargo. El ensaye de imágenes OCI, Helm y Conan necesita el inventario de capas y llegará en una rebanada siguiente.".to_string(),
-                ),
-                components,
-                Vec::new(),
-            )
-        } else {
+        let assay = if can_query {
             match query_findings(
                 self.http_client.as_ref(),
                 coordinate.ecosystem(),
@@ -248,6 +250,28 @@ impl AssayService {
                     Vec::new(),
                 ),
             }
+        } else if components.len() > 1 {
+            Assay::from_parts(
+                existing_id,
+                repository_id,
+                coordinate.clone(),
+                AssayStatus::Ready,
+                Some(scanned_at),
+                composition_only_message(coordinate.ecosystem()),
+                components,
+                Vec::new(),
+            )
+        } else {
+            Assay::from_parts(
+                existing_id,
+                repository_id,
+                coordinate.clone(),
+                AssayStatus::Unsupported,
+                Some(scanned_at),
+                Some(unsupported_message(coordinate.ecosystem())),
+                components,
+                Vec::new(),
+            )
         };
 
         self.assays.upsert(&assay).await?;
@@ -313,6 +337,32 @@ impl AssayService {
     }
 }
 
+fn composition_only_message(ecosystem: PackageEcosystem) -> Option<String> {
+    match ecosystem {
+        PackageEcosystem::Helm => Some(
+            "OSV (Open Source Vulnerabilities) no indexa charts Helm. Se muestra la composición de Chart.yaml.".to_string(),
+        ),
+        PackageEcosystem::Conan => Some(
+            "OSV (Open Source Vulnerabilities) no indexa Conan. Se muestra la composición de la receta.".to_string(),
+        ),
+        _ => None,
+    }
+}
+
+fn unsupported_message(ecosystem: PackageEcosystem) -> String {
+    match ecosystem {
+        PackageEcosystem::Oci | PackageEcosystem::Helm => {
+            "No hay capas locales para inventariar (apk/dpkg o Chart.yaml). Haz pull o push de la imagen/chart para cachear los blobs y vuelve a ensayar.".to_string()
+        }
+        PackageEcosystem::Conan => {
+            "No se encontró conanfile.py ni conanfile.txt con requires en esta receta.".to_string()
+        }
+        _ => {
+            "Assay cubre npm, PyPI, Cargo y el sistema de ficheros de imágenes OCI (Alpine/Debian/Ubuntu).".to_string()
+        }
+    }
+}
+
 fn entry_version_matches(entry: &Bytes, version: &str) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(entry) else {
         return false;
@@ -340,11 +390,16 @@ fn entry_version_matches(entry: &Bytes, version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage_key::storage_key_for;
     use crate::test_support::{
         InMemoryAssayStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryRepositoryStore,
+        InMemoryStorage,
     };
+    use ferrobox_domain::ids::ArtifactId;
     use ferrobox_domain::package_coordinate::PackageName;
     use ferrobox_domain::repository::{RepositoryKind, RepositoryName};
+    use ferrobox_ports::storage::StoragePort;
+    use sha2::{Digest, Sha256};
 
     fn npm_forge() -> Repository {
         Repository::new(
@@ -435,6 +490,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             http,
         );
         let assay = service
@@ -470,6 +526,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             http,
         );
         let first = service
@@ -511,6 +568,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             http,
         );
         let assay = service
@@ -554,6 +612,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
         );
         let assay = service
@@ -597,6 +656,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
         );
         let assay = service
@@ -641,6 +701,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             index,
             repos,
+            Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
         );
         let assay = service
@@ -656,6 +717,197 @@ mod tests {
         assert!(assay.findings().is_empty());
     }
 
+    fn gzip_tar_file(path: &str, content: &str) -> Bytes {
+        use std::io::Write;
+        let mut tar_buf = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_buf);
+            let data = content.as_bytes();
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append(&header, data).unwrap();
+            builder.finish().unwrap();
+        }
+        let mut encoder =
+            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&tar_buf).unwrap();
+        Bytes::from(encoder.finish().unwrap())
+    }
+
+    fn content_digest(body: &[u8]) -> String {
+        format!("sha256:{:x}", Sha256::digest(body))
+    }
+
+    #[tokio::test]
+    async fn oci_alpine_layer_queries_osv_for_apk_packages() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository = Repository::new(
+            RepositoryName::parse("images").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repos.save(&repository).await.unwrap();
+
+        let layer = gzip_tar_file(
+            "lib/apk/db/installed",
+            "P:busybox\nV:1.36.1-r19\n\n",
+        );
+        let layer_digest = content_digest(&layer);
+        let layer_id = ArtifactId::new();
+        storage
+            .put(&storage_key_for(layer_id), layer.clone())
+            .await
+            .unwrap();
+        let blob_coordinate = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("_blob").unwrap(),
+            PackageVersion::parse(layer_digest.clone()).unwrap(),
+        );
+        index
+            .upsert_entry(
+                repository.id(),
+                &blob_coordinate,
+                Some(layer_id),
+                Bytes::from(format!(
+                    r#"{{"digest":"{layer_digest}","artifact_id":"{layer_id}","size":{}}}"#,
+                    layer.len()
+                )),
+            )
+            .await
+            .unwrap();
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": layer_digest,
+                "size": layer.len()
+            }]
+        });
+        let manifest_bytes = Bytes::from(manifest.to_string());
+        let manifest_id = ArtifactId::new();
+        storage
+            .put(&storage_key_for(manifest_id), manifest_bytes)
+            .await
+            .unwrap();
+        let tag_coordinate = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("alpine").unwrap(),
+            PackageVersion::parse("latest").unwrap(),
+        );
+        index
+            .upsert_entry(
+                repository.id(),
+                &tag_coordinate,
+                Some(manifest_id),
+                Bytes::from(format!(
+                    r#"{{"name":"alpine","reference":"latest","digest":"sha256:dead","media_type":"application/vnd.oci.image.manifest.v1+json","size":1,"artifact_id":"{manifest_id}"}}"#
+                )),
+            )
+            .await
+            .unwrap();
+
+        http.stub(
+            "https://api.osv.dev/v1/querybatch",
+            200,
+            Bytes::from(
+                serde_json::json!({
+                    "results": [{
+                        "vulns": [{
+                            "id": "CVE-2022-28391",
+                            "summary": "busybox issue",
+                            "database_specific": { "severity": "MEDIUM" },
+                            "affected": [{ "ranges": [{ "events": [{ "fixed": "1.36.2-r0" }] }] }]
+                        }]
+                    }]
+                })
+                .to_string(),
+            ),
+        );
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            storage,
+            http,
+        );
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Oci, "alpine", "latest")
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Ready);
+        assert!(assay.components().iter().any(|c| c.name() == "busybox"));
+        assert_eq!(assay.counts().medium, 1);
+        assert_eq!(assay.findings()[0].component_name(), "busybox");
+    }
+
+    #[tokio::test]
+    async fn conan_recipe_lists_requires_without_osv() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repository = Repository::new(
+            RepositoryName::parse("conan-releases").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Conan,
+        )
+        .unwrap();
+        repos.save(&repository).await.unwrap();
+        let file_id = ArtifactId::new();
+        storage
+            .put(
+                &storage_key_for(file_id),
+                Bytes::from("[requires]\nzlib/1.2.13\n"),
+            )
+            .await
+            .unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Conan,
+            PackageName::parse("hello").unwrap(),
+            PackageVersion::parse("0.1@_:_").unwrap(),
+        );
+        index
+            .upsert_entry(
+                repository.id(),
+                &coordinate,
+                None,
+                Bytes::from(format!(
+                    r#"{{"name":"hello","version":"0.1","user":"_","channel":"_","yanked":false,"files":[{{"filename":"conanfile.txt","artifact_id":"{file_id}"}}],"revisions":[]}}"#
+                )),
+            )
+            .await
+            .unwrap();
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            storage,
+            Arc::new(InMemoryHttpClient::default()),
+        );
+        let assay = service
+            .run(
+                repository.id(),
+                PackageEcosystem::Conan,
+                "hello",
+                "0.1@_:_",
+            )
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Ready);
+        assert!(assay.components().iter().any(|c| c.name() == "zlib"));
+        assert!(assay.findings().is_empty());
+        assert!(assay.error_message().unwrap().contains("Conan"));
+    }
+
     #[tokio::test]
     async fn missing_package_is_not_found() {
         let repos = Arc::new(InMemoryRepositoryStore::default());
@@ -665,6 +917,7 @@ mod tests {
             Arc::new(InMemoryAssayStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             repos,
+            Arc::new(InMemoryStorage::default()),
             Arc::new(InMemoryHttpClient::default()),
         );
         let err = service
