@@ -170,7 +170,7 @@ impl RetentionService {
         Ok(policy)
     }
 
-    /// Simula la política **sin borrar nada**, como el dry-run de Harbor.
+    /// Simula la política **sin borrar nada**.
     ///
     /// # Errors
     ///
