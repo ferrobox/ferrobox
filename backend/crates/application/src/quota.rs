@@ -70,6 +70,7 @@ pub enum QuotaError {
 
 /// Caso de uso: cuota de almacenamiento.
 #[derive(Clone)]
+#[allow(clippy::struct_field_names)]
 pub struct QuotaService {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -190,7 +191,6 @@ mod tests {
     use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
     use ferrobox_ports::artifact_store::ArtifactStore;
-    use ferrobox_ports::quota_store::QuotaStore;
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use crate::test_support::{
