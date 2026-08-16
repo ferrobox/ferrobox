@@ -9,6 +9,7 @@ import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenReques
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateRepositoryResponse } from "@/api/generated/CreateRepositoryResponse";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
+import type { ResetUserPasswordRequest } from "@/api/generated/ResetUserPasswordRequest";
 import type { ErrorResponse } from "@/api/generated/ErrorResponse";
 import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
@@ -162,6 +163,16 @@ export function updateUserRole(
 ): Promise<UserResponse> {
   return request<UserResponse>(`/users/${userId}`, {
     method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetUserPassword(
+  userId: string,
+  payload: ResetUserPasswordRequest,
+): Promise<void> {
+  return request<void>(`/users/${userId}/password`, {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }

@@ -98,6 +98,9 @@ export function LoginPage() {
           <Button type="submit" className="w-full" disabled={submitting}>
             {submitting ? "Entrando…" : "Entrar"}
           </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            Si olvidaste la contraseña, pide a un administrador que la restablezca.
+          </p>
         </form>
       </div>
     </div>

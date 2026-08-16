@@ -241,6 +241,13 @@ export function useUpdateUserRole() {
   });
 }
 
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password: string }) =>
+      api.resetUserPassword(userId, { password }),
+  });
+}
+
 export function useSettings() {
   return useQuery({
     queryKey: queryKeys.settings,

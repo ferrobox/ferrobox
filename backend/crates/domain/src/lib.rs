@@ -26,7 +26,7 @@ pub mod ids;
 /// repositorio esté publicada.
 pub mod package_coordinate;
 
-/// La entidad `User` y el objeto de valor `Username`.
+/// La entidad `User` y los objetos de valor `Username` y `Email`.
 pub mod user;
 
 /// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.

@@ -380,6 +380,15 @@ impl UserStore for InMemoryUserStore {
             return Err(UserStoreError::DuplicateUsername(user.username().clone()));
         }
 
+        if let Some(email) = user.email() {
+            let email_taken_by_another = users.values().any(|(existing, _)| {
+                existing.id() != user.id() && existing.email() == Some(email)
+            });
+            if email_taken_by_another {
+                return Err(UserStoreError::DuplicateEmail(email.clone()));
+            }
+        }
+
         users.insert(user.id(), (user.clone(), password_hash.to_string()));
         Ok(())
     }

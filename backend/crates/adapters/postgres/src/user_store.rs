@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::UserId;
-use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_domain::user::{Email, Role, User, Username};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use sqlx::PgPool;
 use thiserror::Error;
@@ -28,20 +28,42 @@ fn backend_error(message: impl Into<String>) -> UserStoreError {
     UserStoreError::Backend(Box::new(RowConversionError(message.into())))
 }
 
-fn translate_save_error(username: &Username, err: &sqlx::Error) -> UserStoreError {
-    if let sqlx::Error::Database(db_err) = err
-        && db_err.constraint() == Some("users_username_key")
-    {
-        return UserStoreError::DuplicateUsername(username.clone());
+fn translate_save_error(user: &User, err: &sqlx::Error) -> UserStoreError {
+    if let sqlx::Error::Database(db_err) = err {
+        match db_err.constraint() {
+            Some("users_username_key") => {
+                return UserStoreError::DuplicateUsername(user.username().clone());
+            }
+            Some("users_email_key") => {
+                if let Some(email) = user.email() {
+                    return UserStoreError::DuplicateEmail(email.clone());
+                }
+            }
+            _ => {}
+        }
     }
 
     backend_error(err.to_string())
 }
 
-fn row_to_user(id: Uuid, username: String, role: &str) -> Result<User, UserStoreError> {
+fn row_to_user(
+    id: Uuid,
+    username: String,
+    role: &str,
+    email: Option<String>,
+) -> Result<User, UserStoreError> {
     let username = Username::parse(username).map_err(|err| backend_error(err.to_string()))?;
     let role = Role::parse(role).map_err(|err| backend_error(err.to_string()))?;
-    Ok(User::from_parts(UserId::from(id), username, role))
+    let email = email
+        .map(Email::parse)
+        .transpose()
+        .map_err(|err| backend_error(err.to_string()))?;
+    Ok(User::from_parts(
+        UserId::from(id),
+        username,
+        role,
+        email,
+    ))
 }
 
 #[async_trait]
@@ -52,24 +74,27 @@ impl UserStore for PostgresUserStore {
         password_hash: &str,
     ) -> Result<(), UserStoreError> {
         let id: Uuid = user.id().into();
+        let email = user.email().map(Email::as_str);
 
         sqlx::query!(
             r#"
-            INSERT INTO users (id, username, password_hash, role)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO users (id, username, password_hash, role, email)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO UPDATE
             SET username = EXCLUDED.username,
                 password_hash = EXCLUDED.password_hash,
-                role = EXCLUDED.role
+                role = EXCLUDED.role,
+                email = EXCLUDED.email
             "#,
             id,
             user.username().as_str(),
             password_hash,
             user.role().as_str(),
+            email,
         )
         .execute(&self.pool)
         .await
-        .map_err(|err| translate_save_error(user.username(), &err))?;
+        .map_err(|err| translate_save_error(user, &err))?;
 
         Ok(())
     }
@@ -79,7 +104,7 @@ impl UserStore for PostgresUserStore {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, username, role
+            SELECT id, username, role, email
             FROM users
             WHERE id = $1
             "#,
@@ -89,7 +114,7 @@ impl UserStore for PostgresUserStore {
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|row| row_to_user(row.id, row.username, &row.role))
+        row.map(|row| row_to_user(row.id, row.username, &row.role, row.email))
             .transpose()
     }
 
@@ -99,7 +124,7 @@ impl UserStore for PostgresUserStore {
     ) -> Result<Option<(User, String)>, UserStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, username, password_hash, role
+            SELECT id, username, password_hash, role, email
             FROM users
             WHERE username = $1
             "#,
@@ -110,7 +135,7 @@ impl UserStore for PostgresUserStore {
         .map_err(|err| backend_error(err.to_string()))?;
 
         row.map(|row| {
-            let user = row_to_user(row.id, row.username, &row.role)?;
+            let user = row_to_user(row.id, row.username, &row.role, row.email)?;
             Ok((user, row.password_hash))
         })
         .transpose()
@@ -119,7 +144,7 @@ impl UserStore for PostgresUserStore {
     async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, username, role
+            SELECT id, username, role, email
             FROM users
             ORDER BY username ASC
             "#,
@@ -129,7 +154,7 @@ impl UserStore for PostgresUserStore {
         .map_err(|err| backend_error(err.to_string()))?;
 
         rows.into_iter()
-            .map(|row| row_to_user(row.id, row.username, &row.role))
+            .map(|row| row_to_user(row.id, row.username, &row.role, row.email))
             .collect()
     }
 
@@ -223,7 +248,8 @@ mod tests {
         let user = User::new(
             Username::parse("integration-auth-user").unwrap(),
             Role::Developer,
-        );
+        )
+        .with_email(Some(Email::parse("integration-auth-user@example.com").unwrap()));
 
         store
             .save_with_password_hash(&user, "hash-integration")
@@ -238,6 +264,10 @@ mod tests {
 
         assert_eq!(found.0, user);
         assert_eq!(found.0.role(), Role::Developer);
+        assert_eq!(
+            found.0.email().map(Email::as_str),
+            Some("integration-auth-user@example.com")
+        );
         assert_eq!(found.1, "hash-integration");
     }
 }

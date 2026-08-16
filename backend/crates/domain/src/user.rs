@@ -5,12 +5,15 @@ use thiserror::Error;
 use crate::ids::UserId;
 
 const MAX_USERNAME_LENGTH: usize = 64;
+const MAX_EMAIL_LENGTH: usize = 254;
+const MIN_PASSWORD_LENGTH: usize = 8;
 
 /// Rol de autorización de un usuario en `FerroBox`.
 ///
 /// Los roles son deliberadamente pocos y ordenados por privilegio:
-/// `Admin` gestiona usuarios y puede escribir; `Developer` puede
-/// publicar y crear repositorios; `Reader` solo lee.
+/// `Admin` gestiona cuentas (crear, borrar, cambiar rol, restablecer
+/// contraseñas ajenas) y puede escribir; `Developer` puede publicar y
+/// crear repositorios; `Reader` solo lee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
     /// Gestión completa: usuarios, repositorios y publicación.
@@ -157,6 +160,129 @@ impl TryFrom<String> for Username {
     }
 }
 
+/// Correo electrónico validado, normalizado a minúsculas ASCII.
+///
+/// El administrador inicial creado al arrancar puede no tener correo
+/// (`None` en [`User`]). Las cuentas que crea un Admin sí lo requieren.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Email(String);
+
+/// Motivos por los que una cadena no es un [`Email`] válido.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum EmailError {
+    /// El correo no puede estar vacío.
+    #[error("email cannot be empty")]
+    Empty,
+
+    /// El correo supera la longitud máxima permitida.
+    #[error("email cannot exceed {max} characters, got {actual}")]
+    TooLong {
+        /// Longitud máxima permitida.
+        max: usize,
+        /// Longitud real recibida.
+        actual: usize,
+    },
+
+    /// El correo no tiene forma `local@dominio.tld`.
+    #[error("email is not a valid address")]
+    Invalid,
+}
+
+impl Email {
+    /// Valida y normaliza un correo electrónico.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`EmailError`] si está vacío, es demasiado largo o no
+    /// tiene forma de dirección.
+    pub fn parse(email: impl Into<String>) -> Result<Self, EmailError> {
+        let email = email.into();
+        let trimmed = email.trim();
+
+        if trimmed.is_empty() {
+            return Err(EmailError::Empty);
+        }
+
+        if trimmed.len() > MAX_EMAIL_LENGTH {
+            return Err(EmailError::TooLong {
+                max: MAX_EMAIL_LENGTH,
+                actual: trimmed.len(),
+            });
+        }
+
+        if trimmed.chars().any(char::is_whitespace) {
+            return Err(EmailError::Invalid);
+        }
+
+        let normalized = trimmed.to_ascii_lowercase();
+        let Some((local, domain)) = normalized.split_once('@') else {
+            return Err(EmailError::Invalid);
+        };
+
+        if local.is_empty()
+            || domain.is_empty()
+            || !domain.contains('.')
+            || domain.starts_with('.')
+            || domain.ends_with('.')
+            || domain.contains("..")
+        {
+            return Err(EmailError::Invalid);
+        }
+
+        Ok(Self(normalized))
+    }
+
+    /// Devuelve el correo como cadena de texto.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Email {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Motivos por los que una contraseña no cumple la política de la
+/// instancia.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PasswordPolicyError {
+    /// Menos de ocho caracteres, o le falta minúscula, mayúscula o
+    /// dígito.
+    #[error(
+        "password must be at least {min} characters and include a lowercase letter, \
+         an uppercase letter, and a digit"
+    )]
+    TooWeak {
+        /// Longitud mínima exigida.
+        min: usize,
+    },
+}
+
+/// Comprueba que `password` tenga al menos 8 caracteres, una minúscula,
+/// una mayúscula y un dígito. Aplica a crear cuentas, restablecer y
+/// cambiar la propia contraseña; no al administrador inicial de
+/// arranque.
+///
+/// # Errors
+///
+/// Devuelve [`PasswordPolicyError::TooWeak`] si no cumple la política.
+pub fn validate_password_policy(password: &str) -> Result<(), PasswordPolicyError> {
+    let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+
+    if password.len() >= MIN_PASSWORD_LENGTH && has_lower && has_upper && has_digit {
+        Ok(())
+    } else {
+        Err(PasswordPolicyError::TooWeak {
+            min: MIN_PASSWORD_LENGTH,
+        })
+    }
+}
+
 /// Un usuario de `FerroBox`: identidad autenticable con un rol de
 /// autorización, que puede poseer tokens de API.
 ///
@@ -167,16 +293,20 @@ impl TryFrom<String> for Username {
 pub struct User {
     id: UserId,
     username: Username,
+    email: Option<Email>,
     role: Role,
 }
 
 impl User {
     /// Registra un usuario nuevo, asignándole un identificador nuevo.
+    /// El correo queda vacío: úsalo para el administrador de arranque
+    /// o llama a [`User::with_email`].
     #[must_use]
     pub fn new(username: Username, role: Role) -> Self {
         Self {
             id: UserId::new(),
             username,
+            email: None,
             role,
         }
     }
@@ -185,8 +315,18 @@ impl User {
     /// identificador conocido (por ejemplo, al cargarlo desde
     /// persistencia).
     #[must_use]
-    pub fn from_parts(id: UserId, username: Username, role: Role) -> Self {
-        Self { id, username, role }
+    pub fn from_parts(
+        id: UserId,
+        username: Username,
+        role: Role,
+        email: Option<Email>,
+    ) -> Self {
+        Self {
+            id,
+            username,
+            email,
+            role,
+        }
     }
 
     /// Identificador único de este usuario.
@@ -201,10 +341,23 @@ impl User {
         &self.username
     }
 
+    /// Correo electrónico, si la cuenta lo tiene.
+    #[must_use]
+    pub fn email(&self) -> Option<&Email> {
+        self.email.as_ref()
+    }
+
     /// Rol de autorización de este usuario.
     #[must_use]
     pub fn role(&self) -> Role {
         self.role
+    }
+
+    /// Devuelve este usuario con un correo distinto. La identidad no
+    /// cambia.
+    #[must_use]
+    pub fn with_email(self, email: Option<Email>) -> Self {
+        Self { email, ..self }
     }
 
     /// Devuelve este usuario con un rol distinto. La identidad no cambia.
@@ -253,8 +406,8 @@ mod tests {
     #[test]
     fn equality_is_based_on_identity() {
         let id = UserId::new();
-        let first = User::from_parts(id, Username::parse("admin").unwrap(), Role::Admin);
-        let second = User::from_parts(id, Username::parse("other").unwrap(), Role::Reader);
+        let first = User::from_parts(id, Username::parse("admin").unwrap(), Role::Admin, None);
+        let second = User::from_parts(id, Username::parse("other").unwrap(), Role::Reader, None);
 
         assert_eq!(first, second);
     }
@@ -283,5 +436,39 @@ mod tests {
         for role in [Role::Admin, Role::Developer, Role::Reader] {
             assert_eq!(Role::parse(role.as_str()).unwrap(), role);
         }
+    }
+
+    #[test]
+    fn email_is_normalized_to_lowercase() {
+        let email = Email::parse("Ada@Example.COM").unwrap();
+        assert_eq!(email.as_str(), "ada@example.com");
+    }
+
+    #[test]
+    fn rejects_an_invalid_email() {
+        assert_eq!(Email::parse(""), Err(EmailError::Empty));
+        assert_eq!(Email::parse("not-an-email"), Err(EmailError::Invalid));
+        assert_eq!(Email::parse("ada@localhost"), Err(EmailError::Invalid));
+    }
+
+    #[test]
+    fn password_policy_requires_length_and_character_classes() {
+        assert!(validate_password_policy("Secret1a").is_ok());
+        assert_eq!(
+            validate_password_policy("secret"),
+            Err(PasswordPolicyError::TooWeak { min: 8 })
+        );
+        assert_eq!(
+            validate_password_policy("alllowercase1"),
+            Err(PasswordPolicyError::TooWeak { min: 8 })
+        );
+        assert_eq!(
+            validate_password_policy("ALLUPPERCASE1"),
+            Err(PasswordPolicyError::TooWeak { min: 8 })
+        );
+        assert_eq!(
+            validate_password_policy("NoDigitsHere"),
+            Err(PasswordPolicyError::TooWeak { min: 8 })
+        );
     }
 }

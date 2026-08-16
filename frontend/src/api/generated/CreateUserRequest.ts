@@ -4,4 +4,4 @@ import type { RoleDto } from "./RoleDto";
 /**
  * Cuerpo de la petición para crear un usuario.
  */
-export type CreateUserRequest = { username: string, password: string, role: RoleDto, };
+export type CreateUserRequest = { username: string, email: string, password: string, role: RoleDto, };

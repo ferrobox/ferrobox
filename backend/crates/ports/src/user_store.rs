@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::UserId;
-use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_domain::user::{Email, Role, User, Username};
 use thiserror::Error;
 
 /// Motivos por los que una operación de persistencia de usuarios puede
@@ -10,6 +10,10 @@ pub enum UserStoreError {
     /// Ya existe un usuario con ese nombre.
     #[error("a user named '{0}' already exists")]
     DuplicateUsername(Username),
+
+    /// Ya existe un usuario con ese correo.
+    #[error("a user with email '{0}' already exists")]
+    DuplicateEmail(Email),
 
     /// El backend de persistencia concreto devolvió un error propio.
     #[error("persistence backend failure")]
@@ -27,9 +31,10 @@ pub trait UserStore: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::DuplicateUsername`] si ya existe otro
-    /// usuario con el mismo nombre, o
-    /// [`UserStoreError::Backend`] si el backend subyacente falla.
+    /// Devuelve [`UserStoreError::DuplicateUsername`] o
+    /// [`UserStoreError::DuplicateEmail`] si ya existe otro usuario con
+    /// el mismo nombre o correo, o [`UserStoreError::Backend`] si el
+    /// backend subyacente falla.
     async fn save_with_password_hash(
         &self,
         user: &User,
@@ -105,7 +110,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use ferrobox_domain::user::Role;
+    use ferrobox_domain::user::{Email, Role};
 
     use super::*;
 
@@ -129,6 +134,15 @@ mod tests {
 
             if name_taken_by_another {
                 return Err(UserStoreError::DuplicateUsername(user.username().clone()));
+            }
+
+            if let Some(email) = user.email() {
+                let email_taken_by_another = users.values().any(|(existing, _)| {
+                    existing.id() != user.id() && existing.email() == Some(email)
+                });
+                if email_taken_by_another {
+                    return Err(UserStoreError::DuplicateEmail(email.clone()));
+                }
             }
 
             users.insert(user.id(), (user.clone(), password_hash.to_string()));
@@ -237,6 +251,29 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(UserStoreError::DuplicateUsername(_))));
+    }
+
+    #[tokio::test]
+    async fn saving_a_duplicate_email_is_rejected() {
+        let store = InMemoryUserStore::default();
+        let email = Email::parse("ada@example.com").unwrap();
+        store
+            .save_with_password_hash(
+                &User::new(Username::parse("ada").unwrap(), Role::Admin).with_email(Some(email.clone())),
+                "a",
+            )
+            .await
+            .unwrap();
+
+        let result = store
+            .save_with_password_hash(
+                &User::new(Username::parse("other").unwrap(), Role::Developer)
+                    .with_email(Some(email)),
+                "b",
+            )
+            .await;
+
+        assert!(matches!(result, Err(UserStoreError::DuplicateEmail(_))));
     }
 
     #[tokio::test]

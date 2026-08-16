@@ -231,6 +231,9 @@ pub(crate) struct LoginRequest {
 pub(crate) struct UserResponse {
     pub(crate) id: String,
     pub(crate) username: String,
+    /// Correo de la cuenta, o `null` si el administrador de arranque
+    /// no tiene uno.
+    pub(crate) email: Option<String>,
     pub(crate) role: RoleDto,
 }
 
@@ -239,6 +242,7 @@ impl From<&User> for UserResponse {
         Self {
             id: user.id().to_string(),
             username: user.username().to_string(),
+            email: user.email().map(ToString::to_string),
             role: user.role().into(),
         }
     }
@@ -282,8 +286,17 @@ impl From<RoleDto> for Role {
 #[ts(export)]
 pub(crate) struct CreateUserRequest {
     pub(crate) username: String,
+    pub(crate) email: String,
     pub(crate) password: String,
     pub(crate) role: RoleDto,
+}
+
+/// Cuerpo de la petición para que un Admin restablezca la contraseña de
+/// otra cuenta.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ResetUserPasswordRequest {
+    pub(crate) password: String,
 }
 
 /// Cuerpo de la petición para cambiar el rol de un usuario.

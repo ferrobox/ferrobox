@@ -6,13 +6,15 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use ferrobox_domain::ids::UserId;
-use ferrobox_domain::user::Username;
+use ferrobox_domain::user::{Email, Username};
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_manage_users;
-use crate::dto::{CreateUserRequest, UpdateUserRoleRequest, UserResponse};
+use crate::dto::{
+    CreateUserRequest, ResetUserPasswordRequest, UpdateUserRoleRequest, UserResponse,
+};
 use crate::error::ApiError;
 
 pub(crate) async fn list_users(
@@ -33,14 +35,11 @@ pub(crate) async fn create_user(
 
     let username =
         Username::parse(payload.username).map_err(|err| ApiError::BadRequest(err.to_string()))?;
-
-    if payload.password.is_empty() {
-        return Err(ApiError::BadRequest("password cannot be empty".to_string()));
-    }
+    let email = Email::parse(payload.email).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
     let created = state
         .create_user
-        .execute(username, &payload.password, payload.role.into())
+        .execute(username, email, &payload.password, payload.role.into())
         .await?;
 
     Ok((StatusCode::CREATED, Json(UserResponse::from(&created))))
@@ -75,4 +74,290 @@ pub(crate) async fn update_user_role(
         .await?;
 
     Ok(Json(UserResponse::from(&updated)))
+}
+
+pub(crate) async fn reset_user_password(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(user_id): Path<Uuid>,
+    Json(payload): Json<ResetUserPasswordRequest>,
+) -> Result<StatusCode, ApiError> {
+    require_manage_users(&user)?;
+
+    state
+        .reset_user_password
+        .execute(user.id(), UserId::from(user_id), &payload.password)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use ferrobox_application::assay::AssayService;
+    use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
+    use ferrobox_application::change_password::ChangePasswordUseCase;
+    use ferrobox_application::create_repository::CreateRepositoryUseCase;
+    use ferrobox_application::delete_artifact::DeleteArtifactUseCase;
+    use ferrobox_application::delete_repository::DeleteRepositoryUseCase;
+    use ferrobox_application::download_artifact::DownloadArtifactUseCase;
+    use ferrobox_application::get_repository::GetRepositoryUseCase;
+    use ferrobox_application::list_repositories::ListRepositoriesUseCase;
+    use ferrobox_application::list_repository_artifacts::ListRepositoryArtifactsUseCase;
+    use ferrobox_application::login::LoginUseCase;
+    use ferrobox_application::manage_api_tokens::{
+        CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
+    };
+    use ferrobox_application::manage_users::{
+        ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
+        ResetUserPasswordUseCase,
+    };
+    use ferrobox_application::packaging::PackagingRegistry;
+    use ferrobox_application::publish_artifact::PublishArtifactUseCase;
+    use ferrobox_application::quota::QuotaService;
+    use ferrobox_application::retention::RetentionService;
+    use ferrobox_application::search_packages::SearchPackagesUseCase;
+    use ferrobox_application::test_support::{
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+    };
+    use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
+    use ferrobox_domain::api_token::ApiTokenName;
+    use ferrobox_domain::user::Role;
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    use crate::AppState;
+
+    #[allow(clippy::too_many_lines)]
+    async fn fixture() -> (Router, String, String, String, String) {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let user_store = Arc::new(InMemoryUserStore::default());
+        let api_token_store = Arc::new(InMemoryApiTokenStore::default());
+        let assay_store = Arc::new(InMemoryAssayStore::default());
+        let retention_store = Arc::new(InMemoryRetentionStore::default());
+        let http_client = Arc::new(InMemoryHttpClient::default());
+        let quota = QuotaService::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            Arc::new(InMemoryQuotaStore::default()),
+        );
+        let search_packages =
+            SearchPackagesUseCase::new(repository_store.clone(), package_index_store.clone());
+
+        let state = Arc::new(AppState {
+            create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
+            list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
+            get_repository: GetRepositoryUseCase::new(repository_store.clone()),
+            update_alloy_members: UpdateAlloyMembersUseCase::new(repository_store.clone()),
+            publish_artifact: PublishArtifactUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                storage.clone(),
+                quota.clone(),
+            ),
+            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                package_index_store.clone(),
+            ),
+            delete_repository: DeleteRepositoryUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+            ),
+            delete_artifact: DeleteArtifactUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+            ),
+            packaging: PackagingRegistry::new(),
+            assays: AssayService::new(
+                assay_store.clone(),
+                package_index_store.clone(),
+                repository_store.clone(),
+                storage.clone(),
+                http_client,
+            ),
+            retention: RetentionService::new(
+                repository_store,
+                artifact_store,
+                package_index_store,
+                storage,
+                assay_store,
+                retention_store,
+            ),
+            quota,
+            search_packages,
+            public_base_url: "http://127.0.0.1:3000".to_string(),
+            login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
+            change_password: ChangePasswordUseCase::new(user_store.clone()),
+            authenticate_token: AuthenticateTokenUseCase::new(
+                user_store.clone(),
+                api_token_store.clone(),
+            ),
+            create_api_token: CreateApiTokenUseCase::new(api_token_store.clone()),
+            list_api_tokens: ListApiTokensUseCase::new(api_token_store.clone()),
+            revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
+            create_user: CreateUserUseCase::new(user_store.clone()),
+            list_users: ListUsersUseCase::new(user_store.clone()),
+            delete_user: DeleteUserUseCase::new(user_store.clone()),
+            change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
+            reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+        });
+
+        let admin = state
+            .create_user
+            .seed("admin", Role::Admin)
+            .await
+            .unwrap();
+        let admin_token = state
+            .create_api_token
+            .execute(admin.id(), ApiTokenName::parse("admin").unwrap())
+            .await
+            .unwrap()
+            .plaintext_secret;
+        let reader = state
+            .create_user
+            .seed("reader", Role::Reader)
+            .await
+            .unwrap();
+        let reader_token = state
+            .create_api_token
+            .execute(reader.id(), ApiTokenName::parse("read").unwrap())
+            .await
+            .unwrap()
+            .plaintext_secret;
+
+        (
+            crate::build_router(state),
+            admin_token,
+            reader_token,
+            admin.id().to_string(),
+            reader.id().to_string(),
+        )
+    }
+
+    async fn json_body(response: axum::http::Response<Body>) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_user_requires_email_and_a_strong_password() {
+        let (app, admin_token, _reader, _admin_id, _reader_id) = fixture().await;
+
+        let weak = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users")
+                    .header("Authorization", format!("Bearer {admin_token}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "username": "dev",
+                            "email": "dev@example.com",
+                            "password": "secret",
+                            "role": "developer"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(weak.status(), StatusCode::BAD_REQUEST);
+
+        let created = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/users")
+                    .header("Authorization", format!("Bearer {admin_token}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "username": "dev",
+                            "email": "dev@example.com",
+                            "password": "Secret1a",
+                            "role": "developer"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let body = json_body(created).await;
+        assert_eq!(body["username"], "dev");
+        assert_eq!(body["email"], "dev@example.com");
+        assert_eq!(body["role"], "developer");
+    }
+
+    #[tokio::test]
+    async fn reader_cannot_manage_users() {
+        let (app, _admin, reader_token, _admin_id, _reader_id) = fixture().await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/users")
+                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_can_reset_another_user_password_but_not_own() {
+        let (app, admin_token, _reader_token, admin_id, reader_id) = fixture().await;
+
+        let self_reset = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/users/{admin_id}/password"))
+                    .header("Authorization", format!("Bearer {admin_token}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({ "password": "NewPass1a" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(self_reset.status(), StatusCode::CONFLICT);
+
+        let reset = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/users/{reader_id}/password"))
+                    .header("Authorization", format!("Bearer {admin_token}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({ "password": "NewPass1a" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reset.status(), StatusCode::NO_CONTENT);
+    }
 }
