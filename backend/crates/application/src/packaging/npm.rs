@@ -29,7 +29,8 @@ use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -41,6 +42,7 @@ pub struct NpmPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
+    assays: Option<AssayService>,
 }
 
 impl NpmPackagingStrategy {
@@ -62,7 +64,15 @@ impl NpmPackagingStrategy {
             http_client,
             repository_store,
             public_base_url,
+            assays: None,
         }
+    }
+
+    /// Conecta el ensaye automático al publicar o cachear un tarball.
+    #[must_use]
+    pub fn with_assays(mut self, assays: AssayService) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     fn ensure_npm_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -258,6 +268,7 @@ impl NpmPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), coordinate);
 
         Ok(tarball)
     }
@@ -430,6 +441,7 @@ impl PackagingStrategy for NpmPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), &coordinate);
 
         Ok(coordinate)
     }
@@ -929,8 +941,9 @@ mod tests {
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
+    use crate::assay::AssayService;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient, InMemoryPackageIndexStore,
         InMemoryRepositoryStore, InMemoryStorage,
     };
 
@@ -1013,6 +1026,53 @@ mod tests {
 
         let downloaded = strategy.download(&repository, &coordinate).await.unwrap();
         assert_eq!(downloaded.as_ref(), tarball);
+    }
+
+    #[tokio::test]
+    async fn publish_schedules_an_assay_without_blocking() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub(
+            "https://api.osv.dev/v1/querybatch",
+            200,
+            Bytes::from(r#"{"results":[{}]}"#),
+        );
+        let assays = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index.clone(),
+            repos.clone(),
+            storage.clone(),
+            http.clone(),
+        );
+        let strategy = NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            index,
+            storage,
+            http,
+            repos.clone(),
+            "http://127.0.0.1:3000".to_string(),
+        )
+        .with_assays(assays.clone());
+        let repository = npm_forge("npm-local");
+        repos.save(&repository).await.unwrap();
+
+        strategy
+            .publish(&repository, publish_body("demo-pkg", "1.0.0", b"tarball"))
+            .await
+            .unwrap();
+
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            found = assays.list_all().await.unwrap();
+            if !found.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].coordinate().name().as_str(), "demo-pkg");
     }
 
     #[tokio::test]

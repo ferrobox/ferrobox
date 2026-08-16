@@ -33,7 +33,8 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
-use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -45,6 +46,7 @@ pub struct PypiPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
+    assays: Option<AssayService>,
 }
 
 impl PypiPackagingStrategy {
@@ -66,7 +68,15 @@ impl PypiPackagingStrategy {
             http_client,
             repository_store,
             public_base_url,
+            assays: None,
         }
+    }
+
+    /// Conecta el ensaye automático al publicar o cachear un fichero.
+    #[must_use]
+    pub fn with_assays(mut self, assays: AssayService) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     fn ensure_pypi_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -311,6 +321,7 @@ impl PypiPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), &coordinate);
 
         Ok(content)
     }
@@ -457,6 +468,7 @@ impl PackagingStrategy for PypiPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), &coordinate);
 
         Ok(coordinate)
     }

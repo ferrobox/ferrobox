@@ -27,16 +27,30 @@ export function SeverityBadge({ severity }: { severity: AssaySeverityDto }) {
   );
 }
 
-export function AssayCountPills({ counts }: { counts: AssayCountsDto }) {
-  const items: Array<[AssaySeverityDto, number]> = [
-    ["critical", counts.critical],
-    ["high", counts.high],
-    ["medium", counts.medium],
-    ["low", counts.low],
-    ["unknown", counts.unknown],
-  ];
+export function AssayCountPills({
+  counts,
+  compact = false,
+}: {
+  counts: AssayCountsDto;
+  compact?: boolean;
+}) {
+  const items: Array<[AssaySeverityDto, number]> = compact
+    ? [
+        ["critical", counts.critical],
+        ["high", counts.high],
+      ]
+    : [
+        ["critical", counts.critical],
+        ["high", counts.high],
+        ["medium", counts.medium],
+        ["low", counts.low],
+        ["unknown", counts.unknown],
+      ];
   const visible = items.filter(([, count]) => count > 0);
   if (visible.length === 0) {
+    if (compact) {
+      return null;
+    }
     return <span className="text-xs text-muted-foreground">Sin hallazgos</span>;
   }
   return (
@@ -45,9 +59,10 @@ export function AssayCountPills({ counts }: { counts: AssayCountsDto }) {
         <Badge
           key={severity}
           variant="outline"
-          className={cn("font-mono", SEVERITY_CLASS[severity])}
+          className={cn("font-mono", compact && "px-1.5 py-0 text-[10px]", SEVERITY_CLASS[severity])}
         >
-          {count} {SEVERITY_LABEL[severity].toLowerCase()}
+          {count}
+          {compact ? "" : ` ${SEVERITY_LABEL[severity].toLowerCase()}`}
         </Badge>
       ))}
     </span>

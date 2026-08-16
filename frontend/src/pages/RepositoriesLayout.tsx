@@ -1,6 +1,6 @@
 import { Outlet, useParams } from "react-router-dom";
 
-import { useRepositories } from "@/api/queries";
+import { useAssays, useRepositories } from "@/api/queries";
 import { RepositoryBrowser } from "@/components/repository/RepositoryBrowser";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 export function RepositoriesLayout() {
   const { repositoryId } = useParams<{ repositoryId: string }>();
   const { data, isPending, isError, error, refetch, isFetching } = useRepositories();
+  const { data: assays } = useAssays();
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -34,7 +35,11 @@ export function RepositoriesLayout() {
           </Alert>
         </aside>
       ) : (
-        <RepositoryBrowser repositories={data ?? []} selectedId={repositoryId} />
+        <RepositoryBrowser
+          repositories={data ?? []}
+          assays={assays ?? []}
+          selectedId={repositoryId}
+        />
       )}
       <div className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
         <Outlet />

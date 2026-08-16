@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::Repository;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
@@ -26,6 +27,8 @@ use ferrobox_ports::package_index_store::PackageIndexStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 use ferrobox_ports::storage::StorageError;
 use thiserror::Error;
+
+use crate::assay::AssayService;
 
 /// La implementación de Cargo (protocolo de índice disperso) del
 /// patrón Strategy.
@@ -385,6 +388,18 @@ pub trait PackagingStrategy: Send + Sync {
         query: &str,
         limit: usize,
     ) -> Result<Vec<PackageSearchHit>, PackagingError>;
+}
+
+/// Dispara un ensaye en segundo plano si la estrategia tiene
+/// [`AssayService`]. No bloquea publish ni install.
+pub(crate) fn notify_assay(
+    assays: Option<&AssayService>,
+    repository_id: RepositoryId,
+    coordinate: &PackageCoordinate,
+) {
+    if let Some(assays) = assays {
+        assays.schedule(repository_id, coordinate.clone());
+    }
 }
 
 /// Selecciona, en tiempo de ejecución, la [`PackagingStrategy`] adecuada

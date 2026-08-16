@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_write_artifacts;
-use crate::dto::{AssayLookupRequest, AssayResponse};
+use crate::dto::{AssayLookupRequest, AssayResponse, AssayRerunResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn list_all(
@@ -23,6 +23,15 @@ pub(crate) async fn list_all(
 ) -> Result<Json<Vec<AssayResponse>>, ApiError> {
     let assays = state.assays.list_all().await?;
     Ok(Json(assays.iter().map(AssayResponse::from).collect()))
+}
+
+pub(crate) async fn rerun_all(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+) -> Result<Json<AssayRerunResponse>, ApiError> {
+    require_write_artifacts(&user)?;
+    let scheduled = state.assays.rerun_all().await?;
+    Ok(Json(AssayRerunResponse { scheduled }))
 }
 
 pub(crate) async fn list_for_repository(
@@ -167,7 +176,7 @@ mod tests {
     use tower::ServiceExt;
 
     #[allow(clippy::too_many_lines)]
-    async fn fixture() -> (Router, String) {
+    async fn fixture() -> (Router, String, String) {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
@@ -251,6 +260,21 @@ mod tests {
             .await
             .unwrap()
             .plaintext_secret;
+        let reader = state
+            .create_user
+            .execute(
+                Username::parse("reader").unwrap(),
+                "secret",
+                Role::Reader,
+            )
+            .await
+            .unwrap();
+        let reader_token = state
+            .create_api_token
+            .execute(reader.id(), ApiTokenName::parse("read").unwrap())
+            .await
+            .unwrap()
+            .plaintext_secret;
         let _repo = state
             .create_repository
             .execute(
@@ -261,12 +285,12 @@ mod tests {
             .await
             .unwrap();
 
-        (crate::build_router(state), token)
+        (crate::build_router(state), token, reader_token)
     }
 
     #[tokio::test]
     async fn list_assays_requires_auth_and_starts_empty() {
-        let (app, token) = fixture().await;
+        let (app, token, _) = fixture().await;
 
         let response = app
             .clone()
@@ -291,5 +315,56 @@ mod tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().map(Vec::len), Some(0));
+    }
+
+    #[tokio::test]
+    async fn rerun_all_requires_write_role_and_schedules_nothing_when_empty() {
+        let (app, token, reader_token) = fixture().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/assays/rerun")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/assays/rerun")
+                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/assays/rerun")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["scheduled"], 0);
     }
 }

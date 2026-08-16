@@ -27,7 +27,8 @@ use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -37,6 +38,7 @@ pub struct ConanPackagingStrategy {
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
     repository_store: Arc<dyn RepositoryStore>,
+    assays: Option<AssayService>,
 }
 
 impl ConanPackagingStrategy {
@@ -53,7 +55,15 @@ impl ConanPackagingStrategy {
             package_index_store,
             storage,
             repository_store,
+            assays: None,
         }
+    }
+
+    /// Conecta el ensaye automático al subir una receta.
+    #[must_use]
+    pub fn with_assays(mut self, assays: AssayService) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     fn ensure_conan_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -451,7 +461,13 @@ impl ConanPackagingStrategy {
             });
         }
         entry.rebuild_files();
-        self.save_recipe(repository, &entry, saved_artifact).await
+        self.save_recipe(repository, &entry, saved_artifact).await?;
+        if let Ok(coordinate) =
+            recipe_coordinate(&entry.name, &entry.version, &entry.user, &entry.channel)
+        {
+            notify_assay(self.assays.as_ref(), repository.id(), &coordinate);
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -302,3 +302,15 @@ export function useRunAssay(repositoryId: string) {
     },
   });
 }
+
+export function useRerunAllAssays() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.rerunAllAssays,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+      void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+    },
+  });
+}
