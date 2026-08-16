@@ -5,6 +5,10 @@
  */
 export type CleanupItemResponse = { 
 /**
+ * Repositorio al que pertenece la fila.
+ */
+repository: string, 
+/**
  * Nombre del paquete, o vacío si es un binario huérfano.
  */
 name: string, 

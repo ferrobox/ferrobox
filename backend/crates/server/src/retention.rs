@@ -86,6 +86,24 @@ pub(crate) async fn collect_garbage(
     Ok(Json(CleanupReportResponse::from(report)))
 }
 
+pub(crate) async fn dry_run_garbage_collection(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+) -> Result<Json<CleanupPreviewResponse>, ApiError> {
+    require_write_artifacts(&user)?;
+    let preview = state.retention.dry_run_garbage_collection().await?;
+    Ok(Json(CleanupPreviewResponse::from(preview)))
+}
+
+pub(crate) async fn collect_garbage_all(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+) -> Result<Json<CleanupPreviewResponse>, ApiError> {
+    require_write_artifacts(&user)?;
+    let preview = state.retention.collect_garbage_all().await?;
+    Ok(Json(CleanupPreviewResponse::from(preview)))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::AppState;
@@ -352,6 +370,44 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["dry_run"], false);
         assert_eq!(json["dropped_versions"], 0);
+        assert_eq!(json["deleted_artifacts"], 0);
+    }
+
+    #[tokio::test]
+    async fn instance_gc_dry_run_requires_write_role() {
+        let (app, token, reader_token, _) = fixture().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/gc/dry-run")
+                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/gc/dry-run")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["dry_run"], true);
         assert_eq!(json["deleted_artifacts"], 0);
     }
 }

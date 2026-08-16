@@ -18,6 +18,7 @@ import { UploadArtifactButton } from "@/components/repository/UploadArtifactButt
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import NotFoundPage from "@/pages/NotFoundPage";
 
 export function RepositoryDetailPage() {
@@ -189,28 +190,32 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         </div>
       </header>
 
-      <section>
-        <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold tracking-wide text-foreground uppercase">
-            Paquetes
-          </h2>
+      <Tabs defaultValue="packages">
+        <TabsList variant="line">
+          <TabsTrigger value="packages">Paquetes</TabsTrigger>
+          {repository.kind.type !== "alloy" ? (
+            <TabsTrigger value="retention">Retención</TabsTrigger>
+          ) : null}
+        </TabsList>
+        <TabsContent value="packages" className="mt-4 space-y-3">
           <p className="text-xs text-muted-foreground">
             Agrupados por nombre, con cada versión debajo.
           </p>
-        </div>
-        <ArtifactsTable
-          repositoryId={repositoryId}
-          kind={repository.kind.type}
-          ecosystem={repository.ecosystem}
-          memberNames={Object.fromEntries(
-            alloyMembers.map((member) => [member.id, member.name]),
-          )}
-        />
-      </section>
-
-      {repository.kind.type !== "alloy" ? (
-        <RetentionPanel repositoryId={repositoryId} canWrite={canWrite} />
-      ) : null}
+          <ArtifactsTable
+            repositoryId={repositoryId}
+            kind={repository.kind.type}
+            ecosystem={repository.ecosystem}
+            memberNames={Object.fromEntries(
+              alloyMembers.map((member) => [member.id, member.name]),
+            )}
+          />
+        </TabsContent>
+        {repository.kind.type !== "alloy" ? (
+          <TabsContent value="retention" className="mt-4">
+            <RetentionPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+      </Tabs>
     </div>
   );
 }

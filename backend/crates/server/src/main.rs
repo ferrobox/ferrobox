@@ -220,6 +220,8 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/repositories/{repository_id}/gc",
             post(retention::collect_garbage),
         )
+        .route("/gc/dry-run", post(retention::dry_run_garbage_collection))
+        .route("/gc", post(retention::collect_garbage_all))
         .merge(cargo_registry::write_router())
         .merge(npm_registry::write_router())
         .merge(pypi_registry::write_router())

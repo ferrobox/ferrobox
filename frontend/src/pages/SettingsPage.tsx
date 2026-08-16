@@ -6,6 +6,7 @@ import { ApiError } from "@/api/client";
 import { useChangePassword, useSettings } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { roleLabel } from "@/auth/roles";
+import { GarbageCollectionCard } from "@/components/cleanup/GarbageCollectionCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,7 +67,7 @@ export function SettingsPage() {
     <div>
       <PageHeader
         title="Configuración"
-        description="Cuenta, contraseña y datos de esta instancia de FerroBox."
+        description="Cuenta, instancia y recolección de basura de FerroBox."
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -177,6 +178,7 @@ export function SettingsPage() {
             )}
           </CardContent>
         </Card>
+        <GarbageCollectionCard />
       </div>
     </div>
   );
