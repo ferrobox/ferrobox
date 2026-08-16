@@ -92,8 +92,8 @@ export function RetentionPanel({
       <CardHeader>
         <CardTitle>Retención y basura</CardTitle>
         <CardDescription>
-          Como Harbor: configura los límites, pulsa Simular para ver qué se borraría sin tocar nada,
-          y solo entonces Aplicar. Vacío = no hay límite. No bloquea install ni publish.
+          Configura los límites, pulsa Simular para ver qué se borraría sin tocar nada, y solo
+          entonces Aplicar. Vacío = no hay límite. No bloquea install ni publish.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
