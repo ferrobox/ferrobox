@@ -567,6 +567,37 @@ impl From<ferrobox_domain::retention::RetentionPolicy> for RetentionPolicyRespon
     }
 }
 
+/// Tope de almacenamiento enviado al guardar.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct QuotaRequest {
+    /// Tope en bytes. Ausente o `null` = ilimitado.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub(crate) limit_bytes: Option<u64>,
+}
+
+/// Uso y tope de almacenamiento de un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct QuotaResponse {
+    /// Tope en bytes, o `null` si no hay límite.
+    #[ts(type = "number | null")]
+    pub(crate) limit_bytes: Option<u64>,
+    /// Bytes ocupados por todos los binarios del repositorio.
+    #[ts(type = "number")]
+    pub(crate) used_bytes: u64,
+}
+
+impl From<ferrobox_application::quota::QuotaSnapshot> for QuotaResponse {
+    fn from(snapshot: ferrobox_application::quota::QuotaSnapshot) -> Self {
+        Self {
+            limit_bytes: snapshot.limit_bytes,
+            used_bytes: snapshot.used_bytes,
+        }
+    }
+}
+
 /// Resultado de aplicar retención o recolectar basura.
 #[derive(Serialize, TS)]
 #[ts(export)]

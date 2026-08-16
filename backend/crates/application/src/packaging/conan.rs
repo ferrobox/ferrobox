@@ -27,8 +27,11 @@ use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{
+    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+};
 use crate::assay::AssayService;
+use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -39,6 +42,7 @@ pub struct ConanPackagingStrategy {
     storage: Arc<dyn StoragePort>,
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
+    quota: Option<QuotaService>,
 }
 
 impl ConanPackagingStrategy {
@@ -56,6 +60,7 @@ impl ConanPackagingStrategy {
             storage,
             repository_store,
             assays: None,
+            quota: None,
         }
     }
 
@@ -63,6 +68,13 @@ impl ConanPackagingStrategy {
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
+        self
+    }
+
+    /// Aplica la cuota de almacenamiento al subir.
+    #[must_use]
+    pub fn with_quota(mut self, quota: QuotaService) -> Self {
+        self.quota = Some(quota);
         self
     }
 
@@ -1007,6 +1019,7 @@ impl PackagingStrategy for ConanPackagingStrategy {
         let resource = parse_conan_path(path)?;
         let checksum = sha256_checksum(&body);
         let artifact = Artifact::new(repository.id(), checksum, body.len() as u64);
+        ensure_quota(self.quota.as_ref(), repository.id(), body.len() as u64).await?;
         self.storage
             .put(&storage_key_for(artifact.id()), body)
             .await?;

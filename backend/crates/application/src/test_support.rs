@@ -12,6 +12,7 @@ use ferrobox_domain::assay::Assay;
 use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+use ferrobox_domain::quota::StorageQuota;
 use ferrobox_domain::retention::RetentionPolicy;
 use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
@@ -22,6 +23,7 @@ use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
 };
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
+use ferrobox_ports::quota_store::{QuotaStore, QuotaStoreError};
 use ferrobox_ports::retention_store::{RetentionStore, RetentionStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
@@ -672,6 +674,36 @@ impl RetentionStore for InMemoryRetentionStore {
         policy: RetentionPolicy,
     ) -> Result<(), RetentionStoreError> {
         self.policies.lock().unwrap().insert(repository_id, policy);
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryQuotaStore {
+    quotas: Mutex<HashMap<RepositoryId, StorageQuota>>,
+}
+
+#[async_trait]
+impl QuotaStore for InMemoryQuotaStore {
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<StorageQuota, QuotaStoreError> {
+        Ok(self
+            .quotas
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .copied()
+            .unwrap_or_else(StorageQuota::unlimited))
+    }
+
+    async fn save(
+        &self,
+        repository_id: RepositoryId,
+        quota: StorageQuota,
+    ) -> Result<(), QuotaStoreError> {
+        self.quotas.lock().unwrap().insert(repository_id, quota);
         Ok(())
     }
 }

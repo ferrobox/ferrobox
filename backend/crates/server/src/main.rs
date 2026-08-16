@@ -14,6 +14,7 @@ mod error;
 mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
+mod quota;
 mod repositories;
 mod retention;
 mod settings;
@@ -34,6 +35,7 @@ use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
+use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
 use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
@@ -62,6 +64,7 @@ use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
+use ferrobox_application::quota::QuotaService;
 use ferrobox_application::retention::RetentionService;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
@@ -82,6 +85,7 @@ struct AppState {
     packaging: PackagingRegistry,
     assays: AssayService,
     retention: RetentionService,
+    quota: QuotaService,
     public_base_url: String,
     login: LoginUseCase,
     change_password: ChangePasswordUseCase,
@@ -114,6 +118,7 @@ async fn main() {
     let package_index_store = Arc::new(PostgresPackageIndexStore::new(pool.clone()));
     let assay_store = Arc::new(PostgresAssayStore::new(pool.clone()));
     let retention_store = Arc::new(PostgresRetentionStore::new(pool.clone()));
+    let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
@@ -128,6 +133,7 @@ async fn main() {
         package_index_store,
         assay_store,
         retention_store,
+        quota_store,
         user_store,
         api_token_store,
         storage,
@@ -205,6 +211,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             get(assays::get_or_run),
         )
         .route(
+            "/repositories/{repository_id}/quota",
+            get(quota::get_quota).put(quota::save_quota),
+        )
+        .route(
             "/repositories/{repository_id}/retention",
             get(retention::get_policy).put(retention::save_policy),
         )
@@ -272,6 +282,7 @@ fn build_app_state(
     package_index_store: Arc<PostgresPackageIndexStore>,
     assay_store: Arc<PostgresAssayStore>,
     retention_store: Arc<PostgresRetentionStore>,
+    quota_store: Arc<PostgresQuotaStore>,
     user_store: Arc<PostgresUserStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     storage: Arc<S3StorageAdapter>,
@@ -284,6 +295,11 @@ fn build_app_state(
         storage.clone(),
         http_client.clone(),
     );
+    let quota = QuotaService::new(
+        repository_store.clone(),
+        artifact_store.clone(),
+        quota_store,
+    );
     let packaging = packaging_registry(
         &config.public_base_url,
         &repository_store,
@@ -292,6 +308,7 @@ fn build_app_state(
         &storage,
         http_client,
         &assays,
+        quota.clone(),
     );
     let retention = RetentionService::new(
         repository_store.clone(),
@@ -311,6 +328,7 @@ fn build_app_state(
             repository_store.clone(),
             artifact_store.clone(),
             storage.clone(),
+            quota.clone(),
         ),
         download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
         list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
@@ -333,6 +351,7 @@ fn build_app_state(
         packaging,
         assays,
         retention,
+        quota,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),
@@ -359,6 +378,7 @@ fn packaging_registry(
     storage: &Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
     assays: &AssayService,
+    quota: QuotaService,
 ) -> PackagingRegistry {
     PackagingRegistry::new()
         .register(Arc::new(
@@ -369,7 +389,8 @@ fn packaging_registry(
                 http_client.clone(),
                 repository_store.clone(),
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
         ))
         .register(Arc::new(
             NpmPackagingStrategy::new(
@@ -380,7 +401,8 @@ fn packaging_registry(
                 repository_store.clone(),
                 public_base_url.to_string(),
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
         ))
         .register(Arc::new(
             PypiPackagingStrategy::new(
@@ -391,7 +413,8 @@ fn packaging_registry(
                 repository_store.clone(),
                 public_base_url.to_string(),
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
         ))
         .register(Arc::new(
             OciPackagingStrategy::new(
@@ -401,7 +424,8 @@ fn packaging_registry(
                 repository_store.clone(),
                 http_client.clone(),
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
         ))
         .register(Arc::new(
             OciPackagingStrategy::for_ecosystem(
@@ -412,7 +436,8 @@ fn packaging_registry(
                 repository_store.clone(),
                 http_client,
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
         ))
         .register(Arc::new(
             ConanPackagingStrategy::new(
@@ -421,7 +446,8 @@ fn packaging_registry(
                 storage.clone(),
                 repository_store.clone(),
             )
-            .with_assays(assays.clone()),
+            .with_assays(assays.clone())
+            .with_quota(quota),
         ))
 }
 

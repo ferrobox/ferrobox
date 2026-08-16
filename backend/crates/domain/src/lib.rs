@@ -37,3 +37,6 @@ pub mod assay;
 
 /// Política de retención de versiones de un repositorio.
 pub mod retention;
+
+/// Cuota de almacenamiento de un repositorio.
+pub mod quota;

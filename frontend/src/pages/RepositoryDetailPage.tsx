@@ -12,6 +12,7 @@ import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
+import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
@@ -196,6 +197,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="retention">Retención</TabsTrigger>
           ) : null}
+          {repository.kind.type !== "alloy" ? (
+            <TabsTrigger value="quota">Cuota</TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="packages" className="mt-4 space-y-3">
           <p className="text-xs text-muted-foreground">
@@ -213,6 +217,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="retention" className="mt-4">
             <RetentionPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+        {repository.kind.type !== "alloy" ? (
+          <TabsContent value="quota" className="mt-4">
+            <QuotaPanel repositoryId={repositoryId} canWrite={canWrite} />
           </TabsContent>
         ) : null}
       </Tabs>

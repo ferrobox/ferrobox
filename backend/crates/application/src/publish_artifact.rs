@@ -10,6 +10,7 @@ use ferrobox_ports::storage::{StorageError, StoragePort};
 use thiserror::Error;
 
 use crate::content_hash::sha256_checksum;
+use crate::quota::{QuotaError, QuotaService};
 use crate::storage_key::storage_key_for;
 
 /// Motivos por los que publicar un artefacto puede fallar.
@@ -34,6 +35,10 @@ pub enum PublishArtifactError {
     /// Fallo al persistir los metadatos del artefacto.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
+
+    /// El binario no cabe en la cuota de almacenamiento.
+    #[error(transparent)]
+    Quota(#[from] QuotaError),
 }
 
 /// Caso de uso: publicar un artefacto binario en un repositorio
@@ -42,6 +47,7 @@ pub struct PublishArtifactUseCase {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
     storage: Arc<dyn StoragePort>,
+    quota: QuotaService,
 }
 
 impl PublishArtifactUseCase {
@@ -51,11 +57,13 @@ impl PublishArtifactUseCase {
         repository_store: Arc<dyn RepositoryStore>,
         artifact_store: Arc<dyn ArtifactStore>,
         storage: Arc<dyn StoragePort>,
+        quota: QuotaService,
     ) -> Self {
         Self {
             repository_store,
             artifact_store,
             storage,
+            quota,
         }
     }
 
@@ -88,6 +96,10 @@ impl PublishArtifactUseCase {
         let checksum = sha256_checksum(&content);
         let artifact = Artifact::new(repository_id, checksum, content.len() as u64);
 
+        self.quota
+            .ensure_can_store(repository_id, content.len() as u64)
+            .await?;
+
         self.storage
             .put(&storage_key_for(artifact.id()), content)
             .await?;
@@ -105,14 +117,30 @@ mod tests {
 
     use bytes::Bytes;
 
+    use crate::quota::QuotaService;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryRepositoryStore, InMemoryStorage, forge,
+        InMemoryArtifactStore, InMemoryQuotaStore, InMemoryRepositoryStore, InMemoryStorage, forge,
     };
     use ferrobox_domain::package_coordinate::PackageEcosystem;
+    use ferrobox_domain::quota::StorageQuota;
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+    use ferrobox_ports::quota_store::QuotaStore;
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
+
+    fn use_case(
+        repository_store: Arc<InMemoryRepositoryStore>,
+        artifact_store: Arc<InMemoryArtifactStore>,
+        storage: Arc<InMemoryStorage>,
+    ) -> PublishArtifactUseCase {
+        let quota = QuotaService::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            Arc::new(InMemoryQuotaStore::default()),
+        );
+        PublishArtifactUseCase::new(repository_store, artifact_store, storage, quota)
+    }
 
     #[tokio::test]
     async fn publishes_an_artifact_to_an_existing_repository() {
@@ -123,8 +151,7 @@ mod tests {
         let repository = forge("cargo-releases");
         repository_store.save(&repository).await.unwrap();
 
-        let use_case =
-            PublishArtifactUseCase::new(repository_store, artifact_store.clone(), storage);
+        let use_case = use_case(repository_store, artifact_store.clone(), storage);
 
         let artifact_id = use_case
             .execute(repository.id(), Bytes::from_static(b"hello, ferrobox"))
@@ -147,7 +174,7 @@ mod tests {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let storage = Arc::new(InMemoryStorage::default());
-        let use_case = PublishArtifactUseCase::new(repository_store, artifact_store, storage);
+        let use_case = use_case(repository_store, artifact_store, storage);
 
         let result = use_case
             .execute(RepositoryId::new(), Bytes::from_static(b"data"))
@@ -191,7 +218,7 @@ mod tests {
         repository_store.save(&forge_member).await.unwrap();
         repository_store.save(&alloy).await.unwrap();
 
-        let use_case = PublishArtifactUseCase::new(repository_store, artifact_store, storage);
+        let use_case = use_case(repository_store, artifact_store, storage);
 
         let mirror_result = use_case
             .execute(mirror.id(), Bytes::from_static(b"data"))
@@ -208,5 +235,36 @@ mod tests {
             alloy_result,
             Err(PublishArtifactError::ReadOnlyRepository)
         ));
+    }
+
+    #[tokio::test]
+    async fn rejects_publish_when_quota_is_exceeded() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let quotas = Arc::new(InMemoryQuotaStore::default());
+        let repository = forge("cargo-releases");
+        repository_store.save(&repository).await.unwrap();
+        quotas
+            .save(repository.id(), StorageQuota::new(Some(4)).unwrap())
+            .await
+            .unwrap();
+        let quota = QuotaService::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            quotas,
+        );
+        let use_case = PublishArtifactUseCase::new(
+            repository_store,
+            artifact_store,
+            storage,
+            quota,
+        );
+
+        let err = use_case
+            .execute(repository.id(), Bytes::from_static(b"too-big"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PublishArtifactError::Quota(QuotaError::Exceeded { .. })));
     }
 }

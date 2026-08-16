@@ -26,8 +26,11 @@ use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
-use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{
+    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+};
 use crate::assay::AssayService;
+use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -39,6 +42,7 @@ pub struct CargoPackagingStrategy {
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
+    quota: Option<QuotaService>,
 }
 
 impl CargoPackagingStrategy {
@@ -58,6 +62,7 @@ impl CargoPackagingStrategy {
             http_client,
             repository_store,
             assays: None,
+            quota: None,
         }
     }
 
@@ -65,6 +70,13 @@ impl CargoPackagingStrategy {
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
+        self
+    }
+
+    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    #[must_use]
+    pub fn with_quota(mut self, quota: QuotaService) -> Self {
+        self.quota = Some(quota);
         self
     }
 
@@ -227,6 +239,7 @@ impl CargoPackagingStrategy {
 
         let artifact = Artifact::new(repository.id(), checksum, crate_bytes.len() as u64);
 
+        ensure_quota(self.quota.as_ref(), repository.id(), crate_bytes.len() as u64).await?;
         self.storage
             .put(&storage_key_for(artifact.id()), crate_bytes.clone())
             .await?;
@@ -420,6 +433,12 @@ impl PackagingStrategy for CargoPackagingStrategy {
             parsed.crate_bytes.len() as u64,
         );
 
+        ensure_quota(
+            self.quota.as_ref(),
+            repository.id(),
+            parsed.crate_bytes.len() as u64,
+        )
+        .await?;
         self.storage
             .put(&storage_key_for(artifact.id()), parsed.crate_bytes)
             .await?;

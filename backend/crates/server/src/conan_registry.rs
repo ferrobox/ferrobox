@@ -285,8 +285,8 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
-        InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage,
-        InMemoryUserStore,
+        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -329,6 +329,12 @@ mod tests {
                 repository_store.clone(),
             )));
 
+        let quota = ferrobox_application::quota::QuotaService::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            Arc::new(InMemoryQuotaStore::default()),
+        );
+
         let state = Arc::new(AppState {
             create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
             list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
@@ -338,6 +344,7 @@ mod tests {
                 repository_store.clone(),
                 artifact_store.clone(),
                 storage.clone(),
+                quota.clone(),
             ),
             download_artifact: DownloadArtifactUseCase::new(
                 artifact_store.clone(),
@@ -376,6 +383,7 @@ mod tests {
                 Arc::new(InMemoryAssayStore::default()),
                 Arc::new(InMemoryRetentionStore::default()),
             ),
+            quota,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
             change_password: ChangePasswordUseCase::new(user_store.clone()),

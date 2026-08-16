@@ -33,8 +33,11 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
-use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{
+    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+};
 use crate::assay::AssayService;
+use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -47,6 +50,7 @@ pub struct PypiPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     public_base_url: String,
     assays: Option<AssayService>,
+    quota: Option<QuotaService>,
 }
 
 impl PypiPackagingStrategy {
@@ -69,6 +73,7 @@ impl PypiPackagingStrategy {
             repository_store,
             public_base_url,
             assays: None,
+            quota: None,
         }
     }
 
@@ -76,6 +81,13 @@ impl PypiPackagingStrategy {
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
+        self
+    }
+
+    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    #[must_use]
+    pub fn with_quota(mut self, quota: QuotaService) -> Self {
+        self.quota = Some(quota);
         self
     }
 
@@ -297,6 +309,7 @@ impl PypiPackagingStrategy {
         }
 
         let artifact = Artifact::new(repository.id(), checksum.clone(), content.len() as u64);
+        ensure_quota(self.quota.as_ref(), repository.id(), content.len() as u64).await?;
         self.storage
             .put(&storage_key_for(artifact.id()), content.clone())
             .await?;
@@ -443,6 +456,12 @@ impl PackagingStrategy for PypiPackagingStrategy {
             checksum.clone(),
             parsed.content.len() as u64,
         );
+        ensure_quota(
+            self.quota.as_ref(),
+            repository.id(),
+            parsed.content.len() as u64,
+        )
+        .await?;
         self.storage
             .put(&storage_key_for(artifact.id()), parsed.content)
             .await?;

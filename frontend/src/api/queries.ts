@@ -9,6 +9,7 @@ import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
+import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 
 export const queryKeys = {
@@ -21,6 +22,7 @@ export const queryKeys = {
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
+  repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
 };
 
 export function useRepositories() {
@@ -376,6 +378,9 @@ export function useCollectGarbage(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryQuota(repositoryId),
+      });
     },
   });
 }
@@ -394,6 +399,27 @@ export function useCollectGarbageAll() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+    },
+  });
+}
+
+export function useQuota(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryQuota(repositoryId),
+    queryFn: () => api.getQuota(repositoryId),
+    enabled,
+  });
+}
+
+export function useSaveQuota(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: QuotaRequest) => api.saveQuota(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryQuota(repositoryId),
+      });
     },
   });
 }
