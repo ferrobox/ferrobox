@@ -92,15 +92,74 @@ pub fn osv_query_target(
 }
 
 fn ecosystem_from_purl(purl: &str) -> Option<&'static str> {
-    if purl.starts_with("pkg:apk/") {
+    let rest = purl.strip_prefix("pkg:")?;
+    if rest.starts_with("apk/wolfi/") {
+        Some("Wolfi")
+    } else if rest.starts_with("apk/chainguard/") {
+        Some("Chainguard")
+    } else if rest.starts_with("apk/alpaquita/") {
+        Some("Alpaquita")
+    } else if rest.starts_with("apk/minimos/") {
+        Some("MinimOS")
+    } else if rest.starts_with("apk/") {
         Some("Alpine")
-    } else if purl.starts_with("pkg:deb/ubuntu/") {
+    } else if rest.starts_with("deb/ubuntu/") {
         Some("Ubuntu")
-    } else if purl.starts_with("pkg:deb/") {
+    } else if rest.starts_with("deb/") {
         Some("Debian")
+    } else if rest.starts_with("rpm/rocky/") {
+        Some("Rocky Linux")
+    } else if rest.starts_with("rpm/almalinux/") {
+        Some("AlmaLinux")
+    } else if rest.starts_with("rpm/azurelinux/") || rest.starts_with("rpm/mariner/") {
+        Some("Azure Linux")
+    } else if rest.starts_with("rpm/opensuse/") {
+        Some("openSUSE")
+    } else if rest.starts_with("rpm/suse/") {
+        Some("SUSE")
+    } else if rest.starts_with("rpm/photon/") {
+        Some("Photon OS")
+    } else if rest.starts_with("rpm/rhel/")
+        || rest.starts_with("rpm/centos/")
+        || rest.starts_with("rpm/redhat/")
+        || rest.starts_with("rpm/ol/")
+    {
+        Some("Red Hat")
     } else {
         None
     }
+}
+
+/// Inserta o concreta un componente. Si ya había un rango declarado,
+/// una versión exacta del lockfile la sustituye y conserva el papel
+/// (`direct`). Las nuevas entradas de lockfile van como `transitive`.
+pub(crate) fn merge_component(
+    components: &mut Vec<AssayComponent>,
+    name: String,
+    version: String,
+    kind: AssayComponentKind,
+    purl: Option<String>,
+) {
+    if name.is_empty() || version.is_empty() {
+        return;
+    }
+    if let Some(index) = components
+        .iter()
+        .position(|component| component.name().eq_ignore_ascii_case(&name))
+    {
+        let existing = &components[index];
+        if existing.kind() == AssayComponentKind::Root || is_exact_version(existing.version()) {
+            return;
+        }
+        if !is_exact_version(&version) {
+            return;
+        }
+        let keep_kind = existing.kind();
+        let purl = purl.or_else(|| existing.purl().map(ToOwned::to_owned));
+        components[index] = AssayComponent::new(name, version, purl, keep_kind);
+        return;
+    }
+    components.push(AssayComponent::new(name, version, purl, kind));
 }
 
 /// Inventario a partir de la entrada de índice del ecosistema.
@@ -260,5 +319,61 @@ mod tests {
         assert_eq!(components.len(), 2);
         assert_eq!(components[1].name(), "serde");
         assert_eq!(components[1].version(), "^1.0");
+    }
+
+    #[test]
+    fn merge_component_upgrades_range_to_lockfile_pin() {
+        let mut components = extract_components(
+            PackageEcosystem::Npm,
+            "demo",
+            "1.0.0",
+            &serde_json::to_vec(&serde_json::json!({
+                "manifest": { "dependencies": { "lodash": "^4.17.0" } }
+            }))
+            .unwrap(),
+        );
+        merge_component(
+            &mut components,
+            "lodash".to_string(),
+            "4.17.21".to_string(),
+            AssayComponentKind::Transitive,
+            purl_for(PackageEcosystem::Npm, "lodash", "4.17.21"),
+        );
+        let lodash = components
+            .iter()
+            .find(|component| component.name() == "lodash")
+            .unwrap();
+        assert_eq!(lodash.version(), "4.17.21");
+        assert_eq!(lodash.kind(), AssayComponentKind::Direct);
+        assert_eq!(lodash.purl(), Some("pkg:npm/lodash@4.17.21"));
+    }
+
+    #[test]
+    fn osv_query_target_maps_distro_purls() {
+        let wolfi = AssayComponent::new(
+            "busybox",
+            "1.36.1-r0",
+            Some("pkg:apk/wolfi/busybox@1.36.1-r0".to_string()),
+            AssayComponentKind::Direct,
+        );
+        let target = osv_query_target(&wolfi, PackageEcosystem::Oci).unwrap();
+        assert_eq!(target.0, "Wolfi");
+        let rocky = AssayComponent::new(
+            "openssl",
+            "1.1.1k-1.el8",
+            Some("pkg:rpm/rocky/openssl@1.1.1k-1.el8".to_string()),
+            AssayComponentKind::Direct,
+        );
+        assert_eq!(
+            osv_query_target(&rocky, PackageEcosystem::Oci).unwrap().0,
+            "Rocky Linux"
+        );
+        let arch = AssayComponent::new(
+            "linux",
+            "6.6.1-1",
+            Some("pkg:alpm/arch/linux@6.6.1-1".to_string()),
+            AssayComponentKind::Direct,
+        );
+        assert!(osv_query_target(&arch, PackageEcosystem::Oci).is_none());
     }
 }

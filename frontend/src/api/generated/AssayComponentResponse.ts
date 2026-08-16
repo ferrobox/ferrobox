@@ -5,6 +5,7 @@
  */
 export type AssayComponentResponse = { name: string, version: string, purl: string | null, 
 /**
- * `root` es el paquete ensayado; `direct` una dependencia declarada.
+ * `root` es el paquete ensayado; `direct` una dependencia declarada;
+ * `transitive` una resuelta desde lockfile.
  */
 kind: string, };

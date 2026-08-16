@@ -3,6 +3,7 @@
 mod cyclonedx;
 mod extract;
 mod layers;
+mod lockfiles;
 mod osv;
 
 use std::collections::HashSet;

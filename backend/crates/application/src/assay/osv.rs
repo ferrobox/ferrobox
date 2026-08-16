@@ -13,6 +13,7 @@ use super::extract::osv_query_target;
 
 const OSV_QUERYBATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
 const OSV_VULN_URL: &str = "https://api.osv.dev/v1/vulns";
+const OSV_BATCH_SIZE: usize = 1000;
 
 /// Consulta OSV para los componentes con versión concreta.
 ///
@@ -46,13 +47,21 @@ pub async fn query_findings(
         return Ok(Vec::new());
     }
 
-    let body = Bytes::from(
-        serde_json::to_vec(&json!({ "queries": queries })).expect("query batch always serializes"),
-    );
-    let response = http
-        .post(OSV_QUERYBATCH_URL, body, "application/json")
-        .await?;
-    let mut parsed = parse_querybatch_vulns(&response.body, &queried_packages);
+    let mut parsed = Vec::new();
+    for start in (0..queries.len()).step_by(OSV_BATCH_SIZE) {
+        let end = (start + OSV_BATCH_SIZE).min(queries.len());
+        let body = Bytes::from(
+            serde_json::to_vec(&json!({ "queries": queries[start..end] }))
+                .expect("query batch always serializes"),
+        );
+        let response = http
+            .post(OSV_QUERYBATCH_URL, body, "application/json")
+            .await?;
+        parsed.extend(parse_querybatch_vulns(
+            &response.body,
+            &queried_packages[start..end],
+        ));
+    }
     hydrate_thin_vulns(http, &mut parsed).await;
     Ok(parsed
         .iter()
