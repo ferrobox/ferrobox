@@ -27,6 +27,19 @@ pub struct IndexedArtifact {
     pub entry: Bytes,
 }
 
+/// Fila del índice de paquetes, con o sin binario cacheado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageIndexRecord {
+    /// Identificador del binario persistido, si ya se cacheó.
+    pub artifact_id: Option<ArtifactId>,
+    /// Coordenada de paquete asociada.
+    pub coordinate: PackageCoordinate,
+    /// Entrada de índice ya serializada por la estrategia de empaquetado.
+    pub entry: Bytes,
+    /// Momento en que se insertó la fila, en RFC 3339.
+    pub created_at_rfc3339: String,
+}
+
 /// Puerto de persistencia del índice de paquetes: la lista, por
 /// repositorio y coordenada, de las entradas que cada estrategia de
 /// empaquetado (`PackagingStrategy`) necesita para responder al
@@ -135,6 +148,31 @@ pub trait PackageIndexStore: Send + Sync {
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError>;
+
+    /// Lista todas las entradas de índice de un repositorio, incluidas
+    /// las que todavía no tienen binario cacheado.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn list_entries(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<PackageIndexRecord>, PackageIndexStoreError>;
+
+    /// Elimina la entrada de índice de una coordenada. No es un error si
+    /// no existe.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
+    /// subyacente falla.
+    async fn delete_by_coordinate(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<(), PackageIndexStoreError>;
 }
 
 #[cfg(test)]
@@ -264,6 +302,41 @@ mod tests {
                     })
                 })
                 .collect())
+        }
+
+        async fn list_entries(
+            &self,
+            repository_id: RepositoryId,
+        ) -> Result<Vec<PackageIndexRecord>, PackageIndexStoreError> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|((repo_id, coordinate), (artifact_id, entry))| {
+                    if *repo_id != repository_id {
+                        return None;
+                    }
+                    Some(PackageIndexRecord {
+                        artifact_id: *artifact_id,
+                        coordinate: coordinate.clone(),
+                        entry: entry.clone(),
+                        created_at_rfc3339: "2026-01-01T00:00:00Z".to_string(),
+                    })
+                })
+                .collect())
+        }
+
+        async fn delete_by_coordinate(
+            &self,
+            repository_id: RepositoryId,
+            coordinate: &PackageCoordinate,
+        ) -> Result<(), PackageIndexStoreError> {
+            self.entries
+                .lock()
+                .unwrap()
+                .remove(&(repository_id, coordinate.clone()));
+            Ok(())
         }
     }
 
@@ -451,6 +524,39 @@ mod tests {
             .unwrap();
 
         assert_eq!(entries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delete_by_coordinate_removes_only_that_row() {
+        let store = InMemoryPackageIndexStore::default();
+        let repository_id = RepositoryId::new();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.0.0"),
+                Some(ArtifactId::new()),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_entry(
+                repository_id,
+                &coordinate("1.1.0"),
+                Some(ArtifactId::new()),
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
+
+        store
+            .delete_by_coordinate(repository_id, &coordinate("1.0.0"))
+            .await
+            .unwrap();
+
+        let listed = store.list_entries(repository_id).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].coordinate.version().as_str(), "1.1.0");
     }
 
     #[tokio::test]

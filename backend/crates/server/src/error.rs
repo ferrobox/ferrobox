@@ -20,7 +20,9 @@ use ferrobox_application::manage_users::{
 };
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
+use ferrobox_application::retention::RetentionError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
+use ferrobox_domain::retention::RetentionPolicyError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 
@@ -284,6 +286,29 @@ impl From<ChangePasswordError> for ApiError {
             ChangePasswordError::PasswordHashing(_) | ChangePasswordError::Persistence(_) => {
                 Self::Internal(err.to_string())
             }
+        }
+    }
+}
+
+impl From<RetentionPolicyError> for ApiError {
+    fn from(err: RetentionPolicyError) -> Self {
+        Self::BadRequest(err.to_string())
+    }
+}
+
+impl From<RetentionError> for ApiError {
+    fn from(err: RetentionError) -> Self {
+        match err {
+            RetentionError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            RetentionError::AlloyRepository | RetentionError::InvalidPolicy(_) => {
+                Self::BadRequest(err.to_string())
+            }
+            RetentionError::Repositories(_)
+            | RetentionError::Artifacts(_)
+            | RetentionError::Index(_)
+            | RetentionError::Assays(_)
+            | RetentionError::Policy(_)
+            | RetentionError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
 }

@@ -34,3 +34,6 @@ pub mod api_token;
 
 /// La entidad `Assay`: ensaye de un artefacto (composición e impurezas).
 pub mod assay;
+
+/// Política de retención de versiones de un repositorio.
+pub mod retention;

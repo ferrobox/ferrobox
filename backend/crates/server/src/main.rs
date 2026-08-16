@@ -15,6 +15,7 @@ mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
 mod repositories;
+mod retention;
 mod settings;
 mod users;
 
@@ -33,6 +34,7 @@ use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
+use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::assay::AssayService;
@@ -60,6 +62,7 @@ use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
+use ferrobox_application::retention::RetentionService;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
@@ -78,6 +81,7 @@ struct AppState {
     delete_artifact: DeleteArtifactUseCase,
     packaging: PackagingRegistry,
     assays: AssayService,
+    retention: RetentionService,
     public_base_url: String,
     login: LoginUseCase,
     change_password: ChangePasswordUseCase,
@@ -109,6 +113,7 @@ async fn main() {
     let artifact_store = Arc::new(PostgresArtifactStore::new(pool.clone()));
     let package_index_store = Arc::new(PostgresPackageIndexStore::new(pool.clone()));
     let assay_store = Arc::new(PostgresAssayStore::new(pool.clone()));
+    let retention_store = Arc::new(PostgresRetentionStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
@@ -122,6 +127,7 @@ async fn main() {
         artifact_store,
         package_index_store,
         assay_store,
+        retention_store,
         user_store,
         api_token_store,
         storage,
@@ -198,6 +204,18 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/repositories/{repository_id}/assay",
             get(assays::get_or_run),
         )
+        .route(
+            "/repositories/{repository_id}/retention",
+            get(retention::get_policy).put(retention::save_policy),
+        )
+        .route(
+            "/repositories/{repository_id}/retention/apply",
+            post(retention::apply),
+        )
+        .route(
+            "/repositories/{repository_id}/gc",
+            post(retention::collect_garbage),
+        )
         .merge(cargo_registry::write_router())
         .merge(npm_registry::write_router())
         .merge(pypi_registry::write_router())
@@ -247,13 +265,14 @@ fn build_app_state(
     artifact_store: Arc<PostgresArtifactStore>,
     package_index_store: Arc<PostgresPackageIndexStore>,
     assay_store: Arc<PostgresAssayStore>,
+    retention_store: Arc<PostgresRetentionStore>,
     user_store: Arc<PostgresUserStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
     let assays = AssayService::new(
-        assay_store,
+        assay_store.clone(),
         package_index_store.clone(),
         repository_store.clone(),
         storage.clone(),
@@ -267,6 +286,14 @@ fn build_app_state(
         &storage,
         http_client,
         &assays,
+    );
+    let retention = RetentionService::new(
+        repository_store.clone(),
+        artifact_store.clone(),
+        package_index_store.clone(),
+        storage.clone(),
+        assay_store,
+        retention_store,
     );
 
     AppState {
@@ -299,6 +326,7 @@ fn build_app_state(
         ),
         packaging,
         assays,
+        retention,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),

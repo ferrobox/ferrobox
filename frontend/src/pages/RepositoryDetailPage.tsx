@@ -12,6 +12,7 @@ import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
+import { RetentionPanel } from "@/components/repository/RetentionPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -206,6 +207,10 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           )}
         />
       </section>
+
+      {repository.kind.type !== "alloy" ? (
+        <RetentionPanel repositoryId={repositoryId} canWrite={canWrite} />
+      ) : null}
     </div>
   );
 }
