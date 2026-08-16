@@ -23,6 +23,7 @@ export const queryKeys = {
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
+  packageSearch: (query: string) => ["search", query] as const,
 };
 
 export function useRepositories() {
@@ -421,5 +422,14 @@ export function useSaveQuota(repositoryId: string) {
         queryKey: queryKeys.repositoryQuota(repositoryId),
       });
     },
+  });
+}
+
+export function usePackageSearch(query: string) {
+  const trimmed = query.trim();
+  return useQuery({
+    queryKey: queryKeys.packageSearch(trimmed),
+    queryFn: () => api.searchPackages(trimmed),
+    enabled: trimmed.length > 0,
   });
 }

@@ -381,6 +381,11 @@ mod tests {
             Arc::new(InMemoryQuotaStore::default()),
         );
 
+        let search_packages = ferrobox_application::search_packages::SearchPackagesUseCase::new(
+            repository_store.clone(),
+            package_index_store.clone(),
+        );
+
         let state = Arc::new(AppState {
             create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
             list_repositories: ListRepositoriesUseCase::new(repository_store.clone()),
@@ -430,6 +435,7 @@ mod tests {
                 Arc::new(InMemoryRetentionStore::default()),
             ),
             quota,
+            search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
             change_password: ChangePasswordUseCase::new(user_store.clone()),

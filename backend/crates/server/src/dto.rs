@@ -680,3 +680,45 @@ impl From<ferrobox_application::retention::CleanupPreview> for CleanupPreviewRes
         }
     }
 }
+
+/// Una coincidencia de la búsqueda global de paquetes.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct PackageSearchHitResponse {
+    /// Repositorio donde está indexado el paquete.
+    pub(crate) repository_id: String,
+    /// Nombre del repositorio.
+    pub(crate) repository_name: String,
+    /// Forge o Mirror.
+    pub(crate) kind: RepositoryKindDto,
+    /// Ecosistema del paquete.
+    pub(crate) ecosystem: PackageEcosystemDto,
+    /// Nombre del paquete.
+    pub(crate) name: String,
+    /// Versión mostrada.
+    pub(crate) version: String,
+    /// `true` si esa versión está yankada.
+    pub(crate) yanked: bool,
+}
+
+impl From<ferrobox_application::search_packages::PackageSearchHit> for PackageSearchHitResponse {
+    fn from(hit: ferrobox_application::search_packages::PackageSearchHit) -> Self {
+        Self {
+            repository_id: hit.repository_id.to_string(),
+            repository_name: hit.repository_name.to_string(),
+            kind: (&hit.repository_kind).into(),
+            ecosystem: hit.ecosystem.into(),
+            name: hit.name,
+            version: hit.version,
+            yanked: hit.yanked,
+        }
+    }
+}
+
+/// Resultado de buscar paquetes en toda la instancia.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SearchResponse {
+    /// Coincidencias, ya recortadas al límite pedido.
+    pub(crate) hits: Vec<PackageSearchHitResponse>,
+}

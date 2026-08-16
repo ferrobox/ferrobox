@@ -22,6 +22,7 @@ use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
+use ferrobox_application::search_packages::SearchPackagesError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
 use ferrobox_domain::quota::StorageQuotaError;
 use ferrobox_domain::retention::RetentionPolicyError;
@@ -333,8 +334,14 @@ impl From<RetentionError> for ApiError {
             | RetentionError::Artifacts(_)
             | RetentionError::Index(_)
             | RetentionError::Assays(_)
-            | RetentionError::Policy(_)
+            |             RetentionError::Policy(_)
             | RetentionError::Storage(_) => Self::Internal(err.to_string()),
         }
+    }
+}
+
+impl From<SearchPackagesError> for ApiError {
+    fn from(err: SearchPackagesError) -> Self {
+        Self::Internal(err.to_string())
     }
 }

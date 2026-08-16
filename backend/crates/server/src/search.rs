@@ -1,107 +1,38 @@
-//! Rutas HTTP de retención y recolección de basura.
+//! Búsqueda global de paquetes en el catálogo.
 
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
-use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::retention::RetentionPolicy;
-use uuid::Uuid;
+use axum::extract::{Query, State};
+use ferrobox_application::search_packages::default_search_limit;
+use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
-use crate::dto::{
-    CleanupPreviewResponse, CleanupReportResponse, RetentionPolicyRequest, RetentionPolicyResponse,
-};
+use crate::dto::{PackageSearchHitResponse, SearchResponse};
 use crate::error::ApiError;
 
-pub(crate) async fn get_policy(
+#[derive(Debug, Deserialize)]
+pub(crate) struct SearchQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+fn default_limit() -> usize {
+    default_search_limit()
+}
+
+pub(crate) async fn search_packages(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    let policy = state
-        .retention
-        .get_policy(RepositoryId::from(repository_id))
-        .await?;
-    Ok(Json(RetentionPolicyResponse::from(policy)))
-}
-
-pub(crate) async fn save_policy(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-    Json(payload): Json<RetentionPolicyRequest>,
-) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
-    let saved = state
-        .retention
-        .save_policy(RepositoryId::from(repository_id), policy)
-        .await?;
-    Ok(Json(RetentionPolicyResponse::from(saved)))
-}
-
-pub(crate) async fn dry_run(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-    Json(payload): Json<RetentionPolicyRequest>,
-) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
-    let preview = state
-        .retention
-        .dry_run(RepositoryId::from(repository_id), policy)
-        .await?;
-    Ok(Json(CleanupPreviewResponse::from(preview)))
-}
-
-pub(crate) async fn apply(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-    Json(payload): Json<RetentionPolicyRequest>,
-) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
-    let preview = state
-        .retention
-        .apply_policy(RepositoryId::from(repository_id), policy)
-        .await?;
-    Ok(Json(CleanupPreviewResponse::from(preview)))
-}
-
-pub(crate) async fn collect_garbage(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-) -> Result<Json<CleanupReportResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let report = state
-        .retention
-        .collect_garbage_only(RepositoryId::from(repository_id))
-        .await?;
-    Ok(Json(CleanupReportResponse::from(report)))
-}
-
-pub(crate) async fn dry_run_garbage_collection(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let preview = state.retention.dry_run_garbage_collection().await?;
-    Ok(Json(CleanupPreviewResponse::from(preview)))
-}
-
-pub(crate) async fn collect_garbage_all(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
-    let preview = state.retention.collect_garbage_all().await?;
-    Ok(Json(CleanupPreviewResponse::from(preview)))
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<SearchResponse>, ApiError> {
+    let hits = state.search_packages.execute(&query.q, query.limit).await?;
+    Ok(Json(SearchResponse {
+        hits: hits.into_iter().map(PackageSearchHitResponse::from).collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -110,6 +41,7 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use bytes::Bytes;
     use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
     use ferrobox_application::change_password::ChangePasswordUseCase;
     use ferrobox_application::create_repository::{CreateRepositoryKind, CreateRepositoryUseCase};
@@ -128,7 +60,9 @@ mod tests {
     };
     use ferrobox_application::packaging::PackagingRegistry;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
+    use ferrobox_application::quota::QuotaService;
     use ferrobox_application::retention::RetentionService;
+    use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
@@ -136,15 +70,18 @@ mod tests {
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
-    use ferrobox_domain::package_coordinate::PackageEcosystem;
+    use ferrobox_domain::package_coordinate::{
+        PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+    };
     use ferrobox_domain::repository::RepositoryName;
     use ferrobox_domain::user::{Role, Username};
+    use ferrobox_ports::package_index_store::PackageIndexStore;
     use serde_json::Value;
     use std::sync::Arc;
     use tower::ServiceExt;
 
     #[allow(clippy::too_many_lines)]
-    async fn fixture() -> (Router, String, String, String) {
+    async fn fixture() -> (Router, String, String) {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
@@ -154,14 +91,12 @@ mod tests {
         let assay_store = Arc::new(InMemoryAssayStore::default());
         let retention_store = Arc::new(InMemoryRetentionStore::default());
         let http_client = Arc::new(InMemoryHttpClient::default());
-
-        let quota = ferrobox_application::quota::QuotaService::new(
+        let quota = QuotaService::new(
             repository_store.clone(),
             artifact_store.clone(),
             Arc::new(InMemoryQuotaStore::default()),
         );
-
-        let search_packages = ferrobox_application::search_packages::SearchPackagesUseCase::new(
+        let search_packages = SearchPackagesUseCase::new(
             repository_store.clone(),
             package_index_store.clone(),
         );
@@ -206,7 +141,7 @@ mod tests {
             retention: RetentionService::new(
                 repository_store.clone(),
                 artifact_store,
-                package_index_store,
+                package_index_store.clone(),
                 storage,
                 assay_store,
                 retention_store,
@@ -264,22 +199,66 @@ mod tests {
             )
             .await
             .unwrap();
+        package_index_store
+            .upsert_entry(
+                repo,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Cargo,
+                    PackageName::parse("serde").unwrap(),
+                    PackageVersion::parse("1.0.210").unwrap(),
+                ),
+                None,
+                Bytes::from_static(b"{}"),
+            )
+            .await
+            .unwrap();
 
-        (
-            crate::build_router(state),
-            token,
-            reader_token,
-            repo.to_string(),
-        )
+        (crate::build_router(state), token, reader_token)
     }
 
     #[tokio::test]
-    async fn get_policy_defaults_to_keep_all() {
-        let (app, token, _, repo) = fixture().await;
+    async fn search_requires_auth_and_is_readable_by_a_reader() {
+        let (app, _token, reader_token) = fixture().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/search?q=serde")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/retention"))
+                    .uri("/search?q=ser")
+                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["hits"][0]["name"], "serde");
+        assert_eq!(json["hits"][0]["version"], "1.0.210");
+        assert_eq!(json["hits"][0]["repository_name"], "crates-releases");
+    }
+
+    #[tokio::test]
+    async fn empty_query_returns_no_hits() {
+        let (app, token, _) = fixture().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/search")
                     .header("Authorization", format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -291,137 +270,6 @@ mod tests {
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["keep_last"], Value::Null);
-        assert_eq!(json["keep_days"], Value::Null);
-    }
-
-    #[tokio::test]
-    async fn save_and_apply_require_write_role() {
-        let (app, token, reader_token, repo) = fixture().await;
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!("/repositories/{repo}/retention"))
-                    .header("Authorization", format!("Bearer {reader_token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"keep_last":2}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/repositories/{repo}/retention/dry-run"))
-                    .header("Authorization", format!("Bearer {reader_token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"keep_last":2}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!("/repositories/{repo}/retention"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"keep_last":2}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/repositories/{repo}/retention/dry-run"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"keep_last":2}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["dry_run"], true);
-        assert_eq!(json["dropped_versions"], 0);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/repositories/{repo}/retention/apply"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"keep_last":2}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["dry_run"], false);
-        assert_eq!(json["dropped_versions"], 0);
-        assert_eq!(json["deleted_artifacts"], 0);
-    }
-
-    #[tokio::test]
-    async fn instance_gc_dry_run_requires_write_role() {
-        let (app, token, reader_token, _) = fixture().await;
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/gc/dry-run")
-                    .header("Authorization", format!("Bearer {reader_token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/gc/dry-run")
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["dry_run"], true);
-        assert_eq!(json["deleted_artifacts"], 0);
+        assert_eq!(json["hits"], Value::Array(vec![]));
     }
 }

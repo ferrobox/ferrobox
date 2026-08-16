@@ -1,20 +1,53 @@
-import { LogOut, Moon, Sun } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import { LogOut, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthProvider";
 import { roleLabel } from "@/auth/roles";
 import { HealthIndicator } from "@/components/layout/HealthIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function Topbar() {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const isDark = resolvedTheme === "dark";
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const urlQuery = location.pathname === "/search" ? (params.get("q") ?? "") : "";
+  const [query, setQuery] = useState(urlQuery);
+
+  useEffect(() => {
+    if (location.pathname === "/search") {
+      setQuery(urlQuery);
+    }
+  }, [location.pathname, urlQuery]);
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = query.trim();
+    navigate(trimmed.length > 0 ? `/search?q=${encodeURIComponent(trimmed)}` : "/search");
+  }
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-6">
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card px-6">
       <HealthIndicator />
+
+      <form onSubmit={onSearch} className="flex min-w-0 flex-1 justify-center">
+        <div className="relative w-full max-w-xl">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar paquetes…"
+            aria-label="Buscar paquetes"
+            className="pl-8"
+          />
+        </div>
+      </form>
 
       <div className="flex items-center gap-2">
         {user ? (

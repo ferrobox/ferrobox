@@ -9,12 +9,13 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AssaysPage } from "@/pages/AssaysPage";
 import { LoginPage } from "@/pages/LoginPage";
 import NotFoundPage from "@/pages/NotFoundPage";
-import { AssaysPage } from "@/pages/AssaysPage";
 import { RepositoriesLayout } from "@/pages/RepositoriesLayout";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailPage } from "@/pages/RepositoryDetailPage";
+import { SearchPage } from "@/pages/SearchPage";
 import { SecurityPage } from "@/pages/SecurityPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { UsersPage } from "@/pages/UsersPage";
@@ -45,6 +46,7 @@ export default function App() {
                       <Route path=":repositoryId" element={<RepositoryDetailPage />} />
                     </Route>
                     <Route element={<PageContainer />}>
+                      <Route path="search" element={<SearchPage />} />
                       <Route path="assays" element={<AssaysPage />} />
                       <Route path="security" element={<SecurityPage />} />
                       <Route path="users" element={<UsersPage />} />
