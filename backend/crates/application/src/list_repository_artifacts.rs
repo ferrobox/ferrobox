@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
+use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
@@ -117,7 +118,12 @@ impl ListRepositoryArtifactsUseCase {
 
         let mut listed = Vec::new();
         for id in ids {
-            listed.extend(self.list_one(id).await?);
+            let hide_unindexed = self
+                .repository_store
+                .find_by_id(id)
+                .await?
+                .is_some_and(|repository| repository.ecosystem() != PackageEcosystem::Generic);
+            listed.extend(self.list_one(id, hide_unindexed).await?);
         }
         sort_listed(&mut listed);
         Ok(listed)
@@ -126,6 +132,7 @@ impl ListRepositoryArtifactsUseCase {
     async fn list_one(
         &self,
         repository_id: RepositoryId,
+        hide_unindexed: bool,
     ) -> Result<Vec<ListedArtifact>, ListRepositoryArtifactsError> {
         let artifacts = self
             .artifact_store
@@ -143,15 +150,18 @@ impl ListRepositoryArtifactsUseCase {
 
         Ok(artifacts
             .into_iter()
-            .map(|artifact| {
+            .filter_map(|artifact| {
                 let meta = names_by_artifact.remove(&artifact.id());
-                ListedArtifact {
+                if hide_unindexed && meta.is_none() {
+                    return None;
+                }
+                Some(ListedArtifact {
                     artifact,
                     package_name: meta.as_ref().map(|item| item.name.clone()),
                     package_version: meta.as_ref().map(|item| item.version.clone()),
                     yanked: meta.as_ref().is_some_and(|item| item.yanked),
                     filename: meta.and_then(|item| item.filename),
-                }
+                })
             })
             .collect())
     }
@@ -300,6 +310,28 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].artifact(), &matching);
         assert_eq!(result[0].package_name(), None);
+    }
+
+    #[tokio::test]
+    async fn hides_unindexed_artifacts_in_package_ecosystems() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("crates").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repository_store.save(&repository).await.unwrap();
+        let leftover = Artifact::new(repository.id(), checksum(), 4);
+        artifact_store.save(&leftover).await.unwrap();
+
+        let result = use_case(repository_store, artifact_store, package_index_store)
+            .execute(repository.id())
+            .await
+            .unwrap();
+        assert!(result.is_empty());
     }
 
     #[tokio::test]

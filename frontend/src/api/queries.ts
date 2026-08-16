@@ -379,3 +379,21 @@ export function useCollectGarbage(repositoryId: string) {
     },
   });
 }
+
+export function useDryRunGarbageCollection() {
+  return useMutation({
+    mutationFn: api.dryRunGarbageCollection,
+  });
+}
+
+export function useCollectGarbageAll() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.collectGarbageAll,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+    },
+  });
+}

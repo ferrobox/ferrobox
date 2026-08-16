@@ -450,6 +450,14 @@ export function collectGarbage(repositoryId: string): Promise<CleanupReportRespo
   });
 }
 
+export function dryRunGarbageCollection(): Promise<CleanupPreviewResponse> {
+  return request<CleanupPreviewResponse>("/gc/dry-run", { method: "POST" });
+}
+
+export function collectGarbageAll(): Promise<CleanupPreviewResponse> {
+  return request<CleanupPreviewResponse>("/gc", { method: "POST" });
+}
+
 export async function downloadAssaySbom(assayId: string, filename: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/assays/${assayId}/sbom`, {
     headers: authHeaders(),

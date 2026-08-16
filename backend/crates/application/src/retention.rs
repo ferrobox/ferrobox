@@ -1,4 +1,4 @@
-//! Retención de versiones y recolección de basura (GC) de un repositorio.
+//! Retención de versiones (índice) y recolección de basura (binarios) de un repositorio.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -35,9 +35,19 @@ pub struct CleanupReport {
     pub freed_bytes: u64,
 }
 
+impl CleanupReport {
+    fn absorb(&mut self, other: Self) {
+        self.dropped_versions += other.dropped_versions;
+        self.deleted_artifacts += other.deleted_artifacts;
+        self.freed_bytes += other.freed_bytes;
+    }
+}
+
 /// Qué se borraría (o se ha borrado) al aplicar retención o GC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleanupItem {
+    /// Repositorio al que pertenece la fila.
+    pub repository: String,
     /// Nombre del paquete, o `_blob` para una capa OCI.
     pub name: String,
     /// Versión, etiqueta o digest.
@@ -155,7 +165,7 @@ impl RetentionService {
         }
     }
 
-    /// Guarda la política. No borra nada hasta [`Self::apply`].
+    /// Guarda la política. No desindexa nada hasta [`Self::apply`].
     ///
     /// # Errors
     ///
@@ -186,7 +196,8 @@ impl RetentionService {
         Ok(preview)
     }
 
-    /// Guarda la política y la aplica de verdad.
+    /// Guarda la política y la aplica: quita versiones del índice. El disco
+    /// se libera después, con la recolección de basura.
     ///
     /// # Errors
     ///
@@ -204,7 +215,7 @@ impl RetentionService {
         Ok(preview)
     }
 
-    /// Aplica la política persistida y después recolecta binarios huérfanos.
+    /// Aplica la política persistida (solo índice).
     ///
     /// No bloquea `install` ni `publish`: hay que invocarlo a propósito.
     ///
@@ -217,7 +228,7 @@ impl RetentionService {
         Ok(self.apply_policy(repository_id, policy).await?.report)
     }
 
-    /// Recolecta binarios huérfanos sin tocar versiones indexadas.
+    /// Recolecta binarios huérfanos de un repositorio sin tocar versiones indexadas.
     ///
     /// # Errors
     ///
@@ -228,6 +239,34 @@ impl RetentionService {
     ) -> Result<CleanupReport, RetentionError> {
         self.require_cleanup_target(repository_id).await?;
         self.collect_garbage(repository_id).await
+    }
+
+    /// Simula la recolección de basura de toda la instancia, sin borrar.
+    ///
+    /// # Errors
+    ///
+    /// Un fallo de puerto.
+    pub async fn dry_run_garbage_collection(&self) -> Result<CleanupPreview, RetentionError> {
+        let mut preview = self.preview_all_garbage().await?;
+        preview.dry_run = true;
+        Ok(preview)
+    }
+
+    /// Borra de disco los binarios que ya no están en el índice, en toda la instancia.
+    ///
+    /// # Errors
+    ///
+    /// Un fallo de puerto.
+    pub async fn collect_garbage_all(&self) -> Result<CleanupPreview, RetentionError> {
+        let mut preview = self.preview_all_garbage().await?;
+        for repository in self.repository_store.find_all().await? {
+            if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+                continue;
+            }
+            self.collect_garbage(repository.id()).await?;
+        }
+        preview.dry_run = false;
+        Ok(preview)
     }
 
     async fn require_cleanup_target(
@@ -255,7 +294,6 @@ impl RetentionService {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn preview(
         &self,
         repository_id: RepositoryId,
@@ -266,6 +304,7 @@ impl RetentionService {
             .find_by_id(repository_id)
             .await?
             .ok_or(RetentionError::RepositoryNotFound(repository_id))?;
+        let repo_name = repository.name().as_str();
         let entries = self.package_index_store.list_entries(repository_id).await?;
         let artifacts = self
             .artifact_store
@@ -277,7 +316,6 @@ impl RetentionService {
             .collect();
 
         let mut items = Vec::new();
-        let mut listed_artifact_ids = HashSet::new();
         let mut remaining: Vec<PackageIndexRecord> = entries.clone();
         let now = Utc::now();
 
@@ -288,81 +326,129 @@ impl RetentionService {
                 .map(|(record, _)| coordinate_key(&record.coordinate))
                 .collect();
             for (record, reason) in dropping {
-                remember_artifact(&record, &mut listed_artifact_ids);
-                items.push(item_from_record(&record, &sizes, reason));
+                items.push(item_from_record(repo_name, &record, &sizes, reason));
             }
             remaining.retain(|entry| !drop_keys.contains(&coordinate_key(&entry.coordinate)));
 
             for record in digest_aliases_to_drop(&remaining) {
                 drop_keys.insert(coordinate_key(&record.coordinate));
-                remember_artifact(&record, &mut listed_artifact_ids);
                 items.push(item_from_record(
+                    repo_name,
                     &record,
                     &sizes,
                     "digest sin etiqueta que lo apunte".to_string(),
                 ));
             }
-            remaining.retain(|entry| !drop_keys.contains(&coordinate_key(&entry.coordinate)));
         }
 
+        let dropped_versions = u64::try_from(items.len()).unwrap_or(0);
+        Ok(CleanupPreview {
+            dry_run: true,
+            report: CleanupReport {
+                dropped_versions,
+                deleted_artifacts: 0,
+                freed_bytes: 0,
+            },
+            items,
+        })
+    }
+
+    async fn preview_all_garbage(&self) -> Result<CleanupPreview, RetentionError> {
+        let mut items = Vec::new();
+        let mut report = CleanupReport::default();
+        for repository in self.repository_store.find_all().await? {
+            if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+                continue;
+            }
+            let preview = self.preview_garbage(repository.id()).await?;
+            items.extend(preview.items);
+            report.absorb(preview.report);
+        }
+        items.sort_by(|left, right| {
+            left.repository
+                .cmp(&right.repository)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.version.cmp(&right.version))
+        });
+        Ok(CleanupPreview {
+            dry_run: true,
+            report,
+            items,
+        })
+    }
+
+    async fn preview_garbage(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<CleanupPreview, RetentionError> {
+        let repository = self
+            .repository_store
+            .find_by_id(repository_id)
+            .await?
+            .ok_or(RetentionError::RepositoryNotFound(repository_id))?;
+        let repo_name = repository.name().as_str();
+        let mut entries = self.package_index_store.list_entries(repository_id).await?;
+        let artifacts = self
+            .artifact_store
+            .find_by_repository_id(repository_id)
+            .await?;
+        let sizes: HashMap<ArtifactId, u64> = artifacts
+            .iter()
+            .map(|artifact| (artifact.id(), artifact.size_bytes()))
+            .collect();
+
+        let mut items = Vec::new();
+        let mut listed_ids = HashSet::new();
         if matches!(
             repository.ecosystem(),
             PackageEcosystem::Oci | PackageEcosystem::Helm
         ) {
-            let blobs = self.unreferenced_blobs(&remaining).await?;
+            let blobs = self.unreferenced_blobs(&entries).await?;
             let blob_keys: HashSet<(String, String)> = blobs
                 .iter()
                 .map(|record| coordinate_key(&record.coordinate))
                 .collect();
             for record in blobs {
-                remember_artifact(&record, &mut listed_artifact_ids);
+                if let Some(artifact_id) = record.artifact_id {
+                    listed_ids.insert(artifact_id);
+                }
                 items.push(item_from_record(
+                    repo_name,
                     &record,
                     &sizes,
                     "capa u objeto OCI sin manifiesto".to_string(),
                 ));
             }
-            remaining.retain(|entry| !blob_keys.contains(&coordinate_key(&entry.coordinate)));
+            entries.retain(|entry| !blob_keys.contains(&coordinate_key(&entry.coordinate)));
         }
 
         let skip_generic =
-            remaining.is_empty() && repository.ecosystem() == PackageEcosystem::Generic;
-        let referenced = referenced_artifact_ids(&remaining);
-        if !skip_generic {
-            for artifact in &artifacts {
-                if referenced.contains(&artifact.id()) || listed_artifact_ids.contains(&artifact.id())
-                {
-                    continue;
-                }
-                items.push(CleanupItem {
-                    name: String::new(),
-                    version: artifact.id().to_string(),
-                    size_bytes: artifact.size_bytes(),
-                    reason: "binario huérfano".to_string(),
-                });
-            }
-        }
-
+            entries.is_empty() && repository.ecosystem() == PackageEcosystem::Generic;
+        let referenced = referenced_artifact_ids(&entries);
         let doomed: Vec<_> = artifacts
             .iter()
             .filter(|artifact| !skip_generic && !referenced.contains(&artifact.id()))
             .collect();
-        let dropped_versions = u64::try_from(
-            items
-                .iter()
-                .filter(|item| item.reason != "binario huérfano")
-                .count(),
-        )
-        .unwrap_or(0);
-        let deleted_artifacts = u64::try_from(doomed.len()).unwrap_or(0);
-        let freed_bytes = doomed.iter().map(|artifact| artifact.size_bytes()).sum();
+        for artifact in &doomed {
+            if listed_ids.contains(&artifact.id()) {
+                continue;
+            }
+            items.push(CleanupItem {
+                repository: repo_name.to_string(),
+                name: String::new(),
+                version: artifact.id().to_string(),
+                size_bytes: artifact.size_bytes(),
+                reason: "binario huérfano".to_string(),
+            });
+        }
 
         Ok(CleanupPreview {
             dry_run: true,
             report: CleanupReport {
-                dropped_versions,
-                deleted_artifacts,
-                freed_bytes,
+                dropped_versions: u64::try_from(items.len().saturating_sub(doomed.len()))
+                    .unwrap_or(0),
+                deleted_artifacts: u64::try_from(doomed.len()).unwrap_or(0),
+                freed_bytes: doomed.iter().map(|artifact| artifact.size_bytes()).sum(),
             },
             items,
         })
@@ -397,7 +483,6 @@ impl RetentionService {
                 .delete_by_coordinate(repository_id, &coordinate)
                 .await?;
         }
-        self.collect_garbage(repository_id).await?;
         Ok(())
     }
 
@@ -536,16 +621,8 @@ fn coordinate_key(coordinate: &PackageCoordinate) -> (String, String) {
     )
 }
 
-fn remember_artifact(record: &PackageIndexRecord, ids: &mut HashSet<ArtifactId>) {
-    if let Some(artifact_id) = record.artifact_id {
-        ids.insert(artifact_id);
-    }
-    if let Ok(value) = serde_json::from_slice::<Value>(&record.entry) {
-        collect_artifact_ids(&value, ids);
-    }
-}
-
 fn item_from_record(
+    repository: &str,
     record: &PackageIndexRecord,
     sizes: &HashMap<ArtifactId, u64>,
     reason: String,
@@ -555,6 +632,7 @@ fn item_from_record(
         .and_then(|id| sizes.get(&id).copied())
         .unwrap_or(0);
     CleanupItem {
+        repository: repository.to_string(),
         name: record.coordinate.name().as_str().to_string(),
         version: record.coordinate.version().as_str().to_string(),
         size_bytes,
@@ -824,7 +902,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn keep_last_drops_old_versions_and_their_binaries() {
+    async fn keep_last_drops_old_versions_from_the_index() {
         let fixture = fixture();
         let repository = cargo("crates");
         fixture.repositories.save(&repository).await.unwrap();
@@ -865,9 +943,9 @@ mod tests {
         let report = fixture.service.apply(repository.id()).await.unwrap();
 
         assert_eq!(report.dropped_versions, 1);
-        assert_eq!(report.deleted_artifacts, 1);
-        assert_eq!(report.freed_bytes, 10);
-        assert!(fixture.artifacts.find_by_id(old).await.unwrap().is_none());
+        assert_eq!(report.deleted_artifacts, 0);
+        assert_eq!(report.freed_bytes, 0);
+        assert!(fixture.artifacts.find_by_id(old).await.unwrap().is_some());
         assert!(fixture.artifacts.find_by_id(mid).await.unwrap().is_some());
         assert!(fixture.artifacts.find_by_id(new).await.unwrap().is_some());
         assert_eq!(
@@ -878,6 +956,17 @@ mod tests {
                 .unwrap(),
             None
         );
+
+        let gc = fixture
+            .service
+            .collect_garbage_only(repository.id())
+            .await
+            .unwrap();
+        assert_eq!(gc.deleted_artifacts, 1);
+        assert_eq!(gc.freed_bytes, 10);
+        assert!(fixture.artifacts.find_by_id(old).await.unwrap().is_none());
+        assert!(fixture.artifacts.find_by_id(mid).await.unwrap().is_some());
+        assert!(fixture.artifacts.find_by_id(new).await.unwrap().is_some());
     }
 
     #[tokio::test]
@@ -913,6 +1002,8 @@ mod tests {
 
         assert!(preview.dry_run);
         assert_eq!(preview.report.dropped_versions, 1);
+        assert_eq!(preview.report.deleted_artifacts, 0);
+        assert_eq!(preview.report.freed_bytes, 0);
         assert_eq!(preview.items[0].name, "demo");
         assert_eq!(preview.items[0].version, "1.0.0");
         assert!(
@@ -965,6 +1056,22 @@ mod tests {
             .unwrap();
         fixture.service.apply(repository.id()).await.unwrap();
 
+        assert_eq!(
+            fixture
+                .index
+                .artifact_for(repository.id(), &coordinate("demo", "1.0.0"))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(fixture.artifacts.find_by_id(stale).await.unwrap().is_some());
+        assert!(fixture.artifacts.find_by_id(fresh).await.unwrap().is_some());
+
+        fixture
+            .service
+            .collect_garbage_only(repository.id())
+            .await
+            .unwrap();
         assert!(fixture.artifacts.find_by_id(stale).await.unwrap().is_none());
         assert!(fixture.artifacts.find_by_id(fresh).await.unwrap().is_some());
     }
@@ -1117,6 +1224,52 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn instance_gc_dry_run_lists_orphans_then_collect_deletes() {
+        let fixture = fixture();
+        let repository = cargo("crates");
+        fixture.repositories.save(&repository).await.unwrap();
+        let old = publish(
+            &fixture,
+            repository.id(),
+            "demo",
+            "1.0.0",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+        publish(
+            &fixture,
+            repository.id(),
+            "demo",
+            "2.0.0",
+            "2026-01-01T00:00:00Z",
+        )
+        .await;
+        fixture
+            .service
+            .apply_policy(
+                repository.id(),
+                RetentionPolicy::new(Some(1), None).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let preview = fixture
+            .service
+            .dry_run_garbage_collection()
+            .await
+            .unwrap();
+        assert!(preview.dry_run);
+        assert_eq!(preview.report.deleted_artifacts, 1);
+        assert_eq!(preview.items[0].repository, "crates");
+        assert!(fixture.artifacts.find_by_id(old).await.unwrap().is_some());
+
+        let collected = fixture.service.collect_garbage_all().await.unwrap();
+        assert!(!collected.dry_run);
+        assert_eq!(collected.report.deleted_artifacts, 1);
+        assert!(fixture.artifacts.find_by_id(old).await.unwrap().is_none());
     }
 
     #[tokio::test]

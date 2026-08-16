@@ -1,36 +1,29 @@
 import { type FormEvent, useState } from "react";
-import { AlertCircle, Eraser, FlaskConical, Save, Trash2 } from "lucide-react";
+import { AlertCircle, FlaskConical, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
-import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
 import {
   useApplyRetention,
-  useCollectGarbage,
   useDryRunRetention,
   useRetentionPolicy,
   useSaveRetentionPolicy,
 } from "@/api/queries";
+import {
+  appliedCatalogMessage,
+  previewCatalogMessage,
+} from "@/components/cleanup/cleanupMessages";
+import { CleanupPreviewTable } from "@/components/cleanup/CleanupPreviewTable";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatBytes } from "@/lib/format";
 
 const EMPTY_POLICY: RetentionPolicyResponse = { keep_last: null, keep_days: null };
 
@@ -52,17 +45,6 @@ function limitToInput(value: number | null): string {
 
 function isMissingMigration(message: string): boolean {
   return message.includes("sqlx migrate run");
-}
-
-function reportMessage(report: CleanupReportResponse | CleanupPreviewResponse): string {
-  return `Eliminadas ${String(report.dropped_versions)} versiones y ${String(report.deleted_artifacts)} binarios (${formatBytes(report.freed_bytes)}).`;
-}
-
-function previewMessage(preview: CleanupPreviewResponse): string {
-  if (preview.items.length === 0) {
-    return "Nada que borrar con esta política.";
-  }
-  return `Se eliminarían ${String(preview.dropped_versions)} versiones y ${String(preview.deleted_artifacts)} binarios (${formatBytes(preview.freed_bytes)}).`;
 }
 
 function payloadFromFields(
@@ -90,10 +72,11 @@ export function RetentionPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Retención y basura</CardTitle>
+        <CardTitle>Retención</CardTitle>
         <CardDescription>
-          Configura los límites, pulsa Simular para ver qué se borraría sin tocar nada, y solo
-          entonces Aplicar. Vacío = no hay límite. No bloquea install ni publish.
+          Conserva las N versiones más recientes y/o las publicadas en los últimos N días. Vacío =
+          no hay límite. Aplicar las saca del catálogo; install y publish no se bloquean. El disco
+          se libera en Configuración → Recolección de basura.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -154,7 +137,6 @@ function RetentionForm({
   const savePolicy = useSaveRetentionPolicy(repositoryId);
   const dryRun = useDryRunRetention(repositoryId);
   const applyRetention = useApplyRetention(repositoryId);
-  const collectGarbage = useCollectGarbage(repositoryId);
   const [keepLast, setKeepLast] = useState(limitToInput(policy.keep_last));
   const [keepDays, setKeepDays] = useState(limitToInput(policy.keep_days));
   const [preview, setPreview] = useState<CleanupPreviewResponse | null>(null);
@@ -182,7 +164,7 @@ function RetentionForm({
     try {
       await savePolicy.mutateAsync(payload);
       setSchemaError(false);
-      toast.success("Política guardada. No se ha borrado nada; pulsa Simular para ver el efecto.");
+      toast.success("Política guardada. No se ha sacado nada del catálogo; pulsa Simular para ver el efecto.");
     } catch (err) {
       rememberSchemaError(err);
       toast.error(err instanceof ApiError ? err.message : "No se pudo guardar la política");
@@ -198,7 +180,7 @@ function RetentionForm({
       const result = await dryRun.mutateAsync(payload);
       setPreview(result);
       setSchemaError(false);
-      toast.success(previewMessage(result));
+      toast.success(previewCatalogMessage(result));
     } catch (err) {
       rememberSchemaError(err);
       toast.error(err instanceof ApiError ? err.message : "No se pudo simular la retención");
@@ -214,7 +196,7 @@ function RetentionForm({
       const result = await applyRetention.mutateAsync(payload);
       setPreview(result);
       setSchemaError(false);
-      toast.success(reportMessage(result));
+      toast.success(appliedCatalogMessage(result));
     } catch (err) {
       rememberSchemaError(err);
       toast.error(err instanceof ApiError ? err.message : "No se pudo aplicar la retención");
@@ -222,21 +204,10 @@ function RetentionForm({
     }
   }
 
-  async function onGc() {
-    try {
-      const report = await collectGarbage.mutateAsync();
-      toast.success(reportMessage(report));
-    } catch (err) {
-      rememberSchemaError(err);
-      toast.error(err instanceof ApiError ? err.message : "No se pudo recolectar la basura");
-      throw err;
-    }
-  }
-
   const applyDescription =
     preview === null
-      ? "Se guardará la política del formulario y se borrarán las versiones fuera de ella, más los binarios huérfanos. Simula antes para ver la lista. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer."
-      : `${previewMessage(preview)} Se guardará la política del formulario y se borrará esa lista. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer.`;
+      ? "Se guardará la política y se sacarán del catálogo las versiones fuera de ella. El disco no se borra hasta la recolección de basura. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer."
+      : `${previewCatalogMessage(preview)} Se guardará la política y se sacará esa lista del catálogo. El disco no se borra hasta la recolección de basura. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer.`;
 
   return (
     <form onSubmit={(event) => void onSave(event)} className="space-y-5">
@@ -272,9 +243,9 @@ function RetentionForm({
         </li>
         {canWrite ? (
           <li className="space-y-3">
-            <p className="font-medium text-foreground">2. Simular (dry-run)</p>
+            <p className="font-medium text-foreground">2. Simular</p>
             <p className="text-muted-foreground">
-              Usa los números del formulario, no hace falta guardar. No borra nada.
+              Usa los números del formulario, no hace falta guardar. No saca nada del catálogo.
             </p>
             <Button
               type="button"
@@ -288,24 +259,29 @@ function RetentionForm({
           </li>
         ) : (
           <p className="text-muted-foreground">
-            Solo lectura: un usuario Writer o Admin puede simular y aplicar.
+            Solo lectura: un usuario Developer o Admin puede simular y aplicar.
           </p>
         )}
       </ol>
 
-      {preview ? <PreviewTable preview={preview} /> : null}
+      {preview ? (
+        <CleanupPreviewTable
+          preview={preview}
+          summary={preview.dry_run ? previewCatalogMessage(preview) : appliedCatalogMessage(preview)}
+        />
+      ) : null}
 
       {canWrite ? (
         <div className="space-y-3">
           <p className="text-sm font-medium text-foreground">3. Aplicar o solo guardar</p>
           <p className="text-sm text-muted-foreground">
-            Aplicar guarda estos números y borra lo que mostró Simular. Simula primero: así no hay
-            sorpresas. Guardar no borra.
+            Aplicar guarda estos números y saca del catálogo lo que mostró Simular. Simula primero.
+            Guardar no toca el catálogo. El disco se libera después, en Configuración.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="outline" disabled={savePolicy.isPending}>
               <Save />
-              {savePolicy.isPending ? "Guardando…" : "Guardar sin borrar"}
+              {savePolicy.isPending ? "Guardando…" : "Guardar sin aplicar"}
             </Button>
             <ConfirmDeleteDialog
               title="Aplicar retención"
@@ -320,61 +296,9 @@ function RetentionForm({
                 </Button>
               }
             />
-            <ConfirmDeleteDialog
-              title="Recolectar basura"
-              description="Se borrarán solo los binarios que ya no están referenciados por el índice (capas OCI huérfanas, restos de un borrado). Las versiones publicadas no se tocan."
-              confirmLabel="Recolectar"
-              pending={collectGarbage.isPending}
-              onConfirm={onGc}
-              trigger={
-                <Button type="button" variant="outline">
-                  <Eraser />
-                  Recolectar basura
-                </Button>
-              }
-            />
           </div>
         </div>
       ) : null}
     </form>
-  );
-}
-
-function PreviewTable({ preview }: { preview: CleanupPreviewResponse }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={preview.dry_run ? "outline" : "destructive"}>
-          {preview.dry_run ? "Simulación" : "Aplicado"}
-        </Badge>
-        <p className="text-sm text-muted-foreground">
-          {preview.dry_run ? previewMessage(preview) : reportMessage(preview)}
-        </p>
-      </div>
-      {preview.items.length === 0 ? null : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Paquete</TableHead>
-              <TableHead>Versión</TableHead>
-              <TableHead>Motivo</TableHead>
-              <TableHead className="text-right">Tamaño</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {preview.items.map((item) => (
-              <TableRow key={`${item.name}:${item.version}:${item.reason}`}>
-                <TableCell className="font-mono text-xs">
-                  {item.name.length > 0 ? item.name : "—"}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{item.version}</TableCell>
-                <TableCell>{item.reason}</TableCell>
-                <TableCell className="text-right">{formatBytes(item.size_bytes)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </div>
   );
 }

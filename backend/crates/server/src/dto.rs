@@ -596,6 +596,8 @@ impl From<ferrobox_application::retention::CleanupReport> for CleanupReportRespo
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CleanupItemResponse {
+    /// Repositorio al que pertenece la fila.
+    pub(crate) repository: String,
     /// Nombre del paquete, o vacío si es un binario huérfano.
     pub(crate) name: String,
     /// Versión, etiqueta, digest o identificador del binario.
@@ -637,6 +639,7 @@ impl From<ferrobox_application::retention::CleanupPreview> for CleanupPreviewRes
                 .items
                 .into_iter()
                 .map(|item| CleanupItemResponse {
+                    repository: item.repository,
                     name: item.name,
                     version: item.version,
                     size_bytes: item.size_bytes,
