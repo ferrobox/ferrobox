@@ -31,3 +31,6 @@ pub mod user;
 
 /// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.
 pub mod api_token;
+
+/// La entidad `Assay`: ensaye de un artefacto (composición e impurezas).
+pub mod assay;

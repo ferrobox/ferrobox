@@ -2,6 +2,7 @@
 //! basado en `reqwest`.
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use reqwest::Client;
 
@@ -86,5 +87,54 @@ impl HttpClient for ReqwestHttpClient {
             body,
             headers: header_pairs,
         })
+    }
+
+    async fn post(
+        &self,
+        url: &str,
+        body: Bytes,
+        content_type: &str,
+    ) -> Result<HttpResponse, HttpClientError> {
+        let response = self
+            .client
+            .post(url)
+            .header("content-type", content_type)
+            .body(body.to_vec())
+            .send()
+            .await
+            .map_err(|err| HttpClientError::Transport {
+                url: url.to_string(),
+                message: err.to_string(),
+            })?;
+
+        let status = response.status().as_u16();
+        let header_pairs = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|text| (name.as_str().to_ascii_lowercase(), text.to_string()))
+            })
+            .collect();
+        let body = response.bytes().await.map_err(|err| HttpClientError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        })?;
+
+        let response = HttpResponse {
+            status,
+            body,
+            headers: header_pairs,
+        };
+        if response.is_success() {
+            Ok(response)
+        } else {
+            Err(HttpClientError::Status {
+                status: response.status,
+                url: url.to_string(),
+            })
+        }
     }
 }

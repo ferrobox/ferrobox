@@ -1,0 +1,223 @@
+//! Extrae el inventario de componentes a partir de una entrada de índice.
+
+use ferrobox_domain::assay::{AssayComponent, AssayComponentKind};
+use ferrobox_domain::package_coordinate::PackageEcosystem;
+use serde::Deserialize;
+use serde_json::Value;
+
+/// `true` si `spec` parece una versión concreta (`1.2.3`), no un rango.
+#[must_use]
+pub fn is_exact_version(spec: &str) -> bool {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return false;
+    }
+    let Some(first) = spec.chars().next() else {
+        return false;
+    };
+    if matches!(first, '^' | '~' | '*' | '<' | '>' | '=' | 'x' | 'X') {
+        return false;
+    }
+    if spec.contains([' ', '|', ',', '*']) {
+        return false;
+    }
+    spec.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '+' | '_'))
+        && spec.chars().any(|ch| ch.is_ascii_digit())
+}
+
+/// Construye un `purl` (*package URL*) para los ecosistemas que OSV
+/// (*Open Source Vulnerabilities*) entiende.
+#[must_use]
+pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Option<String> {
+    let encoded = match ecosystem {
+        PackageEcosystem::Npm if name.starts_with('@') => {
+            format!("%40{}", name.trim_start_matches('@'))
+        }
+        _ => name.to_string(),
+    };
+    let prefix = match ecosystem {
+        PackageEcosystem::Npm => "pkg:npm/",
+        PackageEcosystem::PyPi => "pkg:pypi/",
+        PackageEcosystem::Cargo => "pkg:cargo/",
+        PackageEcosystem::Generic
+        | PackageEcosystem::Oci
+        | PackageEcosystem::Helm
+        | PackageEcosystem::Conan => return None,
+    };
+    Some(format!("{prefix}{encoded}@{version}"))
+}
+
+/// Ecosistema de OSV correspondiente, si el ensaye aplica.
+#[must_use]
+pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
+    match ecosystem {
+        PackageEcosystem::Npm => Some("npm"),
+        PackageEcosystem::PyPi => Some("PyPI"),
+        PackageEcosystem::Cargo => Some("crates.io"),
+        PackageEcosystem::Generic
+        | PackageEcosystem::Oci
+        | PackageEcosystem::Helm
+        | PackageEcosystem::Conan => None,
+    }
+}
+
+/// Inventario a partir de la entrada de índice del ecosistema.
+#[must_use]
+pub fn extract_components(
+    ecosystem: PackageEcosystem,
+    name: &str,
+    version: &str,
+    entry: &[u8],
+) -> Vec<AssayComponent> {
+    let mut components = vec![AssayComponent::new(
+        name,
+        version,
+        purl_for(ecosystem, name, version),
+        AssayComponentKind::Root,
+    )];
+
+    match ecosystem {
+        PackageEcosystem::Npm => append_npm_deps(&mut components, entry),
+        PackageEcosystem::Cargo => append_cargo_deps(&mut components, entry),
+        PackageEcosystem::PyPi
+        | PackageEcosystem::Generic
+        | PackageEcosystem::Oci
+        | PackageEcosystem::Helm
+        | PackageEcosystem::Conan => {}
+    }
+
+    components
+}
+
+fn append_npm_deps(components: &mut Vec<AssayComponent>, entry: &[u8]) {
+    let Ok(value) = serde_json::from_slice::<Value>(entry) else {
+        return;
+    };
+    let Some(manifest) = value.get("manifest") else {
+        return;
+    };
+    for key in ["dependencies", "optionalDependencies"] {
+        let Some(Value::Object(map)) = manifest.get(key) else {
+            continue;
+        };
+        for (dep_name, dep_spec) in map {
+            let Some(spec) = dep_spec.as_str() else {
+                continue;
+            };
+            let purl = if is_exact_version(spec) {
+                purl_for(PackageEcosystem::Npm, dep_name, spec)
+            } else {
+                None
+            };
+            components.push(AssayComponent::new(
+                dep_name.clone(),
+                spec,
+                purl,
+                AssayComponentKind::Direct,
+            ));
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CargoIndexEntry {
+    #[serde(default)]
+    deps: Vec<CargoIndexDep>,
+}
+
+#[derive(Deserialize)]
+struct CargoIndexDep {
+    name: String,
+    req: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    package: Option<String>,
+}
+
+fn append_cargo_deps(components: &mut Vec<AssayComponent>, entry: &[u8]) {
+    let Ok(parsed) = serde_json::from_slice::<CargoIndexEntry>(entry) else {
+        return;
+    };
+    for dep in parsed.deps {
+        if dep.kind == "dev" {
+            continue;
+        }
+        let name = dep.package.unwrap_or(dep.name);
+        components.push(AssayComponent::new(
+            name,
+            dep.req,
+            None,
+            AssayComponentKind::Direct,
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_versions_are_queryable() {
+        assert!(is_exact_version("4.17.20"));
+        assert!(is_exact_version("1.0.0-beta.1"));
+        assert!(!is_exact_version("^4.17.0"));
+        assert!(!is_exact_version("~1.2.3"));
+        assert!(!is_exact_version("*"));
+        assert!(!is_exact_version(">=1.0"));
+    }
+
+    #[test]
+    fn npm_extracts_root_and_exact_direct_deps() {
+        let entry = serde_json::json!({
+            "name": "demo",
+            "version": "1.0.0",
+            "manifest": {
+                "dependencies": {
+                    "lodash": "4.17.20",
+                    "left-pad": "^1.3.0"
+                }
+            }
+        });
+        let components = extract_components(
+            PackageEcosystem::Npm,
+            "demo",
+            "1.0.0",
+            &serde_json::to_vec(&entry).unwrap(),
+        );
+        assert_eq!(components.len(), 3);
+        assert_eq!(components[0].name(), "demo");
+        let lodash = components
+            .iter()
+            .find(|component| component.name() == "lodash")
+            .unwrap();
+        assert_eq!(lodash.purl(), Some("pkg:npm/lodash@4.17.20"));
+        let ranged = components
+            .iter()
+            .find(|component| component.name() == "left-pad")
+            .unwrap();
+        assert!(ranged.purl().is_none());
+    }
+
+    #[test]
+    fn cargo_extracts_normal_deps_and_skips_dev() {
+        let entry = serde_json::json!({
+            "name": "demo",
+            "vers": "1.0.0",
+            "deps": [
+                {"name": "serde", "req": "^1.0", "kind": "normal"},
+                {"name": "tokio", "req": "^1.0", "kind": "dev"}
+            ]
+        });
+        let components = extract_components(
+            PackageEcosystem::Cargo,
+            "demo",
+            "1.0.0",
+            &serde_json::to_vec(&entry).unwrap(),
+        );
+        assert_eq!(components.len(), 2);
+        assert_eq!(components[1].name(), "serde");
+        assert_eq!(components[1].version(), "^1.0");
+    }
+}

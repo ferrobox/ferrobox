@@ -1,6 +1,8 @@
 import type { ApiTokenCreatedResponse } from "@/api/generated/ApiTokenCreatedResponse";
 import type { ApiTokenResponse } from "@/api/generated/ApiTokenResponse";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
+import type { AssayLookupRequest } from "@/api/generated/AssayLookupRequest";
+import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
@@ -364,4 +366,52 @@ export interface CargoRegistryConfig {
 
 export function getCargoRegistryConfig(repositoryId: string): Promise<CargoRegistryConfig> {
   return request<CargoRegistryConfig>(`/cargo/${repositoryId}/config.json`);
+}
+
+export function listAssays(): Promise<AssayResponse[]> {
+  return request<AssayResponse[]>("/assays");
+}
+
+export function listRepositoryAssays(repositoryId: string): Promise<AssayResponse[]> {
+  return request<AssayResponse[]>(`/repositories/${repositoryId}/assays`);
+}
+
+export function getOrRunAssay(
+  repositoryId: string,
+  lookup: AssayLookupRequest,
+): Promise<AssayResponse> {
+  const params = new URLSearchParams({
+    ecosystem: lookup.ecosystem,
+    name: lookup.name,
+    version: lookup.version,
+  });
+  return request<AssayResponse>(`/repositories/${repositoryId}/assay?${params.toString()}`);
+}
+
+export function runAssay(
+  repositoryId: string,
+  lookup: AssayLookupRequest,
+): Promise<AssayResponse> {
+  return request<AssayResponse>(`/repositories/${repositoryId}/assays`, {
+    method: "POST",
+    body: JSON.stringify(lookup),
+  });
+}
+
+export async function downloadAssaySbom(assayId: string, filename: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/assays/${assayId}/sbom`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }

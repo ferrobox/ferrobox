@@ -1,0 +1,148 @@
+import { useState } from "react";
+import { AlertCircle, FlaskConical, RefreshCw } from "lucide-react";
+import { NavLink } from "react-router-dom";
+
+import type { AssayResponse } from "@/api/generated/AssayResponse";
+import { useAssays, useRepositories } from "@/api/queries";
+import { AssayDialog } from "@/components/assay/AssayDialog";
+import { AssayCountPills } from "@/components/assay/SeverityBadges";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+function statusLabel(status: string): string {
+  if (status === "ready") {
+    return "Listo";
+  }
+  if (status === "failed") {
+    return "Fallido";
+  }
+  if (status === "unsupported") {
+    return "Aún no aplica";
+  }
+  return status;
+}
+
+export function AssaysPage() {
+  const { data, isPending, isError, error, refetch, isFetching } = useAssays();
+  const { data: repositories } = useRepositories();
+  const names = new Map((repositories ?? []).map((repository) => [repository.id, repository.name]));
+  const [openAssay, setOpenAssay] = useState<AssayResponse | null>(null);
+
+  return (
+    <div>
+      <PageHeader
+        title="Assays"
+        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. No bloquean install ni publish."
+      />
+
+      {isPending ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-12 w-full rounded-lg" />
+          ))}
+        </div>
+      ) : null}
+
+      {isError ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>No se pudieron cargar los ensayes</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>{error.message}</span>
+            <Button size="sm" variant="outline" onClick={() => void refetch()}>
+              <RefreshCw className={isFetching ? "animate-spin" : ""} />
+              Reintentar
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {data && data.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border py-16 text-center">
+          <FlaskConical className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-3 font-medium text-foreground">Todavía no hay ensayes</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Abre un paquete npm, PyPI o Cargo y pulsa Assay. El inventario se consulta contra OSV
+            (Open Source Vulnerabilities).
+          </p>
+        </div>
+      ) : null}
+
+      {data && data.length > 0 ? (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Paquete</TableHead>
+                <TableHead>Repositorio</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead>Hallazgos</TableHead>
+                <TableHead className="w-[1%]" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((assay) => (
+                <TableRow key={assay.id}>
+                  <TableCell>
+                    <NavLink
+                      to={`/repositories/${assay.repository_id}`}
+                      className="font-mono text-sm text-foreground underline-offset-4 hover:underline"
+                    >
+                      {assay.name}@{assay.version}
+                    </NavLink>
+                    <p className="text-xs text-muted-foreground">{assay.ecosystem}</p>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {names.get(assay.repository_id) ?? assay.repository_id}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{statusLabel(assay.status)}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <AssayCountPills counts={assay.counts} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setOpenAssay(assay)}
+                    >
+                      Ver
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
+
+      {openAssay ? (
+        <AssayDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setOpenAssay(null);
+            }
+          }}
+          repositoryId={openAssay.repository_id}
+          ecosystem={openAssay.ecosystem}
+          name={openAssay.name}
+          version={openAssay.version}
+        />
+      ) : null}
+    </div>
+  );
+}

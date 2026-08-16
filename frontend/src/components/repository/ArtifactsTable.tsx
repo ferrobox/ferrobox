@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Download,
   FileBox,
+  FlaskConical,
   Package,
   RefreshCw,
   RotateCcw,
@@ -16,10 +17,13 @@ import { toast } from "sonner";
 
 import { ApiError, downloadArtifact } from "@/api/client";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
+import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
-import { useDeleteArtifact, useRepositoryArtifacts, useSetYanked } from "@/api/queries";
+import { useDeleteArtifact, useRepositoryArtifacts, useRepositoryAssays, useSetYanked } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
+import { AssayDialog } from "@/components/assay/AssayDialog";
+import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import type { RepositoryStorageKind } from "@/components/repository/RepositoryKindBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -139,6 +143,7 @@ export function ArtifactsTable({
   const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
+  const { data: assays } = useRepositoryAssays(repositoryId);
   const deleteArtifact = useDeleteArtifact(repositoryId);
   const setYanked = useSetYanked(repositoryId);
   const canWrite = canWriteArtifacts(user?.role);
@@ -152,6 +157,19 @@ export function ArtifactsTable({
       ecosystem === "helm" ||
       ecosystem === "conan");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [assayTarget, setAssayTarget] = useState<{
+    repositoryId: string;
+    name: string;
+    version: string;
+  } | null>(null);
+
+  const assayByKey = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof assays>[number]>();
+    for (const assay of assays ?? []) {
+      map.set(`${assay.repository_id}:${assay.name}:${assay.version}`, assay);
+    }
+    return map;
+  }, [assays]);
 
   const groups = useMemo(
     () => (data ? groupArtifacts(data, ecosystem) : []),
@@ -297,6 +315,7 @@ export function ArtifactsTable({
   }
 
   return (
+    <>
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {groups.map((group) => {
         const isCollapsed = collapsed.has(group.name);
@@ -353,6 +372,16 @@ export function ArtifactsTable({
                     onDownload={onDownload}
                     onSetYanked={onSetYanked}
                     onDelete={onDelete}
+                    assayByKey={assayByKey}
+                    onAssay={(artifact) => {
+                      if (artifact.name && artifact.version) {
+                        setAssayTarget({
+                          repositoryId: artifact.repository_id,
+                          name: artifact.name,
+                          version: artifact.version,
+                        });
+                      }
+                    }}
                   />
                 ))}
               </ul>
@@ -361,6 +390,21 @@ export function ArtifactsTable({
         );
       })}
     </div>
+    {assayTarget ? (
+      <AssayDialog
+        open
+        onOpenChange={(open) => {
+          if (!open) {
+            setAssayTarget(null);
+          }
+        }}
+        repositoryId={assayTarget.repositoryId}
+        ecosystem={ecosystem}
+        name={assayTarget.name}
+        version={assayTarget.version}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -376,6 +420,8 @@ function VersionRows({
   onDownload,
   onSetYanked,
   onDelete,
+  assayByKey,
+  onAssay,
 }: {
   bucket: VersionBucket;
   kind: RepositoryStorageKind;
@@ -388,6 +434,8 @@ function VersionRows({
   onDownload: (artifact: ArtifactResponse) => void;
   onSetYanked: (artifact: ArtifactResponse, yanked: boolean) => void;
   onDelete: (artifactId: string) => Promise<void>;
+  assayByKey: ReadonlyMap<string, AssayResponse>;
+  onAssay: (artifact: ArtifactResponse) => void;
 }) {
   const representative = bucket.artifacts[0];
   if (!representative) {
@@ -400,6 +448,12 @@ function VersionRows({
     kind === "alloy"
       ? (memberNames[representative.repository_id] ?? representative.repository_id)
       : null;
+  const assay =
+    representative.name && representative.version
+      ? assayByKey.get(
+          `${representative.repository_id}:${representative.name}:${representative.version}`,
+        )
+      : undefined;
 
   return (
     <li className="border-l-2 border-l-orange-500/40">
@@ -436,6 +490,7 @@ function VersionRows({
                 {memberName}
               </NavLink>
             ) : null}
+            {assay ? <AssayCountPills counts={assay.counts} /> : null}
           </span>
           {nested ? null : (
             <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
@@ -450,6 +505,16 @@ function VersionRows({
               Descargar
             </Button>
           )}
+          {representative.name && representative.version ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onAssay(representative)}
+            >
+              <FlaskConical />
+              Assay
+            </Button>
+          ) : null}
           {canYank && representative.name && representative.version ? (
             <Button
               variant="ghost"

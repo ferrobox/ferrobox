@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
+import type { AssayLookupRequest } from "@/api/generated/AssayLookupRequest";
 import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
@@ -16,6 +17,8 @@ export const queryKeys = {
   apiTokens: ["auth", "tokens"] as const,
   users: ["users"] as const,
   settings: ["settings"] as const,
+  assays: ["assays"] as const,
+  repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
 };
 
 export function useRepositories() {
@@ -243,5 +246,59 @@ export function useSettings() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: (payload: ChangePasswordRequest) => api.changePassword(payload),
+  });
+}
+
+export function useAssays() {
+  return useQuery({
+    queryKey: queryKeys.assays,
+    queryFn: api.listAssays,
+  });
+}
+
+export function useRepositoryAssays(repositoryId: string) {
+  return useQuery({
+    queryKey: queryKeys.repositoryAssays(repositoryId),
+    queryFn: () => api.listRepositoryAssays(repositoryId),
+  });
+}
+
+export function useAssay(
+  repositoryId: string,
+  lookup: AssayLookupRequest | null,
+  enabled: boolean,
+) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: [
+      "repositories",
+      repositoryId,
+      "assay",
+      lookup?.ecosystem,
+      lookup?.name,
+      lookup?.version,
+    ],
+    queryFn: async () => {
+      const assay = await api.getOrRunAssay(repositoryId, lookup as AssayLookupRequest);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAssays(repositoryId),
+      });
+      return assay;
+    },
+    enabled: enabled && lookup !== null,
+  });
+}
+
+export function useRunAssay(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (lookup: AssayLookupRequest) => api.runAssay(repositoryId, lookup),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositoryAssays(repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: ["repositories", repositoryId, "assay"] });
+    },
   });
 }

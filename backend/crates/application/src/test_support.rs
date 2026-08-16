@@ -8,12 +8,14 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::{ApiTokenId, ArtifactId, RepositoryId, UserId};
+use ferrobox_domain::assay::Assay;
+use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
+use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexStore, PackageIndexStoreError,
@@ -509,5 +511,70 @@ impl HttpClient for InMemoryHttpClient {
             return Ok(queue[0].clone());
         }
         Ok(queue.pop_front().expect("queue length was checked"))
+    }
+
+    async fn post(
+        &self,
+        url: &str,
+        _body: Bytes,
+        _content_type: &str,
+    ) -> Result<HttpResponse, HttpClientError> {
+        self.get(url).await
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryAssayStore {
+    assays: Mutex<HashMap<AssayId, Assay>>,
+}
+
+#[async_trait]
+impl AssayStore for InMemoryAssayStore {
+    async fn upsert(&self, assay: &Assay) -> Result<(), AssayStoreError> {
+        let mut assays = self.assays.lock().unwrap();
+        assays.retain(|_, existing| {
+            !(existing.repository_id() == assay.repository_id()
+                && existing.coordinate() == assay.coordinate())
+        });
+        assays.insert(assay.id(), assay.clone());
+        Ok(())
+    }
+
+    async fn find_by_id(&self, id: AssayId) -> Result<Option<Assay>, AssayStoreError> {
+        Ok(self.assays.lock().unwrap().get(&id).cloned())
+    }
+
+    async fn find_by_coordinate(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+    ) -> Result<Option<Assay>, AssayStoreError> {
+        Ok(self
+            .assays
+            .lock()
+            .unwrap()
+            .values()
+            .find(|assay| {
+                assay.repository_id() == repository_id && assay.coordinate() == coordinate
+            })
+            .cloned())
+    }
+
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<Assay>, AssayStoreError> {
+        Ok(self
+            .assays
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|assay| assay.repository_id() == repository_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn find_all(&self) -> Result<Vec<Assay>, AssayStoreError> {
+        Ok(self.assays.lock().unwrap().values().cloned().collect())
     }
 }
