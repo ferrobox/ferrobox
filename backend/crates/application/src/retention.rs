@@ -35,12 +35,28 @@ pub struct CleanupReport {
     pub freed_bytes: u64,
 }
 
-impl CleanupReport {
-    fn merge(&mut self, other: Self) {
-        self.dropped_versions += other.dropped_versions;
-        self.deleted_artifacts += other.deleted_artifacts;
-        self.freed_bytes += other.freed_bytes;
-    }
+/// Qué se borraría (o se ha borrado) al aplicar retención o GC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanupItem {
+    /// Nombre del paquete, o `_blob` para una capa OCI.
+    pub name: String,
+    /// Versión, etiqueta o digest.
+    pub version: String,
+    /// Tamaño del binario, si se conoce.
+    pub size_bytes: u64,
+    /// Por qué entra en la limpieza.
+    pub reason: String,
+}
+
+/// Resultado de simular o aplicar una limpieza.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CleanupPreview {
+    /// `true` si no se ha borrado nada.
+    pub dry_run: bool,
+    /// Resumen numérico.
+    pub report: CleanupReport,
+    /// Versiones y binarios afectados, para enseñarlos en la UI.
+    pub items: Vec<CleanupItem>,
 }
 
 /// Motivos por los que retención o GC pueden fallar.
@@ -53,6 +69,13 @@ pub enum RetentionError {
     /// Un `Alloy` no almacena binarios propios: no hay nada que retener.
     #[error("retention does not apply to Alloy repositories")]
     AlloyRepository,
+
+    /// Falta la migración SQL (`sqlx migrate run` en el directorio backend).
+    #[error(
+        "missing SQL migration: run `sqlx migrate run` from the backend directory \
+         (table repository_retention is missing)"
+    )]
+    MissingSchema,
 
     /// La política pedida no es válida.
     #[error(transparent)]
@@ -125,7 +148,11 @@ impl RetentionService {
         repository_id: RepositoryId,
     ) -> Result<RetentionPolicy, RetentionError> {
         self.require_cleanup_target(repository_id).await?;
-        Ok(self.retention_store.find_by_repository(repository_id).await?)
+        match self.retention_store.find_by_repository(repository_id).await {
+            Ok(policy) => Ok(policy),
+            Err(RetentionStoreError::MissingSchema) => Ok(RetentionPolicy::keep_all()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Guarda la política. No borra nada hasta [`Self::apply`].
@@ -139,8 +166,42 @@ impl RetentionService {
         policy: RetentionPolicy,
     ) -> Result<RetentionPolicy, RetentionError> {
         self.require_cleanup_target(repository_id).await?;
-        self.retention_store.save(repository_id, policy).await?;
+        self.save_store(repository_id, policy).await?;
         Ok(policy)
+    }
+
+    /// Simula la política **sin borrar nada**, como el dry-run de Harbor.
+    ///
+    /// # Errors
+    ///
+    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    pub async fn dry_run(
+        &self,
+        repository_id: RepositoryId,
+        policy: RetentionPolicy,
+    ) -> Result<CleanupPreview, RetentionError> {
+        self.require_cleanup_target(repository_id).await?;
+        let mut preview = self.preview(repository_id, policy).await?;
+        preview.dry_run = true;
+        Ok(preview)
+    }
+
+    /// Guarda la política y la aplica de verdad.
+    ///
+    /// # Errors
+    ///
+    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    pub async fn apply_policy(
+        &self,
+        repository_id: RepositoryId,
+        policy: RetentionPolicy,
+    ) -> Result<CleanupPreview, RetentionError> {
+        self.require_cleanup_target(repository_id).await?;
+        self.save_store(repository_id, policy).await?;
+        let mut preview = self.preview(repository_id, policy).await?;
+        self.execute(repository_id, &preview).await?;
+        preview.dry_run = false;
+        Ok(preview)
     }
 
     /// Aplica la política persistida y después recolecta binarios huérfanos.
@@ -153,9 +214,7 @@ impl RetentionService {
     pub async fn apply(&self, repository_id: RepositoryId) -> Result<CleanupReport, RetentionError> {
         self.require_cleanup_target(repository_id).await?;
         let policy = self.retention_store.find_by_repository(repository_id).await?;
-        let mut report = self.drop_versions(repository_id, policy).await?;
-        report.merge(self.collect_garbage(repository_id).await?);
-        Ok(report)
+        Ok(self.apply_policy(repository_id, policy).await?.report)
     }
 
     /// Recolecta binarios huérfanos sin tocar versiones indexadas.
@@ -184,146 +243,194 @@ impl RetentionService {
         Ok(())
     }
 
-    async fn drop_versions(
+    async fn save_store(
         &self,
         repository_id: RepositoryId,
         policy: RetentionPolicy,
-    ) -> Result<CleanupReport, RetentionError> {
-        if policy.is_keep_all() {
-            return Ok(CleanupReport::default());
+    ) -> Result<(), RetentionError> {
+        match self.retention_store.save(repository_id, policy).await {
+            Ok(()) => Ok(()),
+            Err(RetentionStoreError::MissingSchema) => Err(RetentionError::MissingSchema),
+            Err(err) => Err(RetentionError::Policy(err)),
         }
+    }
 
+    #[allow(clippy::too_many_lines)]
+    async fn preview(
+        &self,
+        repository_id: RepositoryId,
+        policy: RetentionPolicy,
+    ) -> Result<CleanupPreview, RetentionError> {
+        let repository = self
+            .repository_store
+            .find_by_id(repository_id)
+            .await?
+            .ok_or(RetentionError::RepositoryNotFound(repository_id))?;
         let entries = self.package_index_store.list_entries(repository_id).await?;
+        let artifacts = self
+            .artifact_store
+            .find_by_repository_id(repository_id)
+            .await?;
+        let sizes: BTreeMap<ArtifactId, u64> = artifacts
+            .iter()
+            .map(|artifact| (artifact.id(), artifact.size_bytes()))
+            .collect();
+
+        let mut items = Vec::new();
+        let mut listed_artifact_ids = HashSet::new();
+        let mut remaining: Vec<PackageIndexRecord> = entries.clone();
         let now = Utc::now();
-        let mut by_package: BTreeMap<String, Vec<&PackageIndexRecord>> = BTreeMap::new();
-        for entry in &entries {
-            if is_blob_name(entry.coordinate.name().as_str())
-                || is_digest_reference(entry.coordinate.version().as_str())
-            {
-                continue;
+
+        if !policy.is_keep_all() {
+            let dropping = versions_to_drop(&entries, policy, now);
+            let mut drop_keys: HashSet<(String, String)> = dropping
+                .iter()
+                .map(|(record, _)| coordinate_key(&record.coordinate))
+                .collect();
+            for (record, reason) in dropping {
+                remember_artifact(&record, &mut listed_artifact_ids);
+                items.push(item_from_record(&record, &sizes, reason));
             }
-            by_package
-                .entry(entry.coordinate.name().as_str().to_string())
-                .or_default()
-                .push(entry);
+            remaining.retain(|entry| !drop_keys.contains(&coordinate_key(&entry.coordinate)));
+
+            for record in digest_aliases_to_drop(&remaining) {
+                drop_keys.insert(coordinate_key(&record.coordinate));
+                remember_artifact(&record, &mut listed_artifact_ids);
+                items.push(item_from_record(
+                    &record,
+                    &sizes,
+                    "digest sin etiqueta que lo apunte".to_string(),
+                ));
+            }
+            remaining.retain(|entry| !drop_keys.contains(&coordinate_key(&entry.coordinate)));
         }
 
-        let mut dropped_versions = 0;
-        for versions in by_package.values_mut() {
-            versions.sort_by(|left, right| {
-                right
-                    .created_at_rfc3339
-                    .cmp(&left.created_at_rfc3339)
-                    .then_with(|| {
-                        right
-                            .coordinate
-                            .version()
-                            .as_str()
-                            .cmp(left.coordinate.version().as_str())
-                    })
-            });
-            for (rank, record) in versions.iter().enumerate() {
-                let rank = u32::try_from(rank).unwrap_or(u32::MAX);
-                let age_days = age_days(&record.created_at_rfc3339, now);
-                if policy.keeps(rank, age_days) {
+        if matches!(
+            repository.ecosystem(),
+            PackageEcosystem::Oci | PackageEcosystem::Helm
+        ) {
+            let blobs = self.unreferenced_blobs(&remaining).await?;
+            let blob_keys: HashSet<(String, String)> = blobs
+                .iter()
+                .map(|record| coordinate_key(&record.coordinate))
+                .collect();
+            for record in blobs {
+                remember_artifact(&record, &mut listed_artifact_ids);
+                items.push(item_from_record(
+                    &record,
+                    &sizes,
+                    "capa u objeto OCI sin manifiesto".to_string(),
+                ));
+            }
+            remaining.retain(|entry| !blob_keys.contains(&coordinate_key(&entry.coordinate)));
+        }
+
+        let skip_generic =
+            remaining.is_empty() && repository.ecosystem() == PackageEcosystem::Generic;
+        let referenced = referenced_artifact_ids(&remaining);
+        if !skip_generic {
+            for artifact in &artifacts {
+                if referenced.contains(&artifact.id()) || listed_artifact_ids.contains(&artifact.id())
+                {
                     continue;
                 }
-                self.drop_coordinate(repository_id, record, &entries)
-                    .await?;
-                dropped_versions += 1;
+                items.push(CleanupItem {
+                    name: String::new(),
+                    version: artifact.id().to_string(),
+                    size_bytes: artifact.size_bytes(),
+                    reason: "binario huérfano".to_string(),
+                });
             }
         }
-        dropped_versions += self.drop_untagged_digests(repository_id).await?;
 
-        Ok(CleanupReport {
-            dropped_versions,
-            deleted_artifacts: 0,
-            freed_bytes: 0,
+        let doomed: Vec<_> = artifacts
+            .iter()
+            .filter(|artifact| !skip_generic && !referenced.contains(&artifact.id()))
+            .collect();
+        let dropped_versions = u64::try_from(
+            items
+                .iter()
+                .filter(|item| item.reason != "binario huérfano")
+                .count(),
+        )
+        .unwrap_or(0);
+        let deleted_artifacts = u64::try_from(doomed.len()).unwrap_or(0);
+        let freed_bytes = doomed.iter().map(|artifact| artifact.size_bytes()).sum();
+
+        Ok(CleanupPreview {
+            dry_run: true,
+            report: CleanupReport {
+                dropped_versions,
+                deleted_artifacts,
+                freed_bytes,
+            },
+            items,
         })
     }
 
-    async fn drop_untagged_digests(
+    async fn execute(
         &self,
         repository_id: RepositoryId,
-    ) -> Result<u64, RetentionError> {
-        let entries = self.package_index_store.list_entries(repository_id).await?;
-        let mut kept_digests = HashSet::new();
-        for entry in &entries {
-            if is_blob_name(entry.coordinate.name().as_str())
-                || is_digest_reference(entry.coordinate.version().as_str())
-            {
+        preview: &CleanupPreview,
+    ) -> Result<(), RetentionError> {
+        let Some(repository) = self.repository_store.find_by_id(repository_id).await? else {
+            return Err(RetentionError::RepositoryNotFound(repository_id));
+        };
+        let ecosystem = repository.ecosystem();
+        for item in &preview.items {
+            if item.reason == "binario huérfano" || item.name.is_empty() {
                 continue;
             }
-            if let Some(digest) = manifest_digest(&entry.entry) {
-                kept_digests.insert((
-                    entry.coordinate.name().as_str().to_string(),
-                    digest,
-                ));
-            }
-        }
-
-        let mut dropped = 0;
-        for entry in &entries {
-            if is_blob_name(entry.coordinate.name().as_str())
-                || !is_digest_reference(entry.coordinate.version().as_str())
-            {
+            let Ok(name) =
+                ferrobox_domain::package_coordinate::PackageName::parse(item.name.clone())
+            else {
                 continue;
-            }
-            let key = (
-                entry.coordinate.name().as_str().to_string(),
-                entry.coordinate.version().as_str().to_string(),
-            );
-            if kept_digests.contains(&key) {
+            };
+            let Ok(version) = PackageVersion::parse(item.version.clone()) else {
                 continue;
-            }
+            };
+            let coordinate = PackageCoordinate::new(ecosystem, name, version);
             self.assay_store
-                .delete_by_coordinate(repository_id, &entry.coordinate)
+                .delete_by_coordinate(repository_id, &coordinate)
                 .await?;
             self.package_index_store
-                .delete_by_coordinate(repository_id, &entry.coordinate)
+                .delete_by_coordinate(repository_id, &coordinate)
                 .await?;
-            dropped += 1;
         }
-        Ok(dropped)
+        self.collect_garbage(repository_id).await?;
+        Ok(())
     }
 
-    async fn drop_coordinate(
+    async fn unreferenced_blobs(
         &self,
-        repository_id: RepositoryId,
-        record: &PackageIndexRecord,
-        all_entries: &[PackageIndexRecord],
-    ) -> Result<(), RetentionError> {
-        self.assay_store
-            .delete_by_coordinate(repository_id, &record.coordinate)
-            .await?;
-        self.package_index_store
-            .delete_by_coordinate(repository_id, &record.coordinate)
-            .await?;
+        remaining: &[PackageIndexRecord],
+    ) -> Result<Vec<PackageIndexRecord>, RetentionError> {
+        let mut referenced_digests = HashSet::new();
+        for entry in remaining {
+            if is_blob_name(entry.coordinate.name().as_str()) {
+                continue;
+            }
+            let Some(artifact_id) = entry.artifact_id else {
+                continue;
+            };
+            let body = match self.storage.get(&storage_key_for(artifact_id)).await {
+                Ok(body) => body,
+                Err(StorageError::NotFound(_)) => {
+                    return Ok(Vec::new());
+                }
+                Err(err) => return Err(err.into()),
+            };
+            collect_manifest_digests(&body, &mut referenced_digests);
+        }
 
-        let Some(digest) = manifest_digest(&record.entry) else {
-            return Ok(());
-        };
-        if digest_still_referenced(all_entries, record, &digest) {
-            return Ok(());
-        }
-        let Ok(digest_version) = PackageVersion::parse(digest) else {
-            return Ok(());
-        };
-        let digest_coordinate = PackageCoordinate::new(
-            record.coordinate.ecosystem(),
-            record.coordinate.name().clone(),
-            digest_version,
-        );
-        if digest_coordinate == record.coordinate {
-            return Ok(());
-        }
-        self.assay_store
-            .delete_by_coordinate(repository_id, &digest_coordinate)
-            .await?;
-        self.package_index_store
-            .delete_by_coordinate(repository_id, &digest_coordinate)
-            .await?;
-        Ok(())
+        Ok(remaining
+            .iter()
+            .filter(|entry| {
+                is_blob_name(entry.coordinate.name().as_str())
+                    && !referenced_digests.contains(entry.coordinate.version().as_str())
+            })
+            .cloned()
+            .collect())
     }
 
     async fn collect_garbage(
@@ -422,6 +529,150 @@ fn is_digest_reference(version: &str) -> bool {
     version.starts_with("sha256:")
 }
 
+fn coordinate_key(coordinate: &PackageCoordinate) -> (String, String) {
+    (
+        coordinate.name().as_str().to_string(),
+        coordinate.version().as_str().to_string(),
+    )
+}
+
+fn remember_artifact(record: &PackageIndexRecord, ids: &mut HashSet<ArtifactId>) {
+    if let Some(artifact_id) = record.artifact_id {
+        ids.insert(artifact_id);
+    }
+    if let Ok(value) = serde_json::from_slice::<Value>(&record.entry) {
+        collect_artifact_ids(&value, ids);
+    }
+}
+
+fn item_from_record(
+    record: &PackageIndexRecord,
+    sizes: &BTreeMap<ArtifactId, u64>,
+    reason: String,
+) -> CleanupItem {
+    let size_bytes = record
+        .artifact_id
+        .and_then(|id| sizes.get(&id).copied())
+        .unwrap_or(0);
+    CleanupItem {
+        name: record.coordinate.name().as_str().to_string(),
+        version: record.coordinate.version().as_str().to_string(),
+        size_bytes,
+        reason,
+    }
+}
+
+fn drop_reason(policy: RetentionPolicy, rank: u32, age_days: u64) -> String {
+    match (policy.keep_last(), policy.keep_days()) {
+        (Some(limit), None) => {
+            format!("fuera de las {limit} versiones más recientes")
+        }
+        (None, Some(days)) => {
+            format!("indexada hace {age_days} días (límite {days})")
+        }
+        (Some(limit), Some(days)) => {
+            format!("fuera de las {limit} más recientes y con más de {days} días")
+        }
+        (None, None) => "fuera de la política".to_string(),
+    }
+}
+
+#[derive(Default)]
+struct PreviewAccumulator {
+    items: Vec<CleanupItem>,
+    report: CleanupReport,
+    seen_blobs: HashSet<String>,
+}
+
+impl PreviewAccumulator {
+    fn push(
+        &mut self,
+        artifacts: &dyn ArtifactStore,
+        rec: &PackageIndexRecord,
+        reason: String,
+        cache: &mut HashMap<String, ArtifactRecord>,
+    ) {
+        remember_artifact(artifacts, rec, cache);
+        self.items.push(item_from_record(rec, reason, cache));
+        self.report.deleted_versions += 1;
+        if let Some(art) = cache.get(&rec.sha256) {
+            if self.seen_blobs.insert(rec.sha256.clone()) {
+                self.report.deleted_bytes += art.size_bytes;
+            }
+        }
+    }
+}
+
+fn versions_to_drop(
+    entries: &[PackageIndexRecord],
+    policy: RetentionPolicy,
+    now: DateTime<Utc>,
+) -> Vec<(PackageIndexRecord, String)> {
+    let mut by_package: BTreeMap<String, Vec<&PackageIndexRecord>> = BTreeMap::new();
+    for entry in entries {
+        if is_blob_name(entry.coordinate.name().as_str())
+            || is_digest_reference(entry.coordinate.version().as_str())
+        {
+            continue;
+        }
+        by_package
+            .entry(entry.coordinate.name().as_str().to_string())
+            .or_default()
+            .push(entry);
+    }
+
+    let mut dropping = Vec::new();
+    for versions in by_package.values_mut() {
+        versions.sort_by(|left, right| {
+            right
+                .created_at_rfc3339
+                .cmp(&left.created_at_rfc3339)
+                .then_with(|| {
+                    right
+                        .coordinate
+                        .version()
+                        .as_str()
+                        .cmp(left.coordinate.version().as_str())
+                })
+        });
+        for (rank, record) in versions.iter().enumerate() {
+            let rank = u32::try_from(rank).unwrap_or(u32::MAX);
+            let age = age_days(&record.created_at_rfc3339, now);
+            if policy.keeps(rank, age) {
+                continue;
+            }
+            dropping.push(((*record).clone(), drop_reason(policy, rank, age)));
+        }
+    }
+    dropping
+}
+
+fn digest_aliases_to_drop(remaining: &[PackageIndexRecord]) -> Vec<PackageIndexRecord> {
+    let mut kept_digests = HashSet::new();
+    for entry in remaining {
+        if is_blob_name(entry.coordinate.name().as_str())
+            || is_digest_reference(entry.coordinate.version().as_str())
+        {
+            continue;
+        }
+        if let Some(digest) = manifest_digest(&entry.entry) {
+            kept_digests.insert((entry.coordinate.name().as_str().to_string(), digest));
+        }
+    }
+    remaining
+        .iter()
+        .filter(|entry| {
+            is_digest_reference(entry.coordinate.version().as_str())
+                && !is_blob_name(entry.coordinate.name().as_str())
+                && !kept_digests.contains(&(
+                    entry.coordinate.name().as_str().to_string(),
+                    entry.coordinate.version().as_str().to_string(),
+                ))
+        })
+        .cloned()
+        .collect()
+}
+
 fn age_days(created_at_rfc3339: &str, now: DateTime<Utc>) -> u64 {
     DateTime::parse_from_rfc3339(created_at_rfc3339).map_or(0, |stamp| {
         let days = now
@@ -438,25 +689,6 @@ fn manifest_digest(entry: &[u8]) -> Option<String> {
         .get("digest")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
-}
-
-fn digest_still_referenced(
-    entries: &[PackageIndexRecord],
-    dropping: &PackageIndexRecord,
-    digest: &str,
-) -> bool {
-    entries.iter().any(|entry| {
-        if entry.coordinate == dropping.coordinate {
-            return false;
-        }
-        if entry.coordinate.name() != dropping.coordinate.name() {
-            return false;
-        }
-        if is_digest_reference(entry.coordinate.version().as_str()) {
-            return false;
-        }
-        manifest_digest(&entry.entry).as_deref() == Some(digest)
-    })
 }
 
 fn referenced_artifact_ids(entries: &[PackageIndexRecord]) -> HashSet<ArtifactId> {
@@ -671,6 +903,59 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_lists_the_same_version_without_deleting() {
+        let fixture = fixture();
+        let repository = cargo("crates");
+        fixture.repositories.save(&repository).await.unwrap();
+        let old = publish(
+            &fixture,
+            repository.id(),
+            "demo",
+            "1.0.0",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+        publish(
+            &fixture,
+            repository.id(),
+            "demo",
+            "2.0.0",
+            "2026-01-01T00:00:00Z",
+        )
+        .await;
+
+        let preview = fixture
+            .service
+            .dry_run(
+                repository.id(),
+                RetentionPolicy::new(Some(1), None).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(preview.dry_run);
+        assert_eq!(preview.report.dropped_versions, 1);
+        assert_eq!(preview.items[0].name, "demo");
+        assert_eq!(preview.items[0].version, "1.0.0");
+        assert!(
+            fixture
+                .artifacts
+                .find_by_id(old)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            fixture
+                .index
+                .artifact_for(repository.id(), &coordinate("demo", "1.0.0"))
+                .await
+                .unwrap(),
+            Some(old)
         );
     }
 

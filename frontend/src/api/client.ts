@@ -16,6 +16,7 @@ import type { PublishResponse } from "@/api/generated/PublishResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
+import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
 import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { SettingsResponse } from "@/api/generated/SettingsResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
@@ -420,9 +421,26 @@ export function saveRetentionPolicy(
   });
 }
 
-export function applyRetention(repositoryId: string): Promise<CleanupReportResponse> {
-  return request<CleanupReportResponse>(`/repositories/${repositoryId}/retention/apply`, {
+export function dryRunRetention(
+  repositoryId: string,
+  payload: RetentionPolicyRequest,
+): Promise<CleanupPreviewResponse> {
+  return request<CleanupPreviewResponse>(
+    `/repositories/${repositoryId}/retention/dry-run`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function applyRetention(
+  repositoryId: string,
+  payload: RetentionPolicyRequest,
+): Promise<CleanupPreviewResponse> {
+  return request<CleanupPreviewResponse>(`/repositories/${repositoryId}/retention/apply`, {
     method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
