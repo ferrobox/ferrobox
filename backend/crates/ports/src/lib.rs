@@ -20,6 +20,9 @@ pub mod package_index_store;
 /// El puerto de persistencia de la entidad `User` y sus credenciales.
 pub mod user_store;
 
+/// El puerto de persistencia de grupos y su acceso a repositorios.
+pub mod group_store;
+
 /// El puerto de persistencia de la entidad `ApiToken`.
 pub mod api_token_store;
 

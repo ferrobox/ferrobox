@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::{AuthenticatedUser, extract_bearer_token};
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
 const CONAN_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
@@ -167,8 +167,10 @@ async fn conan_head(
     State(state): State<Arc<AppState>>,
     Path((repository_id, rest)): Path<(Uuid, String)>,
     Query(search): Query<SearchParams>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
-    let (status, headers, _) = conan_get(State(state), Path((repository_id, rest)), Query(search)).await?;
+    let (status, headers, _) =
+        conan_get(State(state), Path((repository_id, rest)), Query(search), headers).await?;
     Ok((status, headers, Bytes::new()))
 }
 
@@ -176,7 +178,15 @@ async fn conan_get(
     State(state): State<Arc<AppState>>,
     Path((repository_id, rest)): Path<(Uuid, String)>,
     Query(search): Query<SearchParams>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_conan_repository(&state, repository_id).await?;
     let strategy = conan_strategy(&state)?;
     let rest = rest.trim_matches('/');
@@ -205,7 +215,7 @@ async fn conan_put(
     Path((repository_id, rest)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let repository = load_conan_repository(&state, repository_id).await?;
     let strategy = conan_strategy(&state)?;
     strategy
@@ -219,7 +229,7 @@ async fn yank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     Ok((StatusCode::OK, Json(ConanOk { ok: true })))
 }
@@ -229,7 +239,7 @@ async fn unyank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     Ok((StatusCode::OK, Json(ConanOk { ok: true })))
 }
@@ -276,6 +286,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -285,7 +296,7 @@ mod tests {
     use ferrobox_application::packaging::conan::ConanPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -406,6 +417,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

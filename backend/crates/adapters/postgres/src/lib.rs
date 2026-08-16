@@ -13,6 +13,9 @@ pub mod package_index_store;
 /// Adaptador de `UserStore`.
 pub mod user_store;
 
+/// Adaptador de `GroupStore`.
+pub mod group_store;
+
 /// Adaptador de `ApiTokenStore`.
 pub mod api_token_store;
 

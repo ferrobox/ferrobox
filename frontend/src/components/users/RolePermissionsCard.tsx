@@ -58,6 +58,10 @@ const PERMISSIONS: readonly PermissionRow[] = [
     allowed: { reader: false, developer: false, admin: true },
   },
   {
+    label: "Crear grupos y asignar repositorios",
+    allowed: { reader: false, developer: false, admin: true },
+  },
+  {
     label: "Restablecer la contraseña de otra cuenta",
     allowed: { reader: false, developer: false, admin: true },
   },
@@ -70,7 +74,9 @@ export function RolePermissionsCard() {
         <CardTitle>Permisos por rol</CardTitle>
         <CardDescription>
           Los roles aplican a toda la instancia. Un Lector lee; un Desarrollador además publica y
-          administra repositorios; un Administrador también gestiona cuentas.
+          administra repositorios; un Administrador también gestiona cuentas y grupos. Si un
+          repositorio tiene grupos asignados, solo esos grupos (y los administradores) pueden
+          verlo; el rol del grupo en ese repositorio puede conceder escritura a un Lector.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-0 sm:px-6">

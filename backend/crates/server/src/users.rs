@@ -111,6 +111,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -121,7 +122,7 @@ mod tests {
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -191,7 +192,7 @@ mod tests {
                 http_client,
             ),
             retention: RetentionService::new(
-                repository_store,
+                repository_store.clone(),
                 artifact_store,
                 package_index_store,
                 storage,
@@ -215,6 +216,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let admin = state

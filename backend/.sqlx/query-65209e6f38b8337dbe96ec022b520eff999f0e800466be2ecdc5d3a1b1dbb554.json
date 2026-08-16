@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM repository_group_access\n            WHERE group_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "65209e6f38b8337dbe96ec022b520eff999f0e800466be2ecdc5d3a1b1dbb554"
+}

@@ -39,6 +39,7 @@ export function AssayDialog({
   ecosystem,
   name,
   version,
+  canRerun,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,9 +47,10 @@ export function AssayDialog({
   ecosystem: PackageEcosystemDto;
   name: string;
   version: string;
+  canRerun?: boolean;
 }) {
   const { user } = useAuth();
-  const canRerun = canWriteArtifacts(user?.role);
+  const canRerunAssay = canRerun ?? canWriteArtifacts(user?.role);
   const lookup = { ecosystem, name, version };
   const { data, isPending, isError, error, refetch, isFetching } = useAssay(
     repositoryId,
@@ -108,7 +110,7 @@ export function AssayDialog({
         {data ? (
           <AssayBody
             assay={data}
-            canRerun={canRerun}
+            canRerun={canRerunAssay}
             rerunPending={rerun.isPending || isFetching}
             onDownload={() => void onDownload()}
             onRerun={() => void onRerun()}

@@ -10,19 +10,18 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_repo_read, require_repo_write};
 use crate::dto::{QuotaRequest, QuotaResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn get_quota(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<QuotaResponse>, ApiError> {
-    let snapshot = state
-        .quota
-        .get_snapshot(RepositoryId::from(repository_id))
-        .await?;
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+    let snapshot = state.quota.get_snapshot(repository_id).await?;
     Ok(Json(QuotaResponse::from(snapshot)))
 }
 
@@ -32,7 +31,7 @@ pub(crate) async fn save_quota(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<QuotaRequest>,
 ) -> Result<Json<QuotaResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let quota = StorageQuota::new(payload.limit_bytes)?;
     let snapshot = state
         .quota
@@ -60,6 +59,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -69,7 +69,7 @@ mod tests {
     use ferrobox_application::quota::QuotaService;
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -166,6 +166,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

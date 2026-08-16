@@ -26,6 +26,13 @@ import type { SettingsResponse } from "@/api/generated/SettingsResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
 import type { UserResponse } from "@/api/generated/UserResponse";
+import type { GroupSummaryResponse } from "@/api/generated/GroupSummaryResponse";
+import type { GroupDetailResponse } from "@/api/generated/GroupDetailResponse";
+import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
+import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
+import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
+import type { RepositoryAccessGrantResponse } from "@/api/generated/RepositoryAccessGrantResponse";
+import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
 
 /**
  * Todas las peticiones se dirigen a `/api`, que el servidor de
@@ -493,6 +500,61 @@ export function dryRunGarbageCollection(): Promise<CleanupPreviewResponse> {
 
 export function collectGarbageAll(): Promise<CleanupPreviewResponse> {
   return request<CleanupPreviewResponse>("/gc", { method: "POST" });
+}
+
+export function listGroups(): Promise<GroupSummaryResponse[]> {
+  return request<GroupSummaryResponse[]>("/groups");
+}
+
+export function createGroup(payload: CreateGroupRequest): Promise<GroupSummaryResponse> {
+  return request<GroupSummaryResponse>("/groups", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getGroup(groupId: string): Promise<GroupDetailResponse> {
+  return request<GroupDetailResponse>(`/groups/${groupId}`);
+}
+
+export function deleteGroup(groupId: string): Promise<void> {
+  return request<void>(`/groups/${groupId}`, { method: "DELETE" });
+}
+
+export function setGroupMembers(
+  groupId: string,
+  payload: SetGroupMembersRequest,
+): Promise<void> {
+  return request<void>(`/groups/${groupId}/members`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function setGroupRepositories(
+  groupId: string,
+  payload: SetGroupRepositoriesRequest,
+): Promise<void> {
+  return request<void>(`/groups/${groupId}/repositories`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getRepositoryAccess(
+  repositoryId: string,
+): Promise<RepositoryAccessGrantResponse[]> {
+  return request<RepositoryAccessGrantResponse[]>(`/repositories/${repositoryId}/access`);
+}
+
+export function setRepositoryAccess(
+  repositoryId: string,
+  payload: SetRepositoryAccessRequest,
+): Promise<void> {
+  return request<void>(`/repositories/${repositoryId}/access`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function downloadAssaySbom(assayId: string, filename: string): Promise<void> {

@@ -13,16 +13,23 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
 use crate::dto::{AssayLookupRequest, AssayResponse, AssayRerunResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn list_all(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
 ) -> Result<Json<Vec<AssayResponse>>, ApiError> {
+    let visibility = state.groups.visibility(&user).await?;
     let assays = state.assays.list_all().await?;
-    Ok(Json(assays.iter().map(AssayResponse::from).collect()))
+    Ok(Json(
+        assays
+            .iter()
+            .filter(|assay| visibility.contains(assay.repository_id()))
+            .map(AssayResponse::from)
+            .collect(),
+    ))
 }
 
 pub(crate) async fn rerun_all(
@@ -36,26 +43,27 @@ pub(crate) async fn rerun_all(
 
 pub(crate) async fn list_for_repository(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<AssayResponse>>, ApiError> {
-    let assays = state
-        .assays
-        .list_for_repository(RepositoryId::from(repository_id))
-        .await?;
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+    let assays = state.assays.list_for_repository(repository_id).await?;
     Ok(Json(assays.iter().map(AssayResponse::from).collect()))
 }
 
 pub(crate) async fn get_or_run(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Query(lookup): Query<AssayLookupRequest>,
 ) -> Result<Json<AssayResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
     let assay = state
         .assays
         .get_or_run(
-            RepositoryId::from(repository_id),
+            repository_id,
             lookup.ecosystem.into(),
             &lookup.name,
             &lookup.version,
@@ -70,7 +78,7 @@ pub(crate) async fn run(
     Path(repository_id): Path<Uuid>,
     Json(lookup): Json<AssayLookupRequest>,
 ) -> Result<Json<AssayResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let assay = state
         .assays
         .run(
@@ -85,19 +93,21 @@ pub(crate) async fn run(
 
 pub(crate) async fn get_by_id(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(assay_id): Path<Uuid>,
 ) -> Result<Json<AssayResponse>, ApiError> {
     let assay = state.assays.get_by_id(AssayId::from(assay_id)).await?;
+    require_repo_read(&state.groups, &user, assay.repository_id()).await?;
     Ok(Json(AssayResponse::from(&assay)))
 }
 
 pub(crate) async fn download_sbom(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(assay_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let assay = state.assays.get_by_id(AssayId::from(assay_id)).await?;
+    require_repo_read(&state.groups, &user, assay.repository_id()).await?;
     let body = to_cyclonedx(&assay);
     let filename = format!(
         "{}-{}.cdx.json",
@@ -156,6 +166,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -164,7 +175,7 @@ mod tests {
     use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -268,6 +279,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

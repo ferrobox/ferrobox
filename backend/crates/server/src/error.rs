@@ -23,8 +23,10 @@ use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
 use ferrobox_application::search_packages::SearchPackagesError;
+use ferrobox_application::manage_groups::GroupError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
 use ferrobox_domain::quota::StorageQuotaError;
+use ferrobox_ports::group_store::GroupStoreError;
 use ferrobox_domain::retention::RetentionPolicyError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
@@ -357,5 +359,20 @@ impl From<RetentionError> for ApiError {
 impl From<SearchPackagesError> for ApiError {
     fn from(err: SearchPackagesError) -> Self {
         Self::Internal(err.to_string())
+    }
+}
+
+impl From<GroupError> for ApiError {
+    fn from(err: GroupError) -> Self {
+        match err {
+            GroupError::GroupNotFound => Self::NotFound(err.to_string()),
+            GroupError::UserNotFound
+            | GroupError::RepositoryNotFound
+            | GroupError::InvalidGroupRole => Self::BadRequest(err.to_string()),
+            GroupError::Groups(GroupStoreError::DuplicateName(_)) => Self::Conflict(err.to_string()),
+            GroupError::Groups(GroupStoreError::Backend(_))
+            | GroupError::Users(_)
+            | GroupError::Repositories(_) => Self::Internal(err.to_string()),
+        }
     }
 }

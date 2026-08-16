@@ -20,8 +20,6 @@ import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
 import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import { useDeleteArtifact, useRepositoryArtifacts, useRepositoryAssays, useSetYanked } from "@/api/queries";
-import { useAuth } from "@/auth/AuthProvider";
-import { canWriteArtifacts } from "@/auth/roles";
 import { AssayDialog } from "@/components/assay/AssayDialog";
 import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
@@ -133,20 +131,20 @@ export function ArtifactsTable({
   repositoryId,
   kind,
   ecosystem,
+  canWrite,
   memberNames = {},
 }: {
   repositoryId: string;
   kind: RepositoryStorageKind;
   ecosystem: PackageEcosystemDto;
+  canWrite: boolean;
   memberNames?: Readonly<Record<string, string>>;
 }) {
-  const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
   const { data: assays } = useRepositoryAssays(repositoryId);
   const deleteArtifact = useDeleteArtifact(repositoryId);
   const setYanked = useSetYanked(repositoryId);
-  const canWrite = canWriteArtifacts(user?.role);
   const canYank =
     canWrite &&
     kind === "forge" &&
@@ -402,6 +400,7 @@ export function ArtifactsTable({
         ecosystem={ecosystem}
         name={assayTarget.name}
         version={assayTarget.version}
+        canRerun={canWrite}
       />
     ) : null}
     </>

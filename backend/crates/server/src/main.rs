@@ -11,6 +11,7 @@ mod conan_registry;
 mod config;
 mod dto;
 mod error;
+mod groups;
 mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
@@ -28,12 +29,13 @@ use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use axum::Router;
 use axum::middleware;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use config::Config;
 use ferrobox_adapter_http::ReqwestHttpClient;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
+use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
@@ -55,6 +57,7 @@ use ferrobox_application::login::LoginUseCase;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
 };
+use ferrobox_application::manage_groups::GroupService;
 use ferrobox_application::manage_users::{
     ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
     ResetUserPasswordUseCase,
@@ -102,6 +105,7 @@ struct AppState {
     delete_user: DeleteUserUseCase,
     change_user_role: ChangeUserRoleUseCase,
     reset_user_password: ResetUserPasswordUseCase,
+    groups: GroupService,
 }
 
 #[tokio::main]
@@ -125,6 +129,7 @@ async fn main() {
     let retention_store = Arc::new(PostgresRetentionStore::new(pool.clone()));
     let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
+    let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
     let http_client = Arc::new(ReqwestHttpClient::new());
@@ -140,6 +145,7 @@ async fn main() {
         retention_store,
         quota_store,
         user_store,
+        group_store,
         api_token_store,
         storage,
         http_client,
@@ -157,6 +163,7 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
+#[allow(clippy::too_many_lines)]
 fn build_router(state: Arc<AppState>) -> axum::Router {
     let public = Router::new()
         .route("/health", get(health))
@@ -185,6 +192,16 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/users/{user_id}/password",
             post(users::reset_user_password),
         )
+        .route("/groups", get(groups::list_groups).post(groups::create_group))
+        .route(
+            "/groups/{group_id}",
+            get(groups::get_group).delete(groups::delete_group),
+        )
+        .route("/groups/{group_id}/members", put(groups::set_members))
+        .route(
+            "/groups/{group_id}/repositories",
+            put(groups::set_repositories),
+        )
         .route(
             "/repositories",
             post(repositories::create_repository).get(repositories::list_repositories),
@@ -194,6 +211,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             get(repositories::get_repository)
                 .patch(repositories::update_alloy_members)
                 .delete(repositories::delete_repository),
+        )
+        .route(
+            "/repositories/{repository_id}/access",
+            get(groups::get_repository_access).put(groups::set_repository_access),
         )
         .route(
             "/repositories/{repository_id}/artifacts",
@@ -294,6 +315,7 @@ fn build_app_state(
     retention_store: Arc<PostgresRetentionStore>,
     quota_store: Arc<PostgresQuotaStore>,
     user_store: Arc<PostgresUserStore>,
+    group_store: Arc<PostgresGroupStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
@@ -357,7 +379,7 @@ fn build_app_state(
             storage.clone(),
         ),
         delete_artifact: DeleteArtifactUseCase::new(
-            repository_store,
+            repository_store.clone(),
             artifact_store,
             package_index_store,
             storage,
@@ -381,7 +403,8 @@ fn build_app_state(
         list_users: ListUsersUseCase::new(user_store.clone()),
         delete_user: DeleteUserUseCase::new(user_store.clone()),
         change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
-        reset_user_password: ResetUserPasswordUseCase::new(user_store),
+        reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+        groups: GroupService::new(group_store, user_store, repository_store),
     }
 }
 

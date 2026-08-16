@@ -40,7 +40,7 @@ use crate::AppState;
 use crate::auth_extract::{
     AuthenticatedUser, OCI_ANONYMOUS_TOKEN, extract_bearer_token, oci_bearer_challenge,
 };
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
 /// Tamaño máximo de un blob o manifiesto OCI.
@@ -210,7 +210,15 @@ async fn dispatch_read(
     State(state): State<Arc<AppState>>,
     Path((repository_id, rest)): Path<(Uuid, String)>,
     method: Method,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     match parse_distribution_path(&rest)? {
         DistributionPath::Manifest { name, reference } => {
             get_manifest(&state, repository_id, &name, &reference, method).await
@@ -234,6 +242,12 @@ async fn dispatch_write(
     Query(query): Query<DigestQuery>,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    require_repo_write(
+        &state.groups,
+        &user.user,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     match (method, parse_distribution_path(&rest)?) {
         (Method::PUT, DistributionPath::Manifest { name, reference }) => {
             put_manifest(&state, user, repository_id, &name, &reference, headers, body).await
@@ -377,14 +391,13 @@ async fn get_manifest(
 
 async fn put_manifest(
     state: &AppState,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    _user: AuthenticatedUser,
     repository_id: Uuid,
     name: &str,
     reference: &str,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_write_artifacts(&user)?;
     let repository = load_distribution_repository(state, repository_id).await?;
     let strategy = distribution_strategy(state, &repository)?;
     let media_type = headers
@@ -446,13 +459,12 @@ struct DigestQuery {
 
 async fn start_or_monolithic_upload(
     state: &AppState,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    _user: AuthenticatedUser,
     repository_id: Uuid,
     name: &str,
     query: DigestQuery,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_write_artifacts(&user)?;
     let repository = load_distribution_repository(state, repository_id).await?;
     if let Some(digest) = query.digest {
         let strategy = distribution_strategy(state, &repository)?;
@@ -473,27 +485,25 @@ async fn start_or_monolithic_upload(
 }
 
 fn patch_upload(
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    _user: AuthenticatedUser,
     repository_id: Uuid,
     name: &str,
     upload_id: Uuid,
     body: &Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_write_artifacts(&user)?;
     let size = uploads().append(upload_id, repository_id, name, body)?;
     Ok(upload_accepted(repository_id, name, upload_id, size))
 }
 
 async fn finish_upload(
     state: &AppState,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    _user: AuthenticatedUser,
     repository_id: Uuid,
     name: &str,
     upload_id: Uuid,
     query: DigestQuery,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_write_artifacts(&user)?;
     let digest = query.digest.ok_or_else(|| {
         OciApiError::from_code(
             StatusCode::BAD_REQUEST,
@@ -534,7 +544,7 @@ async fn yank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &reference, true).await?;
     Ok((StatusCode::OK, Json(OciOk { ok: true })))
 }
@@ -544,7 +554,7 @@ async fn unyank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &reference, false).await?;
     Ok((StatusCode::OK, Json(OciOk { ok: true })))
 }
@@ -832,6 +842,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -843,7 +854,7 @@ mod tests {
     use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -993,6 +1004,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

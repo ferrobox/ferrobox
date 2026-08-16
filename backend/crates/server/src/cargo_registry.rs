@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
 /// Rutas de solo lectura del protocolo de Cargo. Van en el router
@@ -111,44 +111,52 @@ async fn config_json(
         )));
     }
 
+    let auth_required = state
+        .groups
+        .is_restricted(RepositoryId::from(repository_id))
+        .await?;
     let base = format!("{}/cargo/{repository_id}", state.public_base_url);
     Ok(Json(RegistryConfig {
         dl: format!("{base}/api/v1/crates"),
         api: base,
-        auth_required: false,
+        auth_required,
     }))
 }
 
 async fn index_len1(
     State(state): State<Arc<AppState>>,
     Path((repository_id, name)): Path<(Uuid, String)>,
+    headers: HeaderMap,
 ) -> Result<(HeaderMap, Bytes), ApiError> {
     let expected = format!("1/{name}");
-    serve_index(&state, repository_id, name, &expected).await
+    serve_index(&state, &headers, repository_id, name, &expected).await
 }
 
 async fn index_len2(
     State(state): State<Arc<AppState>>,
     Path((repository_id, name)): Path<(Uuid, String)>,
+    headers: HeaderMap,
 ) -> Result<(HeaderMap, Bytes), ApiError> {
     let expected = format!("2/{name}");
-    serve_index(&state, repository_id, name, &expected).await
+    serve_index(&state, &headers, repository_id, name, &expected).await
 }
 
 async fn index_len3(
     State(state): State<Arc<AppState>>,
     Path((repository_id, prefix, name)): Path<(Uuid, String, String)>,
+    headers: HeaderMap,
 ) -> Result<(HeaderMap, Bytes), ApiError> {
     let expected = format!("3/{prefix}/{name}");
-    serve_index(&state, repository_id, name, &expected).await
+    serve_index(&state, &headers, repository_id, name, &expected).await
 }
 
 async fn index_len4(
     State(state): State<Arc<AppState>>,
     Path((repository_id, prefix, suffix, name)): Path<(Uuid, String, String, String)>,
+    headers: HeaderMap,
 ) -> Result<(HeaderMap, Bytes), ApiError> {
     let expected = format!("{prefix}/{suffix}/{name}");
-    serve_index(&state, repository_id, name, &expected).await
+    serve_index(&state, &headers, repository_id, name, &expected).await
 }
 
 /// Sirve el índice disperso de un crate. `expected_shard` es la ruta de
@@ -157,6 +165,7 @@ async fn index_len4(
 /// incorrectas.
 async fn serve_index(
     state: &AppState,
+    headers: &HeaderMap,
     repository_id: Uuid,
     package_name: String,
     expected_shard: &str,
@@ -168,6 +177,14 @@ async fn serve_index(
             "sparse-index path '{expected_shard}' does not match crate '{name}'"
         )));
     }
+
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
 
     let repository = state
         .get_repository
@@ -242,7 +259,7 @@ async fn publish(
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
 
     let repository = state
         .get_repository
@@ -259,7 +276,15 @@ async fn publish(
 async fn download(
     State(state): State<Arc<AppState>>,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
+    headers: HeaderMap,
 ) -> Result<Bytes, ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = state
         .get_repository
         .execute(RepositoryId::from(repository_id))
@@ -299,7 +324,7 @@ async fn set_yanked(
     version: String,
     yanked: bool,
 ) -> Result<Json<YankResponse>, ApiError> {
-    require_write_artifacts(user)?;
+    require_repo_write(&state.groups, user, RepositoryId::from(repository_id)).await?;
 
     let repository = state
         .get_repository
@@ -325,7 +350,15 @@ async fn search(
     State(state): State<Arc<AppState>>,
     Path(repository_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
+    headers: HeaderMap,
 ) -> Result<Json<SearchResponse>, ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let query = params.q.trim();
 
     let limit = usize::from(params.per_page.clamp(1, 100));
@@ -370,6 +403,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -378,7 +412,7 @@ mod tests {
     use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -494,6 +528,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state
