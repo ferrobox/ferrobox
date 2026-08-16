@@ -5,6 +5,7 @@ mod extract;
 mod layers;
 mod osv;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -66,6 +67,7 @@ pub enum AssayError {
 }
 
 /// Caso de uso: listar, obtener y ejecutar ensayes.
+#[derive(Clone)]
 pub struct AssayService {
     assays: Arc<dyn AssayStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -178,6 +180,63 @@ impl AssayService {
             .find_by_id(id)
             .await?
             .ok_or(AssayError::AssayNotFound(id))
+    }
+
+    /// Lanza un ensaye en segundo plano. No bloquea `publish` ni
+    /// `install`: un fallo queda persistido como estado `Failed`.
+    pub fn schedule(&self, repository_id: RepositoryId, coordinate: PackageCoordinate) {
+        if !should_auto_assay(&coordinate) {
+            return;
+        }
+        let service = self.clone();
+        tokio::spawn(async move {
+            let _ = service
+                .run(
+                    repository_id,
+                    coordinate.ecosystem(),
+                    coordinate.name().as_str(),
+                    coordinate.version().as_str(),
+                )
+                .await;
+        });
+    }
+
+    /// Vuelve a ensayar las coordenadas de una imagen OCI/Helm tras
+    /// cachear una capa. Sirve para pasar de `unsupported` (manifiesto
+    /// sin blobs) a un inventario real sin bloquear el `pull`.
+    pub fn reschedule_for_name(&self, repository_id: RepositoryId, name: &str) {
+        let name = name.to_string();
+        let service = self.clone();
+        tokio::spawn(async move {
+            let Ok(assays) = service.assays.find_by_repository(repository_id).await else {
+                return;
+            };
+            for assay in assays {
+                if assay.coordinate().name().as_str() == name {
+                    let _ = service.run_on(repository_id, assay.coordinate()).await;
+                }
+            }
+        });
+    }
+
+    /// Reensaya en segundo plano todas las coordenadas ya ensayadas.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AssayError::Persistence`] si falla el almacén.
+    pub async fn rerun_all(&self) -> Result<u32, AssayError> {
+        let assays = self.assays.find_all().await?;
+        let mut seen = HashSet::new();
+        let mut scheduled = 0_u32;
+        for assay in assays {
+            let key = (assay.repository_id(), assay.coordinate().clone());
+            if !seen.insert(key) {
+                continue;
+            }
+            self.schedule(assay.repository_id(), assay.coordinate().clone());
+            scheduled += 1;
+        }
+        Ok(scheduled)
     }
 
     async fn run_on(
@@ -335,6 +394,14 @@ impl AssayService {
         }
         Ok(None)
     }
+}
+
+/// Omite blobs OCI y manifiestos indexados por digest: no son una
+/// versión que la UI ensaye.
+pub(crate) fn should_auto_assay(coordinate: &PackageCoordinate) -> bool {
+    let name = coordinate.name().as_str();
+    let version = coordinate.version().as_str();
+    name != "_blob" && !name.is_empty() && !version.is_empty() && !version.starts_with("sha256:")
 }
 
 fn composition_only_message(ecosystem: PackageEcosystem) -> Option<String> {
@@ -925,5 +992,115 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AssayError::PackageNotFound(_)));
+    }
+
+    #[test]
+    fn auto_assay_skips_oci_blobs_and_digest_references() {
+        let blob = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("_blob").unwrap(),
+            PackageVersion::parse(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+        );
+        assert!(!should_auto_assay(&blob));
+        let digest_tag = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("alpine").unwrap(),
+            PackageVersion::parse(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+        );
+        assert!(!should_auto_assay(&digest_tag));
+        let tag = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("alpine").unwrap(),
+            PackageVersion::parse("latest").unwrap(),
+        );
+        assert!(should_auto_assay(&tag));
+        let npm = PackageCoordinate::new(
+            PackageEcosystem::Npm,
+            PackageName::parse("lodash").unwrap(),
+            PackageVersion::parse("4.17.20").unwrap(),
+        );
+        assert!(should_auto_assay(&npm));
+    }
+
+    async fn wait_for_assays(service: &AssayService, expected: usize) -> Vec<Assay> {
+        for _ in 0..50 {
+            let assays = service.list_all().await.unwrap();
+            if assays.len() >= expected {
+                return assays;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        service.list_all().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn schedule_runs_in_the_background_without_failing_the_caller() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_lodash(&index, &repository).await;
+        http.stub(
+            "https://api.osv.dev/v1/querybatch",
+            200,
+            osv_high_lodash(),
+        );
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryStorage::default()),
+            http,
+        );
+        service.schedule(
+            repository.id(),
+            PackageCoordinate::new(
+                PackageEcosystem::Npm,
+                PackageName::parse("lodash").unwrap(),
+                PackageVersion::parse("4.17.20").unwrap(),
+            ),
+        );
+        let assays = wait_for_assays(&service, 1).await;
+        assert_eq!(assays.len(), 1);
+        assert_eq!(assays[0].counts().high, 1);
+    }
+
+    #[tokio::test]
+    async fn rerun_all_schedules_each_distinct_coordinate() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_lodash(&index, &repository).await;
+        http.stub(
+            "https://api.osv.dev/v1/querybatch",
+            200,
+            osv_high_lodash(),
+        );
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryStorage::default()),
+            http,
+        );
+        service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        let scheduled = service.rerun_all().await.unwrap();
+        assert_eq!(scheduled, 1);
+        let assays = wait_for_assays(&service, 1).await;
+        assert_eq!(assays.len(), 1);
     }
 }

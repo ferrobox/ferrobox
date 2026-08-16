@@ -2,10 +2,13 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
+import type { AssayCountsDto } from "@/api/generated/AssayCountsDto";
+import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
+import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { CreateRepositoryDialog } from "@/components/repository/CreateRepositoryDialog";
 import {
   ECOSYSTEM_OPTIONS,
@@ -22,9 +25,11 @@ import { cn } from "@/lib/utils";
 
 export function RepositoryBrowser({
   repositories,
+  assays,
   selectedId,
 }: {
   repositories: readonly RepositoryResponse[];
+  assays: readonly AssayResponse[];
   selectedId?: string;
 }) {
   const { user } = useAuth();
@@ -59,6 +64,27 @@ export function RepositoryBrowser({
         .sort((left, right) => left.name.localeCompare(right.name)),
     })).filter((group) => group.repositories.length > 0);
   }, [filtered]);
+
+  const countsByRepository = useMemo(() => {
+    const grouped = new Map<string, AssayCountsDto>();
+    for (const assay of assays) {
+      const current = grouped.get(assay.repository_id) ?? {
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        unknown: 0,
+      };
+      grouped.set(assay.repository_id, {
+        critical: current.critical + assay.counts.critical,
+        high: current.high + assay.counts.high,
+        medium: current.medium + assay.counts.medium,
+        low: current.low + assay.counts.low,
+        unknown: current.unknown + assay.counts.unknown,
+      });
+    }
+    return grouped;
+  }, [assays]);
 
   function toggleGroup(ecosystem: PackageEcosystemDto) {
     setCollapsed((current) => {
@@ -145,6 +171,7 @@ export function RepositoryBrowser({
                     {group.repositories.map((repository) => {
                       const kind = KIND_META[repository.kind.type];
                       const KindIcon = kind.icon;
+                      const counts = countsByRepository.get(repository.id);
 
                       return (
                         <li key={repository.id}>
@@ -161,7 +188,7 @@ export function RepositoryBrowser({
                             }
                           >
                             <KindIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0">
+                            <span className="min-w-0 flex-1">
                               <span className="block truncate font-medium">
                                 {repository.name}
                               </span>
@@ -169,6 +196,7 @@ export function RepositoryBrowser({
                                 {kind.label}
                               </span>
                             </span>
+                            {counts ? <AssayCountPills counts={counts} compact /> : null}
                           </NavLink>
                         </li>
                       );

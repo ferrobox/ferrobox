@@ -3,7 +3,9 @@ import { AlertCircle, FlaskConical, RefreshCw } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import type { AssayResponse } from "@/api/generated/AssayResponse";
-import { useAssays, useRepositories } from "@/api/queries";
+import { useAssays, useRerunAllAssays, useRepositories } from "@/api/queries";
+import { useAuth } from "@/auth/AuthProvider";
+import { canWriteArtifacts } from "@/auth/roles";
 import { AssayDialog } from "@/components/assay/AssayDialog";
 import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -34,8 +36,11 @@ function statusLabel(status: string): string {
 }
 
 export function AssaysPage() {
+  const { user } = useAuth();
+  const canWrite = canWriteArtifacts(user?.role);
   const { data, isPending, isError, error, refetch, isFetching } = useAssays();
   const { data: repositories } = useRepositories();
+  const rerunAll = useRerunAllAssays();
   const names = new Map((repositories ?? []).map((repository) => [repository.id, repository.name]));
   const [openAssay, setOpenAssay] = useState<AssayResponse | null>(null);
 
@@ -43,7 +48,20 @@ export function AssaysPage() {
     <div>
       <PageHeader
         title="Assays"
-        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. No bloquean install ni publish."
+        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. Se lanzan solos al publicar o al cachear en un Mirror; no bloquean install ni publish."
+        actions={
+          canWrite && data && data.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={rerunAll.isPending}
+              onClick={() => void rerunAll.mutateAsync()}
+            >
+              <RefreshCw className={rerunAll.isPending ? "animate-spin" : ""} />
+              Reensayar todos
+            </Button>
+          ) : null
+        }
       />
 
       {isPending ? (
@@ -68,14 +86,23 @@ export function AssaysPage() {
         </Alert>
       ) : null}
 
+      {rerunAll.isError ? (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle />
+          <AlertTitle>No se pudo lanzar el reensaye</AlertTitle>
+          <AlertDescription>{rerunAll.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+
       {data && data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
           <FlaskConical className="mx-auto size-8 text-muted-foreground" />
           <p className="mt-3 font-medium text-foreground">Todavía no hay ensayes</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Abre un paquete npm, PyPI, Cargo o una imagen OCI y pulsa Assay. El inventario se
-            consulta contra OSV (Open Source Vulnerabilities). Helm y Conan muestran composición
-            si hay Chart.yaml o requires; OSV no los indexa.
+            Publica un paquete o haz install/pull contra un Mirror: el ensaye se lanza solo. También
+            puedes abrir una versión y pulsar Assay. El inventario se consulta contra OSV (Open
+            Source Vulnerabilities). Helm y Conan muestran composición si hay Chart.yaml o
+            requires; OSV no los indexa.
           </p>
         </div>
       ) : null}

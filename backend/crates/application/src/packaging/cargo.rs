@@ -26,7 +26,8 @@ use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
-use super::{PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -37,6 +38,7 @@ pub struct CargoPackagingStrategy {
     storage: Arc<dyn StoragePort>,
     http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
+    assays: Option<AssayService>,
 }
 
 impl CargoPackagingStrategy {
@@ -55,7 +57,15 @@ impl CargoPackagingStrategy {
             storage,
             http_client,
             repository_store,
+            assays: None,
         }
+    }
+
+    /// Conecta el ensaye automático al publicar o cachear un crate.
+    #[must_use]
+    pub fn with_assays(mut self, assays: AssayService) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     fn ensure_cargo_repository(repository: &Repository) -> Result<(), PackagingError> {
@@ -233,6 +243,7 @@ impl CargoPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), coordinate);
 
         Ok(crate_bytes)
     }
@@ -427,6 +438,7 @@ impl PackagingStrategy for CargoPackagingStrategy {
                 entry_bytes,
             )
             .await?;
+        notify_assay(self.assays.as_ref(), repository.id(), &coordinate);
 
         Ok(coordinate)
     }

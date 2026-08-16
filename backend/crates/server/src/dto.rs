@@ -524,3 +524,11 @@ pub(crate) struct AssayLookupRequest {
     pub(crate) name: String,
     pub(crate) version: String,
 }
+
+/// Resultado de lanzar un reensaye en lote.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AssayRerunResponse {
+    /// Número de coordenadas distintas encoladas para reensayar.
+    pub(crate) scheduled: u32,
+}

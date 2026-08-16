@@ -3,6 +3,7 @@ import type { ApiTokenResponse } from "@/api/generated/ApiTokenResponse";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
 import type { AssayLookupRequest } from "@/api/generated/AssayLookupRequest";
 import type { AssayResponse } from "@/api/generated/AssayResponse";
+import type { AssayRerunResponse } from "@/api/generated/AssayRerunResponse";
 import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
@@ -396,6 +397,10 @@ export function runAssay(
     method: "POST",
     body: JSON.stringify(lookup),
   });
+}
+
+export function rerunAllAssays(): Promise<AssayRerunResponse> {
+  return request<AssayRerunResponse>("/assays/rerun", { method: "POST" });
 }
 
 export async function downloadAssaySbom(assayId: string, filename: string): Promise<void> {

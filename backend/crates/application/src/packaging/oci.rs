@@ -31,7 +31,11 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
-use super::{OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome};
+use super::{
+    notify_assay, OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy,
+    PublishOutcome,
+};
+use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
@@ -51,6 +55,7 @@ pub struct OciPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     http_client: Arc<dyn HttpClient>,
     ecosystem: PackageEcosystem,
+    assays: Option<AssayService>,
 }
 
 impl OciPackagingStrategy {
@@ -90,7 +95,15 @@ impl OciPackagingStrategy {
             repository_store,
             http_client,
             ecosystem,
+            assays: None,
         }
+    }
+
+    /// Conecta el ensaye automático al publicar o cachear un manifiesto.
+    #[must_use]
+    pub fn with_assays(mut self, assays: AssayService) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     fn ensure_repository(&self, repository: &Repository) -> Result<(), PackagingError> {
@@ -302,6 +315,7 @@ impl OciPackagingStrategy {
                     encode_entry(&digest_entry),
                 )
                 .await?;
+            notify_assay(self.assays.as_ref(), repository.id(), &tag_coordinate);
         }
 
         Ok(digest)
@@ -515,6 +529,9 @@ impl OciPackagingStrategy {
         let response = self.registry_get_authed(&url, Vec::new()).await?;
         self.put_blob_one(repository, &digest, response.body.clone())
             .await?;
+        if let Some(assays) = &self.assays {
+            assays.reschedule_for_name(repository.id(), &local_name);
+        }
         Ok(response.body)
     }
 

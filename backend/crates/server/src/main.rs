@@ -187,6 +187,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             get(artifacts::download_artifact),
         )
         .route("/assays", get(assays::list_all))
+        .route("/assays/rerun", post(assays::rerun_all))
         .route("/assays/{assay_id}", get(assays::get_by_id))
         .route("/assays/{assay_id}/sbom", get(assays::download_sbom))
         .route(
@@ -251,51 +252,22 @@ fn build_app_state(
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
-    let packaging = PackagingRegistry::new()
-        .register(Arc::new(CargoPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            http_client.clone(),
-            repository_store.clone(),
-        )))
-        .register(Arc::new(NpmPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            http_client.clone(),
-            repository_store.clone(),
-            config.public_base_url.clone(),
-        )))
-        .register(Arc::new(PypiPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            http_client.clone(),
-            repository_store.clone(),
-            config.public_base_url.clone(),
-        )))
-        .register(Arc::new(OciPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            repository_store.clone(),
-            http_client.clone(),
-        )))
-        .register(Arc::new(OciPackagingStrategy::for_ecosystem(
-            PackageEcosystem::Helm,
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            repository_store.clone(),
-            http_client.clone(),
-        )))
-        .register(Arc::new(ConanPackagingStrategy::new(
-            artifact_store.clone(),
-            package_index_store.clone(),
-            storage.clone(),
-            repository_store.clone(),
-        )));
+    let assays = AssayService::new(
+        assay_store,
+        package_index_store.clone(),
+        repository_store.clone(),
+        storage.clone(),
+        http_client.clone(),
+    );
+    let packaging = packaging_registry(
+        &config.public_base_url,
+        &repository_store,
+        &artifact_store,
+        &package_index_store,
+        &storage,
+        http_client,
+        &assays,
+    );
 
     AppState {
         create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
@@ -320,19 +292,13 @@ fn build_app_state(
             storage.clone(),
         ),
         delete_artifact: DeleteArtifactUseCase::new(
-            repository_store.clone(),
+            repository_store,
             artifact_store,
-            package_index_store.clone(),
-            storage.clone(),
+            package_index_store,
+            storage,
         ),
         packaging,
-        assays: AssayService::new(
-            assay_store,
-            package_index_store,
-            repository_store,
-            storage,
-            http_client,
-        ),
+        assays,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
         change_password: ChangePasswordUseCase::new(user_store.clone()),
@@ -348,6 +314,81 @@ fn build_app_state(
         delete_user: DeleteUserUseCase::new(user_store.clone()),
         change_user_role: ChangeUserRoleUseCase::new(user_store),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn packaging_registry(
+    public_base_url: &str,
+    repository_store: &Arc<PostgresRepositoryStore>,
+    artifact_store: &Arc<PostgresArtifactStore>,
+    package_index_store: &Arc<PostgresPackageIndexStore>,
+    storage: &Arc<S3StorageAdapter>,
+    http_client: Arc<ReqwestHttpClient>,
+    assays: &AssayService,
+) -> PackagingRegistry {
+    PackagingRegistry::new()
+        .register(Arc::new(
+            CargoPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+            )
+            .with_assays(assays.clone()),
+        ))
+        .register(Arc::new(
+            NpmPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+                public_base_url.to_string(),
+            )
+            .with_assays(assays.clone()),
+        ))
+        .register(Arc::new(
+            PypiPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+                public_base_url.to_string(),
+            )
+            .with_assays(assays.clone()),
+        ))
+        .register(Arc::new(
+            OciPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                repository_store.clone(),
+                http_client.clone(),
+            )
+            .with_assays(assays.clone()),
+        ))
+        .register(Arc::new(
+            OciPackagingStrategy::for_ecosystem(
+                PackageEcosystem::Helm,
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                repository_store.clone(),
+                http_client,
+            )
+            .with_assays(assays.clone()),
+        ))
+        .register(Arc::new(
+            ConanPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                repository_store.clone(),
+            )
+            .with_assays(assays.clone()),
+        ))
 }
 
 fn build_s3_client(config: &Config) -> S3Client {
