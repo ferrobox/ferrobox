@@ -155,7 +155,7 @@ mod tests {
     async fn unknown_user_is_not_found() {
         let user_store = Arc::new(InMemoryUserStore::default());
         let err = ChangePasswordUseCase::new(user_store)
-            .execute(&Username::parse("ghost").unwrap(), "x", "y")
+            .execute(&Username::parse("ghost").unwrap(), "x", "NewSecret1")
             .await
             .unwrap_err();
 
