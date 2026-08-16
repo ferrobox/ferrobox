@@ -7,6 +7,13 @@ use thiserror::Error;
 /// fallar.
 #[derive(Debug, Error)]
 pub enum RetentionStoreError {
+    /// No existe la tabla de políticas: falta ejecutar la migración SQL.
+    #[error(
+        "missing SQL migration: run `sqlx migrate run` from the backend directory \
+         (table repository_retention is missing)"
+    )]
+    MissingSchema,
+
     /// El backend de persistencia concreto devolvió un error propio.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),

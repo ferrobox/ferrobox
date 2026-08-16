@@ -303,6 +303,7 @@ impl From<RetentionError> for ApiError {
             RetentionError::AlloyRepository | RetentionError::InvalidPolicy(_) => {
                 Self::BadRequest(err.to_string())
             }
+            RetentionError::MissingSchema => Self::BadRequest(err.to_string()),
             RetentionError::Repositories(_)
             | RetentionError::Artifacts(_)
             | RetentionError::Index(_)

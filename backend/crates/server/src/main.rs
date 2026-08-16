@@ -209,6 +209,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             get(retention::get_policy).put(retention::save_policy),
         )
         .route(
+            "/repositories/{repository_id}/retention/dry-run",
+            post(retention::dry_run),
+        )
+        .route(
             "/repositories/{repository_id}/retention/apply",
             post(retention::apply),
         )

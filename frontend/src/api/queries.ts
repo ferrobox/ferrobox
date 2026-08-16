@@ -339,12 +339,23 @@ export function useSaveRetentionPolicy(repositoryId: string) {
   });
 }
 
+export function useDryRunRetention(repositoryId: string) {
+  return useMutation({
+    mutationFn: (payload: RetentionPolicyRequest) =>
+      api.dryRunRetention(repositoryId, payload),
+  });
+}
+
 export function useApplyRetention(repositoryId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => api.applyRetention(repositoryId),
+    mutationFn: (payload: RetentionPolicyRequest) =>
+      api.applyRetention(repositoryId, payload),
     onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryRetention(repositoryId),
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });

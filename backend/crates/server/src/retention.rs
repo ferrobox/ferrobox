@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_write_artifacts;
-use crate::dto::{CleanupReportResponse, RetentionPolicyRequest, RetentionPolicyResponse};
+use crate::dto::{
+    CleanupPreviewResponse, CleanupReportResponse, RetentionPolicyRequest, RetentionPolicyResponse,
+};
 use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
@@ -41,17 +43,34 @@ pub(crate) async fn save_policy(
     Ok(Json(RetentionPolicyResponse::from(saved)))
 }
 
+pub(crate) async fn dry_run(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<RetentionPolicyRequest>,
+) -> Result<Json<CleanupPreviewResponse>, ApiError> {
+    require_write_artifacts(&user)?;
+    let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
+    let preview = state
+        .retention
+        .dry_run(RepositoryId::from(repository_id), policy)
+        .await?;
+    Ok(Json(CleanupPreviewResponse::from(preview)))
+}
+
 pub(crate) async fn apply(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
-) -> Result<Json<CleanupReportResponse>, ApiError> {
+    Json(payload): Json<RetentionPolicyRequest>,
+) -> Result<Json<CleanupPreviewResponse>, ApiError> {
     require_write_artifacts(&user)?;
-    let report = state
+    let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
+    let preview = state
         .retention
-        .apply(RepositoryId::from(repository_id))
+        .apply_policy(RepositoryId::from(repository_id), policy)
         .await?;
-    Ok(Json(CleanupReportResponse::from(report)))
+    Ok(Json(CleanupPreviewResponse::from(preview)))
 }
 
 pub(crate) async fn collect_garbage(
@@ -267,6 +286,21 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/retention/dry-run"))
+                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"keep_last":2}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
                     .method("PUT")
                     .uri(format!("/repositories/{repo}/retention"))
                     .header("Authorization", format!("Bearer {token}"))
@@ -279,12 +313,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/repositories/{repo}/retention/apply"))
+                    .uri(format!("/repositories/{repo}/retention/dry-run"))
                     .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"keep_last":2}"#))
                     .unwrap(),
             )
             .await
@@ -294,6 +330,27 @@ mod tests {
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["dry_run"], true);
+        assert_eq!(json["dropped_versions"], 0);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/retention/apply"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"keep_last":2}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["dry_run"], false);
         assert_eq!(json["dropped_versions"], 0);
         assert_eq!(json["deleted_artifacts"], 0);
     }

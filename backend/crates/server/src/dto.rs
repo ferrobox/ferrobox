@@ -591,3 +591,58 @@ impl From<ferrobox_application::retention::CleanupReport> for CleanupReportRespo
         }
     }
 }
+
+/// Una fila del dry-run o del resultado real.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CleanupItemResponse {
+    /// Nombre del paquete, o vacío si es un binario huérfano.
+    pub(crate) name: String,
+    /// Versión, etiqueta, digest o identificador del binario.
+    pub(crate) version: String,
+    /// Tamaño del binario, si se conoce.
+    #[ts(type = "number")]
+    pub(crate) size_bytes: u64,
+    /// Por qué se incluye en la limpieza.
+    pub(crate) reason: String,
+}
+
+/// Simulación o aplicación de retención/GC.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CleanupPreviewResponse {
+    /// `true` si no se ha borrado nada.
+    pub(crate) dry_run: bool,
+    /// Versiones o etiquetas eliminadas (o que se eliminarían) del índice.
+    #[ts(type = "number")]
+    pub(crate) dropped_versions: u64,
+    /// Binarios borrados (o que se borrarían).
+    #[ts(type = "number")]
+    pub(crate) deleted_artifacts: u64,
+    /// Bytes liberados (o que se liberarían).
+    #[ts(type = "number")]
+    pub(crate) freed_bytes: u64,
+    /// Detalle para revisar antes de aplicar.
+    pub(crate) items: Vec<CleanupItemResponse>,
+}
+
+impl From<ferrobox_application::retention::CleanupPreview> for CleanupPreviewResponse {
+    fn from(preview: ferrobox_application::retention::CleanupPreview) -> Self {
+        Self {
+            dry_run: preview.dry_run,
+            dropped_versions: preview.report.dropped_versions,
+            deleted_artifacts: preview.report.deleted_artifacts,
+            freed_bytes: preview.report.freed_bytes,
+            items: preview
+                .items
+                .into_iter()
+                .map(|item| CleanupItemResponse {
+                    name: item.name,
+                    version: item.version,
+                    size_bytes: item.size_bytes,
+                    reason: item.reason,
+                })
+                .collect(),
+        }
+    }
+}
