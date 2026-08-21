@@ -495,6 +495,12 @@ mod tests {
                 package_index_store.clone(),
                 storage.clone(),
             ),
+            promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                storage.clone(),
+                quota.clone(),
+            ),
             packaging,
             assays: ferrobox_application::assay::AssayService::new(
                 Arc::new(InMemoryAssayStore::default()),
@@ -975,5 +981,238 @@ mod tests {
         assert_eq!(json[0]["version"], "0.1.0");
         assert_eq!(json[0]["yanked"], true);
         assert_eq!(json[0]["repository_id"], fx.repo_id.to_string());
+    }
+
+    async fn create_repo(app: Router, token: &str, body: Value) -> (StatusCode, Value) {
+        let (status, bytes) = send(
+            app,
+            Request::builder()
+                .method("POST")
+                .uri("/repositories")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+        let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    #[tokio::test]
+    async fn promote_copies_a_crate_to_another_forge() {
+        let fx = fixture().await;
+        let (_, created) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({ "name": "crates-prod", "ecosystem": "cargo" }),
+        )
+        .await;
+        let target_id = created["id"].as_str().unwrap().to_string();
+
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball-bytes",
+        );
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", format!("Token {}", fx.developer_token))
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": target_id,
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["name"], "ferrobox-cli");
+        assert_eq!(json["version"], "0.1.0");
+        assert_eq!(json["artifacts_copied"], 1);
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!("/cargo/{target_id}/api/v1/crates/ferrobox-cli/0.1.0/download"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, Bytes::from_static(b"tarball-bytes"));
+
+        let (status, _) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": target_id,
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn promote_rejects_a_mirror_and_a_reader_without_write() {
+        let fx = fixture().await;
+        let (_, mirror) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({
+                "name": "crates-upstream",
+                "ecosystem": "cargo",
+                "kind": { "type": "mirror", "upstream": "https://index.crates.io/" }
+            }),
+        )
+        .await;
+        let mirror_id = mirror["id"].as_str().unwrap();
+
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball",
+        );
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", format!("Token {}", fx.developer_token))
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": mirror_id,
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (_, prod) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({ "name": "crates-prod", "ecosystem": "cargo" }),
+        )
+        .await;
+        let (status, _) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.reader_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": prod["id"],
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn promote_copies_a_generic_artifact() {
+        let fx = fixture().await;
+        let (_, source) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({ "name": "generic-dev", "ecosystem": "generic" }),
+        )
+        .await;
+        let (_, target) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({ "name": "generic-prod", "ecosystem": "generic" }),
+        )
+        .await;
+        let source_id = source["id"].as_str().unwrap().to_string();
+        let target_id = target["id"].as_str().unwrap().to_string();
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{source_id}/artifacts"))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(Bytes::from_static(b"generic-bytes")))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let published: Value = serde_json::from_slice(&body).unwrap();
+        let artifact_id = published["id"].as_str().unwrap();
+
+        let (status, body) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{source_id}/promote"))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": target_id,
+                        "artifact_id": artifact_id
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["artifacts_copied"], 1);
+        assert_eq!(json["bytes_copied"], 13);
     }
 }

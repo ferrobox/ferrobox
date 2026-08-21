@@ -34,7 +34,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
+    PackagingStrategy, PromoteOutcome, PublishOutcome,
 };
 use crate::assay::AssayService;
 use crate::quota::QuotaService;
@@ -543,6 +544,84 @@ impl PackagingStrategy for PypiPackagingStrategy {
             .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
         let artifact_id = parse_artifact_id(&file.artifact_id)?;
         self.download_stored(artifact_id).await
+    }
+
+    async fn promote_version(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        coordinate: &PackageCoordinate,
+        preserve_yanked: bool,
+    ) -> Result<PromoteOutcome, PackagingError> {
+        Self::ensure_pypi_repository(source)?;
+        Self::ensure_pypi_repository(target)?;
+        if Self::is_read_only(target) {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
+
+        let mut entry = self
+            .load_version_entry(source, coordinate)
+            .await?
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        if entry.files.is_empty() {
+            return Err(PackagingError::VersionNotFound(coordinate.clone()));
+        }
+        if self
+            .load_version_entry(target, coordinate)
+            .await?
+            .is_some_and(|existing| !existing.files.is_empty())
+        {
+            return Err(PackagingError::AlreadyPublished(coordinate.clone()));
+        }
+
+        if !preserve_yanked {
+            entry.yanked = false;
+        }
+
+        let mut artifacts_copied = 0_u32;
+        let mut bytes_copied = 0_u64;
+        let mut last_artifact_id = None;
+        for file in &mut entry.files {
+            if file.artifact_id.is_empty() {
+                return Err(PackagingError::FileNotFound(file.filename.clone()));
+            }
+            let source_id = parse_artifact_id(&file.artifact_id)?;
+            let (new_id, size) = copy_stored_artifact(
+                self.artifact_store.as_ref(),
+                self.storage.as_ref(),
+                self.quota.as_ref(),
+                source_id,
+                target.id(),
+            )
+            .await?;
+            file.artifact_id = new_id.to_string();
+            file.url = None;
+            if !preserve_yanked {
+                file.yanked = false;
+            }
+            artifacts_copied += 1;
+            bytes_copied += size;
+            last_artifact_id = Some(new_id);
+        }
+
+        let entry_bytes = Bytes::from(
+            serde_json::to_vec(&entry).expect("a VersionEntry always serializes to valid JSON"),
+        );
+        self.package_index_store
+            .upsert_entry(
+                target.id(),
+                coordinate,
+                last_artifact_id,
+                entry_bytes,
+            )
+            .await?;
+        notify_assay(self.assays.as_ref(), target.id(), coordinate);
+
+        Ok(PromoteOutcome {
+            coordinate: coordinate.clone(),
+            artifacts_copied,
+            bytes_copied,
+        })
     }
 
     async fn download_file(
@@ -1172,6 +1251,64 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(downloaded.as_ref(), content);
+    }
+
+    #[tokio::test]
+    async fn promote_copies_every_file_of_the_version() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let strategy = PypiPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        );
+        let source = pypi_forge("pypi-dev");
+        let target = pypi_forge("pypi-prod");
+        let coordinate = strategy
+            .publish(
+                &source,
+                publish_body("demo-pypi", "1.0.0", "demo_pypi-1.0.0.tar.gz", b"sdist"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .publish(
+                &source,
+                publish_body(
+                    "demo-pypi",
+                    "1.0.0",
+                    "demo_pypi-1.0.0-py3-none-any.whl",
+                    b"wheel",
+                ),
+            )
+            .await
+            .unwrap();
+
+        let outcome = strategy
+            .promote_version(&source, &target, &coordinate, false)
+            .await
+            .unwrap();
+        assert_eq!(outcome.artifacts_copied, 2);
+        assert_eq!(
+            strategy
+                .download_file(&target, "demo_pypi-1.0.0.tar.gz")
+                .await
+                .unwrap()
+                .as_ref(),
+            b"sdist"
+        );
+        assert_eq!(
+            strategy
+                .download_file(&target, "demo_pypi-1.0.0-py3-none-any.whl")
+                .await
+                .unwrap()
+                .as_ref(),
+            b"wheel"
+        );
     }
 
     #[tokio::test]

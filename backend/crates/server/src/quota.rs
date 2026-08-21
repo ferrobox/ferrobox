@@ -133,6 +133,12 @@ mod tests {
                 package_index_store.clone(),
                 storage.clone(),
             ),
+            promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                storage.clone(),
+                quota.clone(),
+            ),
             packaging: PackagingRegistry::new(),
             assays: ferrobox_application::assay::AssayService::new(
                 assay_store.clone(),

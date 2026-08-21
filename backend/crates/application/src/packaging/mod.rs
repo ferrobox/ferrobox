@@ -18,14 +18,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use ferrobox_domain::ids::RepositoryId;
+use ferrobox_domain::artifact::Artifact;
+use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::Repository;
-use ferrobox_ports::artifact_store::ArtifactStoreError;
+use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::http_client::HttpClientError;
 use ferrobox_ports::package_index_store::PackageIndexStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
-use ferrobox_ports::storage::StorageError;
+use ferrobox_ports::storage::{StorageError, StoragePort};
 use thiserror::Error;
 
 use crate::assay::AssayService;
@@ -138,6 +139,18 @@ pub enum PackagingError {
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.
 pub type PublishOutcome = PackageCoordinate;
+
+/// Recuento de una promoción Forge→Forge: la coordenada copiada y el
+/// volumen de binarios nuevos en el destino.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromoteOutcome {
+    /// Coordenada publicada en el repositorio destino.
+    pub coordinate: PackageCoordinate,
+    /// Binarios nuevos creados en el destino (sin contar blobs OCI ya presentes).
+    pub artifacts_copied: u32,
+    /// Bytes escritos en el almacenamiento del destino.
+    pub bytes_copied: u64,
+}
 
 /// Una coincidencia de `cargo search` contra el índice de un repositorio.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +391,29 @@ pub trait PackagingStrategy: Send + Sync {
         yanked: bool,
     ) -> Result<(), PackagingError>;
 
+    /// Copia una versión ya publicada de `source` a `target` (ambos
+    /// `Forge` del mismo ecosistema). Los binarios se reescriben con
+    /// identificadores nuevos; por defecto la copia no hereda el yank.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
+    /// soporta esta operación, [`PackagingError::VersionNotFound`] si
+    /// la coordenada no existe en el origen,
+    /// [`PackagingError::AlreadyPublished`] si ya está en el destino, u
+    /// otro error si falla un puerto.
+    async fn promote_version(
+        &self,
+        _source: &Repository,
+        _target: &Repository,
+        _coordinate: &PackageCoordinate,
+        _preserve_yanked: bool,
+    ) -> Result<PromoteOutcome, PackagingError> {
+        Err(PackagingError::InvalidPayload(
+            "this ecosystem does not support promoting versions".to_string(),
+        ))
+    }
+
     /// Busca paquetes cuyo nombre contiene `query` (sin distinguir
     /// mayúsculas), hasta `limit` coincidencias.
     ///
@@ -415,6 +451,46 @@ pub(crate) async fn ensure_quota(
         quota.ensure_can_store(repository_id, additional_bytes).await?;
     }
     Ok(())
+}
+
+/// Copia el objeto almacenado de `source_artifact_id` a un artefacto
+/// nuevo en `target_repository_id`. Aplica la cuota del destino.
+pub(crate) async fn copy_stored_artifact(
+    artifact_store: &dyn ArtifactStore,
+    storage: &dyn StoragePort,
+    quota: Option<&crate::quota::QuotaService>,
+    source_artifact_id: ArtifactId,
+    target_repository_id: RepositoryId,
+) -> Result<(ArtifactId, u64), PackagingError> {
+    let source = artifact_store
+        .find_by_id(source_artifact_id)
+        .await?
+        .ok_or_else(|| PackagingError::FileNotFound(source_artifact_id.to_string()))?;
+    let storage_key = crate::storage_key::storage_key_for(source_artifact_id);
+    let content = storage.get(&storage_key).await?;
+    let actual = crate::content_hash::sha256_checksum(&content);
+    if actual != *source.checksum() {
+        return Err(PackagingError::ChecksumMismatch {
+            expected: source.checksum().to_string(),
+            actual: actual.to_string(),
+        });
+    }
+
+    let size_bytes = source.size_bytes();
+    ensure_quota(quota, target_repository_id, size_bytes).await?;
+    let copied = Artifact::new(
+        target_repository_id,
+        source.checksum().clone(),
+        size_bytes,
+    );
+    storage
+        .put(
+            &crate::storage_key::storage_key_for(copied.id()),
+            content,
+        )
+        .await?;
+    artifact_store.save(&copied).await?;
+    Ok((copied.id(), size_bytes))
 }
 
 /// Selecciona, en tiempo de ejecución, la [`PackagingStrategy`] adecuada

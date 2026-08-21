@@ -32,8 +32,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    ensure_quota, notify_assay, OciManifestDocument, PackageSearchHit, PackagingError,
-    PackagingStrategy, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay, OciManifestDocument, PackageSearchHit,
+    PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
 };
 use crate::assay::AssayService;
 use crate::quota::QuotaService;
@@ -441,6 +441,152 @@ impl OciPackagingStrategy {
         Ok(content)
     }
 
+    async fn copy_blob_if_missing(
+        &self,
+        source_id: ArtifactId,
+        target: &Repository,
+        digest: &str,
+        blob_coord: &PackageCoordinate,
+    ) -> Result<(u32, u64), PackagingError> {
+        if self
+            .package_index_store
+            .artifact_for(target.id(), blob_coord)
+            .await?
+            .is_some()
+        {
+            return Ok((0, 0));
+        }
+        let (new_id, size) = copy_stored_artifact(
+            self.artifact_store.as_ref(),
+            self.storage.as_ref(),
+            self.quota.as_ref(),
+            source_id,
+            target.id(),
+        )
+        .await?;
+        let blob_entry = BlobEntry {
+            digest: digest.to_string(),
+            artifact_id: new_id.to_string(),
+            size,
+        };
+        self.package_index_store
+            .upsert_entry(
+                target.id(),
+                blob_coord,
+                Some(new_id),
+                encode_entry(&blob_entry),
+            )
+            .await?;
+        Ok((1, size))
+    }
+
+    async fn copy_manifest_if_missing(
+        &self,
+        source_id: ArtifactId,
+        target: &Repository,
+        digest: &str,
+        entry: &ManifestEntry,
+        digest_coord: &PackageCoordinate,
+    ) -> Result<(ArtifactId, u32, u64), PackagingError> {
+        if let Some(existing) = self
+            .package_index_store
+            .artifact_for(target.id(), digest_coord)
+            .await?
+        {
+            return Ok((existing, 0, 0));
+        }
+        let (new_id, size) = copy_stored_artifact(
+            self.artifact_store.as_ref(),
+            self.storage.as_ref(),
+            self.quota.as_ref(),
+            source_id,
+            target.id(),
+        )
+        .await?;
+        let digest_entry = ManifestEntry {
+            reference: digest.to_string(),
+            yanked: false,
+            artifact_id: new_id.to_string(),
+            ..entry.clone()
+        };
+        self.package_index_store
+            .upsert_entry(
+                target.id(),
+                digest_coord,
+                Some(new_id),
+                encode_entry(&digest_entry),
+            )
+            .await?;
+        Ok((new_id, 1, size))
+    }
+
+    async fn copy_image_into(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        image_name: &str,
+        root_digest: &str,
+    ) -> Result<(ArtifactId, ManifestEntry, u32, u64), PackagingError> {
+        let mut pending = vec![root_digest.to_string()];
+        let mut seen = HashSet::new();
+        let mut artifacts_copied = 0_u32;
+        let mut bytes_copied = 0_u64;
+        let mut root_artifact = None;
+        let mut root_entry = None;
+
+        while let Some(digest) = pending.pop() {
+            if !seen.insert(digest.clone()) {
+                continue;
+            }
+
+            let blob_coord = blob_coordinate(self.ecosystem, &digest)?;
+            if let Some(source_id) = self
+                .package_index_store
+                .artifact_for(source.id(), &blob_coord)
+                .await?
+            {
+                let (copied, size) = self
+                    .copy_blob_if_missing(source_id, target, &digest, &blob_coord)
+                    .await?;
+                artifacts_copied += copied;
+                bytes_copied += size;
+                continue;
+            }
+
+            let package_name = PackageName::parse(image_name.to_string())
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            let Some(entry) = self
+                .load_manifest_entry(source, &package_name, &digest)
+                .await?
+            else {
+                return Err(PackagingError::FileNotFound(digest));
+            };
+            let source_id = parse_artifact_id(&entry.artifact_id)?;
+            let body = self.download_stored(source_id).await?;
+            enqueue_manifest_digests(&body, &mut pending);
+
+            let digest_version = PackageVersion::parse(digest.clone())
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            let digest_coord =
+                PackageCoordinate::new(self.ecosystem, package_name, digest_version);
+            let (artifact_id, copied, size) = self
+                .copy_manifest_if_missing(source_id, target, &digest, &entry, &digest_coord)
+                .await?;
+            artifacts_copied += copied;
+            bytes_copied += size;
+            if digest == root_digest {
+                root_artifact = Some(artifact_id);
+                root_entry = Some(entry);
+            }
+        }
+
+        let artifact_id = root_artifact
+            .ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
+        let entry = root_entry
+            .ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
+        Ok((artifact_id, entry, artifacts_copied, bytes_copied))
+    }
+
     async fn search_one(
         &self,
         repository: &Repository,
@@ -806,6 +952,69 @@ impl PackagingStrategy for OciPackagingStrategy {
         self.list_tags_one(repository, name).await
     }
 
+    async fn promote_version(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        coordinate: &PackageCoordinate,
+        preserve_yanked: bool,
+    ) -> Result<PromoteOutcome, PackagingError> {
+        self.ensure_repository(source)?;
+        self.ensure_repository(target)?;
+        if Self::is_read_only(target) {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
+        if coordinate.name().as_str() == BLOB_PACKAGE {
+            return Err(PackagingError::InvalidPayload(
+                "OCI blobs cannot be promoted on their own".to_string(),
+            ));
+        }
+
+        let reference = coordinate.version().as_str();
+        let Some(source_entry) = self
+            .load_manifest_entry(source, coordinate.name(), reference)
+            .await?
+        else {
+            return Err(PackagingError::VersionNotFound(coordinate.clone()));
+        };
+
+        if self
+            .package_index_store
+            .artifact_for(target.id(), coordinate)
+            .await?
+            .is_some()
+        {
+            return Err(PackagingError::AlreadyPublished(coordinate.clone()));
+        }
+
+        let (artifact_id, mut entry, artifacts_copied, bytes_copied) = self
+            .copy_image_into(source, target, coordinate.name().as_str(), &source_entry.digest)
+            .await?;
+
+        if !is_digest_reference(reference) {
+            entry.reference = reference.to_string();
+            entry.artifact_id = artifact_id.to_string();
+            if !preserve_yanked {
+                entry.yanked = false;
+            }
+            self.package_index_store
+                .upsert_entry(
+                    target.id(),
+                    coordinate,
+                    Some(artifact_id),
+                    encode_entry(&entry),
+                )
+                .await?;
+        }
+
+        notify_assay(self.assays.as_ref(), target.id(), coordinate);
+        Ok(PromoteOutcome {
+            coordinate: coordinate.clone(),
+            artifacts_copied,
+            bytes_copied,
+        })
+    }
+
     async fn set_yanked(
         &self,
         repository: &Repository,
@@ -1145,6 +1354,21 @@ fn encode_entry<T: Serialize>(entry: &T) -> Bytes {
     Bytes::from(serde_json::to_vec(entry).expect("index entry always serializes"))
 }
 
+fn enqueue_manifest_digests(body: &[u8], pending: &mut Vec<String>) {
+    let Ok(loose) = serde_json::from_slice::<LooseManifest>(body) else {
+        return;
+    };
+    if let Some(config) = loose.config {
+        pending.push(config.digest);
+    }
+    for layer in loose.layers.unwrap_or_default() {
+        pending.push(layer.digest);
+    }
+    for nested in loose.manifests.unwrap_or_default() {
+        pending.push(nested.digest);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ManifestEntry {
     name: String,
@@ -1360,6 +1584,68 @@ mod tests {
         assert_eq!(
             strategy.list_tags(&repository, "demo").await.unwrap(),
             vec!["latest".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn promote_copies_manifest_and_blobs() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let strategy = OciPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            Arc::new(InMemoryRepositoryStore::default()),
+            Arc::new(InMemoryHttpClient::default()),
+        );
+        let source = oci_forge("oci-dev");
+        let target = oci_forge("oci-prod");
+        let (config_digest, config) = blob(b"{\"architecture\":\"amd64\"}");
+        let (layer_digest, layer) = blob(b"layer");
+        strategy
+            .put_blob(&source, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&source, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        let manifest = manifest_for(
+            &config_digest,
+            &layer_digest,
+            config.len(),
+            layer.len(),
+        );
+        strategy
+            .put_manifest(
+                &source,
+                "demo",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest.clone(),
+            )
+            .await
+            .unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Oci,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("latest").unwrap(),
+        );
+
+        let outcome = strategy
+            .promote_version(&source, &target, &coordinate, false)
+            .await
+            .unwrap();
+        assert!(outcome.artifacts_copied >= 3);
+        let copied = strategy
+            .get_manifest(&target, "demo", "latest")
+            .await
+            .unwrap();
+        assert_eq!(copied.body, manifest);
+        assert_eq!(
+            strategy.get_blob(&target, "demo", &layer_digest).await.unwrap(),
+            layer
         );
     }
 

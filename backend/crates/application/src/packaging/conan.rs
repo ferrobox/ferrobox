@@ -8,7 +8,7 @@
 //! ficheros, búsqueda y yank) y lecturas en **Alloy**. Un `Mirror`
 //! Conan queda para un corte posterior.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
+    PackagingStrategy, PromoteOutcome, PublishOutcome,
 };
 use crate::assay::AssayService;
 use crate::quota::QuotaService;
@@ -568,6 +569,59 @@ fn recipe_coordinate(
         package_name,
         package_version,
     ))
+}
+
+fn split_conan_version_field(value: &str) -> (String, String, String) {
+    match value.split_once('@') {
+        Some((version, rest)) => match rest.split_once(':') {
+            Some((user, channel)) => {
+                (version.to_string(), user.to_string(), channel.to_string())
+            }
+            None => (version.to_string(), rest.to_string(), "_".to_string()),
+        },
+        None => (value.to_string(), "_".to_string(), "_".to_string()),
+    }
+}
+
+fn collect_recipe_artifact_ids(entry: &RecipeEntry) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    for revision in &entry.revisions {
+        for file in &revision.files {
+            if seen.insert(file.artifact_id.clone()) {
+                ids.push(file.artifact_id.clone());
+            }
+        }
+        for package in &revision.packages {
+            for package_revision in &package.revisions {
+                for file in &package_revision.files {
+                    if seen.insert(file.artifact_id.clone()) {
+                        ids.push(file.artifact_id.clone());
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+fn rewrite_recipe_artifact_ids(entry: &mut RecipeEntry, rewritten: &HashMap<String, String>) {
+    for revision in &mut entry.revisions {
+        for file in &mut revision.files {
+            if let Some(new_id) = rewritten.get(&file.artifact_id) {
+                file.artifact_id.clone_from(new_id);
+            }
+        }
+        for package in &mut revision.packages {
+            for package_revision in &mut package.revisions {
+                for file in &mut package_revision.files {
+                    if let Some(new_id) = rewritten.get(&file.artifact_id) {
+                        file.artifact_id.clone_from(new_id);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn recipe_reference(entry: &RecipeEntry) -> String {
@@ -1132,6 +1186,74 @@ impl PackagingStrategy for ConanPackagingStrategy {
         Err(other_error.unwrap_or_else(|| PackagingError::PackageNotFound(path.to_string())))
     }
 
+    async fn promote_version(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        coordinate: &PackageCoordinate,
+        preserve_yanked: bool,
+    ) -> Result<PromoteOutcome, PackagingError> {
+        Self::ensure_conan_repository(source)?;
+        Self::ensure_conan_repository(target)?;
+        if Self::is_read_only(target) {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
+
+        let (version, user, channel) = split_conan_version_field(coordinate.version().as_str());
+        let Some(mut entry) = self
+            .load_recipe(source, coordinate.name().as_str(), &version, &user, &channel)
+            .await?
+        else {
+            return Err(PackagingError::VersionNotFound(coordinate.clone()));
+        };
+        if self
+            .package_index_store
+            .artifact_for(target.id(), coordinate)
+            .await?
+            .is_some()
+        {
+            return Err(PackagingError::AlreadyPublished(coordinate.clone()));
+        }
+
+        let mut rewritten = HashMap::new();
+        let mut artifacts_copied = 0_u32;
+        let mut bytes_copied = 0_u64;
+        let mut last_artifact_id = None;
+        for artifact_id in collect_recipe_artifact_ids(&entry) {
+            let source_id = ArtifactId::from(
+                Uuid::parse_str(&artifact_id)
+                    .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
+            );
+            let (new_id, size) = copy_stored_artifact(
+                self.artifact_store.as_ref(),
+                self.storage.as_ref(),
+                self.quota.as_ref(),
+                source_id,
+                target.id(),
+            )
+            .await?;
+            rewritten.insert(artifact_id, new_id.to_string());
+            artifacts_copied += 1;
+            bytes_copied += size;
+            last_artifact_id = Some(new_id);
+        }
+        let last_artifact_id = last_artifact_id
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        rewrite_recipe_artifact_ids(&mut entry, &rewritten);
+        if !preserve_yanked {
+            entry.yanked = false;
+        }
+        entry.rebuild_files();
+        self.save_recipe(target, &entry, last_artifact_id).await?;
+        notify_assay(self.assays.as_ref(), target.id(), coordinate);
+
+        Ok(PromoteOutcome {
+            coordinate: coordinate.clone(),
+            artifacts_copied,
+            bytes_copied,
+        })
+    }
+
     async fn set_yanked(
         &self,
         repository: &Repository,
@@ -1331,6 +1453,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body.as_ref(), b"from conan import ConanFile\n");
+    }
+
+    #[tokio::test]
+    async fn promote_copies_recipe_files_to_another_forge() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let strategy = ConanPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
+        let source = conan_forge("conan-dev");
+        let target = conan_forge("conan-prod");
+        strategy
+            .put_protocol_file(
+                &source,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+                Bytes::from_static(b"from conan import ConanFile\n"),
+            )
+            .await
+            .unwrap();
+        strategy
+            .put_protocol_file(
+                &source,
+                "hello/0.1/_/_/revisions/rrev1/files/conanmanifest.txt",
+                Bytes::from_static(b"0\nconanfile.py: abc\n"),
+            )
+            .await
+            .unwrap();
+        let coordinate = recipe_coordinate("hello", "0.1", "_", "_").unwrap();
+
+        let outcome = strategy
+            .promote_version(&source, &target, &coordinate, false)
+            .await
+            .unwrap();
+        assert_eq!(outcome.artifacts_copied, 2);
+        let copied = strategy
+            .get_protocol_file(
+                &target,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+            )
+            .await
+            .unwrap();
+        assert_eq!(copied.as_ref(), b"from conan import ConanFile\n");
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@ import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequ
 import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
 import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
+import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
@@ -133,6 +134,27 @@ export function useDeleteArtifact(repositoryId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function usePromotePackage(sourceRepositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      payload,
+    }: {
+      targetRepositoryId: string;
+      payload: PromotePackageRequest;
+    }) => api.promotePackage(sourceRepositoryId, payload),
+    onSuccess: (_data, { targetRepositoryId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(sourceRepositoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(targetRepositoryId),
       });
     },
   });

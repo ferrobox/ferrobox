@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{ArtifactResponse, PublishResponse};
+use crate::dto::{ArtifactResponse, PromotePackageRequest, PromotePackageResponse, PublishResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn publish_artifact(
@@ -81,4 +81,50 @@ pub(crate) async fn delete_artifact(
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) async fn promote_package(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<PromotePackageRequest>,
+) -> Result<(StatusCode, Json<PromotePackageResponse>), ApiError> {
+    let source_id = RepositoryId::from(repository_id);
+    let target_uuid = Uuid::parse_str(&payload.target_repository_id)
+        .map_err(|_| ApiError::BadRequest("invalid target repository id".to_string()))?;
+    let target_id = RepositoryId::from(target_uuid);
+    require_repo_read(&state.groups, &user, source_id).await?;
+    require_repo_write(&state.groups, &user, target_id).await?;
+
+    let artifact_id = match payload.artifact_id.as_deref() {
+        Some(value) if !value.is_empty() => {
+            let uuid = Uuid::parse_str(value)
+                .map_err(|_| ApiError::BadRequest("invalid artifact id".to_string()))?;
+            Some(ArtifactId::from(uuid))
+        }
+        _ => None,
+    };
+
+    let outcome = state
+        .promote_package
+        .execute(
+            &state.packaging,
+            source_id,
+            target_id,
+            payload.name.as_deref(),
+            payload.version.as_deref(),
+            artifact_id,
+            payload.preserve_yanked,
+        )
+        .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(PromotePackageResponse {
+            name: outcome.name,
+            version: outcome.version,
+            artifacts_copied: outcome.artifacts_copied,
+            bytes_copied: outcome.bytes_copied,
+        }),
+    ))
 }

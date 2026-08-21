@@ -68,6 +68,7 @@ use ferrobox_application::packaging::conan::ConanPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
+use ferrobox_application::promote_package::PromotePackageUseCase;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::quota::QuotaService;
 use ferrobox_application::retention::RetentionService;
@@ -88,6 +89,7 @@ struct AppState {
     list_repository_artifacts: ListRepositoryArtifactsUseCase,
     delete_repository: DeleteRepositoryUseCase,
     delete_artifact: DeleteArtifactUseCase,
+    promote_package: PromotePackageUseCase,
     packaging: PackagingRegistry,
     assays: AssayService,
     retention: RetentionService,
@@ -223,6 +225,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .route(
             "/repositories/{repository_id}/artifacts/{artifact_id}",
             delete(artifacts::delete_artifact),
+        )
+        .route(
+            "/repositories/{repository_id}/promote",
+            post(artifacts::promote_package),
         )
         .route(
             "/artifacts/{artifact_id}",
@@ -377,6 +383,12 @@ fn build_app_state(
             artifact_store.clone(),
             package_index_store.clone(),
             storage.clone(),
+        ),
+        promote_package: PromotePackageUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
+            storage.clone(),
+            quota.clone(),
         ),
         delete_artifact: DeleteArtifactUseCase::new(
             repository_store.clone(),
