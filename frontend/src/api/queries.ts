@@ -15,6 +15,8 @@ import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequ
 import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
 import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
+import type { CreateWebhookRequest } from "@/api/generated/CreateWebhookRequest";
+import type { UpdateWebhookRequest } from "@/api/generated/UpdateWebhookRequest";
 import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
 
 export const queryKeys = {
@@ -31,6 +33,9 @@ export const queryKeys = {
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
+  repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
+  webhookDeliveries: (repositoryId: string, webhookId: string) =>
+    ["repositories", repositoryId, "webhooks", webhookId, "deliveries"] as const,
   packageSearch: (query: string) => ["search", query] as const,
 };
 
@@ -354,6 +359,83 @@ export function useSetRepositoryAccess(repositoryId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+    },
+  });
+}
+
+export function useWebhooks(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryWebhooks(repositoryId),
+    queryFn: () => api.listWebhooks(repositoryId),
+    enabled,
+  });
+}
+
+export function useCreateWebhook(repositoryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateWebhookRequest) => api.createWebhook(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryWebhooks(repositoryId),
+      });
+    },
+  });
+}
+
+export function useUpdateWebhook(repositoryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      webhookId,
+      payload,
+    }: {
+      webhookId: string;
+      payload: UpdateWebhookRequest;
+    }) => api.updateWebhook(repositoryId, webhookId, payload),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryWebhooks(repositoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.webhookDeliveries(repositoryId, variables.webhookId),
+      });
+    },
+  });
+}
+
+export function useDeleteWebhook(repositoryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (webhookId: string) => api.deleteWebhook(repositoryId, webhookId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryWebhooks(repositoryId),
+      });
+    },
+  });
+}
+
+export function useWebhookDeliveries(
+  repositoryId: string,
+  webhookId: string | null,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.webhookDeliveries(repositoryId, webhookId ?? ""),
+    queryFn: () => api.listWebhookDeliveries(repositoryId, webhookId as string),
+    enabled: enabled && webhookId !== null,
+  });
+}
+
+export function usePingWebhook(repositoryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (webhookId: string) => api.pingWebhook(repositoryId, webhookId),
+    onSuccess: (_data, webhookId) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.webhookDeliveries(repositoryId, webhookId),
+      });
     },
   });
 }

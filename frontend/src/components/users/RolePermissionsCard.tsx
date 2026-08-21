@@ -46,7 +46,7 @@ const PERMISSIONS: readonly PermissionRow[] = [
     allowed: { reader: false, developer: true, admin: true },
   },
   {
-    label: "Configurar retención y cuota",
+    label: "Configurar retención, cuota y avisos HTTP",
     allowed: { reader: false, developer: true, admin: true },
   },
   {

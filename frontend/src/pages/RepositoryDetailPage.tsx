@@ -15,6 +15,7 @@ import { KIND_META, RepositoryKindBadge } from "@/components/repository/Reposito
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
+import { WebhooksPanel } from "@/components/repository/WebhooksPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -204,6 +205,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="quota">Cuota</TabsTrigger>
           ) : null}
+          {repository.kind.type !== "alloy" ? (
+            <TabsTrigger value="webhooks">Avisos</TabsTrigger>
+          ) : null}
           {isAdmin ? <TabsTrigger value="access">Acceso</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="packages" className="mt-4 space-y-3">
@@ -228,6 +232,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="quota" className="mt-4">
             <QuotaPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+        {repository.kind.type !== "alloy" ? (
+          <TabsContent value="webhooks" className="mt-4">
+            <WebhooksPanel repositoryId={repositoryId} canWrite={canWrite} />
           </TabsContent>
         ) : null}
         {isAdmin ? (

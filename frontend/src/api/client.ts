@@ -35,6 +35,10 @@ import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequ
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
 import type { RepositoryAccessGrantResponse } from "@/api/generated/RepositoryAccessGrantResponse";
 import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
+import type { CreateWebhookRequest } from "@/api/generated/CreateWebhookRequest";
+import type { UpdateWebhookRequest } from "@/api/generated/UpdateWebhookRequest";
+import type { WebhookDeliveryResponse } from "@/api/generated/WebhookDeliveryResponse";
+import type { WebhookResponse } from "@/api/generated/WebhookResponse";
 
 /**
  * Todas las peticiones se dirigen a `/api`, que el servidor de
@@ -557,6 +561,56 @@ export function getRepositoryAccess(
   repositoryId: string,
 ): Promise<RepositoryAccessGrantResponse[]> {
   return request<RepositoryAccessGrantResponse[]>(`/repositories/${repositoryId}/access`);
+}
+
+export function listWebhooks(repositoryId: string): Promise<WebhookResponse[]> {
+  return request<WebhookResponse[]>(`/repositories/${repositoryId}/webhooks`);
+}
+
+export function createWebhook(
+  repositoryId: string,
+  payload: CreateWebhookRequest,
+): Promise<WebhookResponse> {
+  return request<WebhookResponse>(`/repositories/${repositoryId}/webhooks`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWebhook(
+  repositoryId: string,
+  webhookId: string,
+  payload: UpdateWebhookRequest,
+): Promise<WebhookResponse> {
+  return request<WebhookResponse>(`/repositories/${repositoryId}/webhooks/${webhookId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteWebhook(repositoryId: string, webhookId: string): Promise<void> {
+  return request<void>(`/repositories/${repositoryId}/webhooks/${webhookId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listWebhookDeliveries(
+  repositoryId: string,
+  webhookId: string,
+): Promise<WebhookDeliveryResponse[]> {
+  return request<WebhookDeliveryResponse[]>(
+    `/repositories/${repositoryId}/webhooks/${webhookId}/deliveries`,
+  );
+}
+
+export function pingWebhook(
+  repositoryId: string,
+  webhookId: string,
+): Promise<WebhookDeliveryResponse> {
+  return request<WebhookDeliveryResponse>(
+    `/repositories/${repositoryId}/webhooks/${webhookId}/ping`,
+    { method: "POST" },
+  );
 }
 
 export function setRepositoryAccess(

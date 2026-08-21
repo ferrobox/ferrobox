@@ -28,4 +28,7 @@ pub mod retention_store;
 /// Adaptador de `QuotaStore`.
 pub mod quota_store;
 
+/// Adaptador de `WebhookStore`.
+pub mod webhook_store;
+
 mod ecosystem_column;

@@ -296,7 +296,7 @@ mod tests {
     use ferrobox_application::packaging::conan::ConanPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -428,6 +428,12 @@ mod tests {
                 user_store.clone(),
                 repository_store.clone(),
             ),
+            webhooks: ferrobox_application::webhooks::WebhookService::new(
+                Arc::new(InMemoryWebhookStore::default()),
+                http_client.clone(),
+                repository_store.clone(),
+            ),
+
         });
 
         let developer = state
