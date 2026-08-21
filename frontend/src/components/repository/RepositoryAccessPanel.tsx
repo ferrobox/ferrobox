@@ -66,7 +66,8 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
         <CardTitle>Acceso</CardTitle>
         <CardDescription>
           Si asignas uno o más grupos, solo esos grupos (y los administradores) verán este
-          repositorio. Sin grupos, aplica el rol de la instancia.
+          repositorio. Un miembro de grupo no ve el resto de repositorios. Sin grupos, quien no
+          pertenezca a ningún grupo sigue el rol de la instancia.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -5,13 +5,7 @@ import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import type { RoleDto } from "@/api/generated/RoleDto";
-import {
-  useGroup,
-  useRepositories,
-  useSetGroupMembers,
-  useSetGroupRepositories,
-  useUsers,
-} from "@/api/queries";
+import { useGroup, useRepositories, useSaveGroup, useUsers } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -49,8 +43,7 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
   const groupQuery = useGroup(groupId);
   const usersQuery = useUsers();
   const repositoriesQuery = useRepositories();
-  const setMembers = useSetGroupMembers(groupId);
-  const setRepositories = useSetGroupRepositories(groupId);
+  const saveGroup = useSaveGroup(groupId);
 
   const [draftUserIds, setDraftUserIds] = useState<string[] | null>(null);
   const [draftRepoRoles, setDraftRepoRoles] = useState<Record<string, RoleDto | "none"> | null>(
@@ -59,9 +52,11 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
 
   const selectedUserIds =
     draftUserIds ?? groupQuery.data?.members.map((member) => member.id) ?? [];
-  const repoRoles = draftRepoRoles ?? Object.fromEntries(
-    (groupQuery.data?.repositories ?? []).map((grant) => [grant.repository_id, grant.role]),
-  );
+  const repoRoles =
+    draftRepoRoles ??
+    Object.fromEntries(
+      (groupQuery.data?.repositories ?? []).map((grant) => [grant.repository_id, grant.role]),
+    );
 
   const users = useMemo(
     () =>
@@ -117,17 +112,7 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
     });
   }
 
-  async function onSaveMembers() {
-    try {
-      await setMembers.mutateAsync({ user_ids: selectedUserIds });
-      setDraftUserIds(null);
-      toast.success("Miembros actualizados");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudieron guardar los miembros");
-    }
-  }
-
-  async function onSaveRepositories() {
+  async function onSave() {
     const grants = Object.entries(repoRoles)
       .filter((entry): entry is [string, Exclude<RoleDto, "admin">] => {
         const role = entry[1];
@@ -135,13 +120,15 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
       })
       .map(([repository_id, role]) => ({ repository_id, role }));
     try {
-      await setRepositories.mutateAsync({ grants });
+      await saveGroup.mutateAsync({
+        members: { user_ids: selectedUserIds },
+        repositories: { grants },
+      });
+      setDraftUserIds(null);
       setDraftRepoRoles(null);
-      toast.success("Repositorios actualizados");
+      toast.success("Grupo actualizado");
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "No se pudieron guardar los repositorios",
-      );
+      toast.error(err instanceof ApiError ? err.message : "No se pudo guardar el grupo");
     }
   }
 
@@ -156,7 +143,13 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
         </Button>
         <PageHeader
           title={group.name}
-          description="Elige quién pertenece al grupo y a qué repositorios tiene acceso. El rol del grupo en un repositorio es Lector o Desarrollador."
+          description="Elige los miembros y los repositorios. Quien esté en este grupo solo verá esos repositorios, con rol Lector o Desarrollador."
+          actions={
+            <Button onClick={() => void onSave()} disabled={saveGroup.isPending}>
+              {saveGroup.isPending ? <Loader2 className="animate-spin" /> : null}
+              Guardar
+            </Button>
+          }
         />
       </div>
 
@@ -166,7 +159,7 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
             <CardTitle>Miembros</CardTitle>
             <CardDescription>Los usuarios marcados pertenecen a este grupo.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
             {users.length === 0 ? (
               <p className="text-sm text-muted-foreground">No hay usuarios en la instancia.</p>
             ) : (
@@ -187,10 +180,6 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
                 ))}
               </ul>
             )}
-            <Button onClick={() => void onSaveMembers()} disabled={setMembers.isPending}>
-              {setMembers.isPending ? <Loader2 className="animate-spin" /> : null}
-              Guardar miembros
-            </Button>
           </CardContent>
         </Card>
 
@@ -198,11 +187,10 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
           <CardHeader>
             <CardTitle>Repositorios</CardTitle>
             <CardDescription>
-              Asigna un rol por repositorio. Si dejas «Sin acceso», este grupo no verá ese
-              repositorio cuando esté restringido.
+              Asigna un rol por repositorio. «Sin acceso» deja ese repositorio fuera del grupo.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent>
             {repositories.length === 0 ? (
               <p className="text-sm text-muted-foreground">No hay repositorios.</p>
             ) : (
@@ -246,10 +234,6 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
                 })}
               </ul>
             )}
-            <Button onClick={() => void onSaveRepositories()} disabled={setRepositories.isPending}>
-              {setRepositories.isPending ? <Loader2 className="animate-spin" /> : null}
-              Guardar repositorios
-            </Button>
           </CardContent>
         </Card>
       </div>

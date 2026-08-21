@@ -313,23 +313,19 @@ export function useDeleteGroup() {
   });
 }
 
-export function useSetGroupMembers(groupId: string) {
+export function useSaveGroup(groupId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: SetGroupMembersRequest) => api.setGroupMembers(groupId, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+    mutationFn: async ({
+      members,
+      repositories,
+    }: {
+      members: SetGroupMembersRequest;
+      repositories: SetGroupRepositoriesRequest;
+    }) => {
+      await api.setGroupMembers(groupId, members);
+      await api.setGroupRepositories(groupId, repositories);
     },
-  });
-}
-
-export function useSetGroupRepositories(groupId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: SetGroupRepositoriesRequest) =>
-      api.setGroupRepositories(groupId, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });

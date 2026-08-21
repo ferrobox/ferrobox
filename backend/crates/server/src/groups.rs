@@ -519,4 +519,70 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
     }
+
+    #[tokio::test]
+    async fn group_member_does_not_list_unrestricted_repositories() {
+        let fx = fixture().await;
+
+        let (status, other) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "POST",
+            "/repositories",
+            json!({ "name": "other-repo", "ecosystem": "generic" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let other_id = other["id"].as_str().unwrap();
+
+        let (status, created) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "POST",
+            "/groups",
+            json!({ "name": "team-a" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let group_id = created["id"].as_str().unwrap();
+
+        let (status, _) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "PUT",
+            &format!("/groups/{group_id}/members"),
+            json!({ "user_ids": [fx.reader_id] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, _) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "PUT",
+            &format!("/groups/{group_id}/repositories"),
+            json!({ "grants": [{ "repository_id": fx.repo_id, "role": "developer" }] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, listed) = send(fx.app.clone(), &fx.reader_token, "GET", "/repositories").await;
+        assert_eq!(status, StatusCode::OK);
+        let ids: Vec<&str> = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec![fx.repo_id.as_str()]);
+
+        let (status, _) = send(
+            fx.app,
+            &fx.reader_token,
+            "GET",
+            &format!("/repositories/{other_id}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
 }
