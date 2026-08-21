@@ -6,11 +6,15 @@ import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordReques
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
+import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
+import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
+import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
+import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
 
 export const queryKeys = {
   repositories: ["repositories"] as const,
@@ -18,6 +22,9 @@ export const queryKeys = {
   repositoryArtifacts: (id: string) => ["repositories", id, "artifacts"] as const,
   apiTokens: ["auth", "tokens"] as const,
   users: ["users"] as const,
+  groups: ["groups"] as const,
+  group: (id: string) => ["groups", id] as const,
+  repositoryAccess: (id: string) => ["repositories", id, "access"] as const,
   settings: ["settings"] as const,
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
@@ -245,6 +252,91 @@ export function useResetUserPassword() {
   return useMutation({
     mutationFn: ({ userId, password }: { userId: string; password: string }) =>
       api.resetUserPassword(userId, { password }),
+  });
+}
+
+export function useGroups() {
+  return useQuery({
+    queryKey: queryKeys.groups,
+    queryFn: api.listGroups,
+  });
+}
+
+export function useGroup(groupId: string) {
+  return useQuery({
+    queryKey: queryKeys.group(groupId),
+    queryFn: () => api.getGroup(groupId),
+  });
+}
+
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateGroupRequest) => api.createGroup(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string) => api.deleteGroup(groupId),
+    onSuccess: (_data, groupId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.removeQueries({ queryKey: queryKeys.group(groupId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+    },
+  });
+}
+
+export function useSetGroupMembers(groupId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SetGroupMembersRequest) => api.setGroupMembers(groupId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+    },
+  });
+}
+
+export function useSetGroupRepositories(groupId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SetGroupRepositoriesRequest) =>
+      api.setGroupRepositories(groupId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+    },
+  });
+}
+
+export function useRepositoryAccess(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryAccess(repositoryId),
+    queryFn: () => api.getRepositoryAccess(repositoryId),
+    enabled,
+  });
+}
+
+export function useSetRepositoryAccess(repositoryId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SetRepositoryAccessRequest) =>
+      api.setRepositoryAccess(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAccess(repositoryId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+    },
   });
 }
 

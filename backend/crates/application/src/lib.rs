@@ -62,6 +62,9 @@ pub mod manage_api_tokens;
 /// contraseña y eliminar usuarios.
 pub mod manage_users;
 
+/// Casos de uso: grupos de usuarios y acceso a repositorios.
+pub mod manage_groups;
+
 /// Caso de uso: resolver un secreto Bearer a un principal autenticado.
 pub mod authenticate_token;
 

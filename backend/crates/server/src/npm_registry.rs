@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
 /// Rutas de solo lectura del protocolo de npm.
@@ -94,12 +94,21 @@ async fn npm_get(
     State(state): State<Arc<AppState>>,
     Path((repository_id, path)): Path<(Uuid, String)>,
     Query(search): Query<SearchParams>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
     let path = decode_npm_path(&path);
 
     if path == "-/ping" {
         return Ok(json_raw(StatusCode::OK, Bytes::from_static(b"{}")));
     }
+
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
 
     if path == "-/v1/search" {
         return search_packages(&state, repository_id, &search).await;
@@ -118,7 +127,7 @@ async fn npm_put(
     Path((repository_id, path)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let path = decode_npm_path(&path);
 
     if let Some((name, version)) = strip_suffix_action(&path, "/unyank") {
@@ -134,7 +143,7 @@ async fn npm_delete(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, path)): Path<(Uuid, String)>,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let path = decode_npm_path(&path);
 
     let Some((name, version)) = strip_suffix_action(&path, "/yank") else {
@@ -319,6 +328,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -328,7 +338,7 @@ mod tests {
     use ferrobox_application::packaging::npm::NpmPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -452,6 +462,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

@@ -8,6 +8,12 @@ export function canWriteArtifacts(role: RoleDto | undefined | null): boolean {
   return role === "admin" || role === "developer";
 }
 
+export function canWriteRepository(
+  access: "read" | "write" | undefined | null,
+): boolean {
+  return access === "write";
+}
+
 export function roleLabel(role: RoleDto): string {
   switch (role) {
     case "admin":

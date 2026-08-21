@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
 use crate::dto::{
     CleanupPreviewResponse, CleanupReportResponse, RetentionPolicyRequest, RetentionPolicyResponse,
 };
@@ -18,13 +18,12 @@ use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { .. }: AuthenticatedUser,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    let policy = state
-        .retention
-        .get_policy(RepositoryId::from(repository_id))
-        .await?;
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+    let policy = state.retention.get_policy(repository_id).await?;
     Ok(Json(RetentionPolicyResponse::from(policy)))
 }
 
@@ -34,7 +33,7 @@ pub(crate) async fn save_policy(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let saved = state
         .retention
@@ -49,7 +48,7 @@ pub(crate) async fn dry_run(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -64,7 +63,7 @@ pub(crate) async fn apply(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -78,7 +77,7 @@ pub(crate) async fn collect_garbage(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<CleanupReportResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let report = state
         .retention
         .collect_garbage_only(RepositoryId::from(repository_id))
@@ -123,6 +122,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -131,7 +131,7 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -229,6 +229,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

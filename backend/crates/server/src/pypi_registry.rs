@@ -32,7 +32,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
 /// Tamaño máximo de una subida `twine` (sdist o wheel).
@@ -89,6 +89,13 @@ async fn simple_root(
     Path(repository_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_pypi_repository(&state, repository_id).await?;
     let strategy = pypi_strategy(&state)?;
     let hits = strategy.search(&repository, "", 10_000).await?;
@@ -104,6 +111,13 @@ async fn simple_project(
     Path((repository_id, name)): Path<(Uuid, String)>,
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_pypi_repository(&state, repository_id).await?;
     let package_name =
         PackageName::parse(name.clone()).map_err(|err| ApiError::BadRequest(err.to_string()))?;
@@ -126,7 +140,15 @@ async fn simple_project(
 async fn download_file(
     State(state): State<Arc<AppState>>,
     Path((repository_id, filename)): Path<(Uuid, String)>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
+    require_public_repo_read(
+        &state.groups,
+        &state.authenticate_token,
+        &headers,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_pypi_repository(&state, repository_id).await?;
     if filename.contains('/') || filename.contains('\\') {
         return Err(ApiError::BadRequest(
@@ -149,7 +171,7 @@ async fn upload(
     Path(repository_id): Path<Uuid>,
     multipart: Multipart,
 ) -> Result<(StatusCode, &'static str), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     let repository = load_pypi_repository(&state, repository_id).await?;
     let payload = multipart_to_publish_payload(multipart).await?;
     let strategy = pypi_strategy(&state)?;
@@ -162,7 +184,7 @@ async fn yank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     Ok((StatusCode::OK, Json(PypiOk { ok: true })))
 }
@@ -172,7 +194,7 @@ async fn unyank(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
-    require_write_artifacts(&user)?;
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     Ok((StatusCode::OK, Json(PypiOk { ok: true })))
 }
@@ -387,6 +409,7 @@ mod tests {
     use ferrobox_application::manage_api_tokens::{
         CreateApiTokenUseCase, ListApiTokensUseCase, RevokeApiTokenUseCase,
     };
+    use ferrobox_application::manage_groups::GroupService;
     use ferrobox_application::manage_users::{
         ChangeUserRoleUseCase, CreateUserUseCase, DeleteUserUseCase, ListUsersUseCase,
         ResetUserPasswordUseCase,
@@ -397,7 +420,7 @@ mod tests {
     use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -528,6 +551,11 @@ mod tests {
             delete_user: DeleteUserUseCase::new(user_store.clone()),
             change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
             reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
+            groups: GroupService::new(
+                Arc::new(InMemoryGroupStore::default()),
+                user_store.clone(),
+                repository_store.clone(),
+            ),
         });
 
         let developer = state

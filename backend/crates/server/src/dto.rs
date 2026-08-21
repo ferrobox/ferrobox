@@ -103,6 +103,26 @@ impl From<&RepositoryKind> for RepositoryKindDto {
     }
 }
 
+/// Acceso efectivo de un usuario a un repositorio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RepositoryAccessDto {
+    /// Puede listar y descargar.
+    Read,
+    /// Puede publicar, borrar y configurar el repositorio.
+    Write,
+}
+
+impl From<ferrobox_domain::group::RepositoryAccess> for RepositoryAccessDto {
+    fn from(access: ferrobox_domain::group::RepositoryAccess) -> Self {
+        match access {
+            ferrobox_domain::group::RepositoryAccess::Read => Self::Read,
+            ferrobox_domain::group::RepositoryAccess::Write => Self::Write,
+        }
+    }
+}
+
 /// Representación de un repositorio en las respuestas de la API.
 #[derive(Serialize, TS)]
 #[ts(export)]
@@ -111,15 +131,26 @@ pub(crate) struct RepositoryResponse {
     pub(crate) name: String,
     pub(crate) kind: RepositoryKindDto,
     pub(crate) ecosystem: PackageEcosystemDto,
+    /// Acceso del usuario autenticado a este repositorio.
+    pub(crate) access: RepositoryAccessDto,
+    /// `true` si hay grupos asignados; entonces solo esos grupos (y
+    /// los administradores) pueden verlo.
+    pub(crate) restricted: bool,
 }
 
-impl From<&Repository> for RepositoryResponse {
-    fn from(repository: &Repository) -> Self {
+impl RepositoryResponse {
+    pub(crate) fn from_repository(
+        repository: &Repository,
+        access: ferrobox_domain::group::RepositoryAccess,
+        restricted: bool,
+    ) -> Self {
         Self {
             id: repository.id().to_string(),
             name: repository.name().to_string(),
             kind: repository.kind().into(),
             ecosystem: repository.ecosystem().into(),
+            access: access.into(),
+            restricted,
         }
     }
 }
@@ -734,4 +765,88 @@ impl From<ferrobox_application::search_packages::PackageSearchHit> for PackageSe
 pub(crate) struct SearchResponse {
     /// Coincidencias, ya recortadas al límite pedido.
     pub(crate) hits: Vec<PackageSearchHitResponse>,
+}
+
+/// Resumen de un grupo en listados.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct GroupSummaryResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[ts(type = "number")]
+    pub(crate) member_count: usize,
+    #[ts(type = "number")]
+    pub(crate) repository_count: usize,
+}
+
+/// Repositorio asignado a un grupo, con el rol en ese repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct GroupRepositoryGrantResponse {
+    pub(crate) repository_id: String,
+    pub(crate) repository_name: String,
+    pub(crate) role: RoleDto,
+}
+
+/// Detalle de un grupo: miembros y repositorios.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct GroupDetailResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) members: Vec<UserResponse>,
+    pub(crate) repositories: Vec<GroupRepositoryGrantResponse>,
+}
+
+/// Cuerpo de la petición para crear un grupo.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateGroupRequest {
+    pub(crate) name: String,
+}
+
+/// Cuerpo de la petición para sustituir los miembros de un grupo.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetGroupMembersRequest {
+    pub(crate) user_ids: Vec<String>,
+}
+
+/// Asignación de un repositorio a un grupo.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct GroupRepositoryGrantRequest {
+    pub(crate) repository_id: String,
+    pub(crate) role: RoleDto,
+}
+
+/// Cuerpo de la petición para sustituir los repositorios de un grupo.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetGroupRepositoriesRequest {
+    pub(crate) grants: Vec<GroupRepositoryGrantRequest>,
+}
+
+/// Grupo con acceso a un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct RepositoryAccessGrantResponse {
+    pub(crate) group_id: String,
+    pub(crate) group_name: String,
+    pub(crate) role: RoleDto,
+}
+
+/// Asignación de un grupo a un repositorio.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct RepositoryAccessGrantRequest {
+    pub(crate) group_id: String,
+    pub(crate) role: RoleDto,
+}
+
+/// Cuerpo de la petición para sustituir los grupos de un repositorio.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetRepositoryAccessRequest {
+    pub(crate) grants: Vec<RepositoryAccessGrantRequest>,
 }

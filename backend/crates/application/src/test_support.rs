@@ -1,7 +1,7 @@
 //! Dobles en memoria de los puertos, para tests de aplicación y HTTP.
 #![allow(missing_docs, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -9,7 +9,8 @@ use bytes::Bytes;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
-use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, RepositoryId, UserId};
+use ferrobox_domain::group::Group;
+use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::quota::StorageQuota;
@@ -18,6 +19,7 @@ use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
+use ferrobox_ports::group_store::{GroupStore, GroupStoreError, RepositoryGroupGrant};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
@@ -714,5 +716,141 @@ impl QuotaStore for InMemoryQuotaStore {
     ) -> Result<(), QuotaStoreError> {
         self.quotas.lock().unwrap().insert(repository_id, quota);
         Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryGroupStore {
+    groups: Mutex<HashMap<GroupId, Group>>,
+    members: Mutex<HashMap<GroupId, HashSet<UserId>>>,
+    grants: Mutex<Vec<RepositoryGroupGrant>>,
+}
+
+#[async_trait]
+impl GroupStore for InMemoryGroupStore {
+    async fn save(&self, group: &Group) -> Result<(), GroupStoreError> {
+        let mut groups = self.groups.lock().unwrap();
+        let name_taken = groups.values().any(|existing| {
+            existing.id() != group.id() && existing.name() == group.name()
+        });
+        if name_taken {
+            return Err(GroupStoreError::DuplicateName(group.name().clone()));
+        }
+        groups.insert(group.id(), group.clone());
+        Ok(())
+    }
+
+    async fn find_by_id(&self, id: GroupId) -> Result<Option<Group>, GroupStoreError> {
+        Ok(self.groups.lock().unwrap().get(&id).cloned())
+    }
+
+    async fn find_all(&self) -> Result<Vec<Group>, GroupStoreError> {
+        let mut groups: Vec<_> = self.groups.lock().unwrap().values().cloned().collect();
+        groups.sort_by(|a, b| a.name().as_str().cmp(b.name().as_str()));
+        Ok(groups)
+    }
+
+    async fn delete(&self, id: GroupId) -> Result<bool, GroupStoreError> {
+        let removed = self.groups.lock().unwrap().remove(&id).is_some();
+        self.members.lock().unwrap().remove(&id);
+        self.grants.lock().unwrap().retain(|grant| grant.group_id != id);
+        Ok(removed)
+    }
+
+    async fn set_members(
+        &self,
+        group_id: GroupId,
+        user_ids: &[UserId],
+    ) -> Result<(), GroupStoreError> {
+        self.members
+            .lock()
+            .unwrap()
+            .insert(group_id, user_ids.iter().copied().collect());
+        Ok(())
+    }
+
+    async fn members(&self, group_id: GroupId) -> Result<Vec<UserId>, GroupStoreError> {
+        Ok(self
+            .members
+            .lock()
+            .unwrap()
+            .get(&group_id)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default())
+    }
+
+    async fn groups_for_user(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError> {
+        Ok(self
+            .members
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, members)| members.contains(&user_id))
+            .map(|(group_id, _)| *group_id)
+            .collect())
+    }
+
+    async fn set_group_repositories(
+        &self,
+        group_id: GroupId,
+        grants: &[(RepositoryId, Role)],
+    ) -> Result<(), GroupStoreError> {
+        let mut all = self.grants.lock().unwrap();
+        all.retain(|grant| grant.group_id != group_id);
+        all.extend(grants.iter().map(|(repository_id, role)| {
+            RepositoryGroupGrant {
+                repository_id: *repository_id,
+                group_id,
+                role: *role,
+            }
+        }));
+        Ok(())
+    }
+
+    async fn set_repository_groups(
+        &self,
+        repository_id: RepositoryId,
+        grants: &[(GroupId, Role)],
+    ) -> Result<(), GroupStoreError> {
+        let mut all = self.grants.lock().unwrap();
+        all.retain(|grant| grant.repository_id != repository_id);
+        all.extend(grants.iter().map(|(group_id, role)| RepositoryGroupGrant {
+            repository_id,
+            group_id: *group_id,
+            role: *role,
+        }));
+        Ok(())
+    }
+
+    async fn grants_for_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError> {
+        Ok(self
+            .grants
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|grant| grant.repository_id == repository_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn grants_for_group(
+        &self,
+        group_id: GroupId,
+    ) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError> {
+        Ok(self
+            .grants
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|grant| grant.group_id == group_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn all_grants(&self) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError> {
+        Ok(self.grants.lock().unwrap().clone())
     }
 }

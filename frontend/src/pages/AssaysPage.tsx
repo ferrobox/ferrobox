@@ -169,6 +169,10 @@ export function AssaysPage() {
           ecosystem={openAssay.ecosystem}
           name={openAssay.name}
           version={openAssay.version}
+          canRerun={
+            repositories?.find((repository) => repository.id === openAssay.repository_id)
+              ?.access === "write"
+          }
         />
       ) : null}
     </div>

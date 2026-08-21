@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_write_artifacts;
+use crate::authz::{require_repo_read, require_repo_write};
 use crate::dto::{ArtifactResponse, PublishResponse};
 use crate::error::ApiError;
 
@@ -22,12 +22,10 @@ pub(crate) async fn publish_artifact(
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
-    require_write_artifacts(&user)?;
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
 
-    let artifact_id = state
-        .publish_artifact
-        .execute(RepositoryId::from(repository_id), body)
-        .await?;
+    let artifact_id = state.publish_artifact.execute(repository_id, body).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -39,23 +37,29 @@ pub(crate) async fn publish_artifact(
 
 pub(crate) async fn download_artifact(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(artifact_id): Path<Uuid>,
 ) -> Result<Bytes, ApiError> {
-    let (_artifact, content) = state
+    let (artifact, content) = state
         .download_artifact
         .execute(ArtifactId::from(artifact_id))
         .await?;
+    require_repo_read(&state.groups, &user, artifact.repository_id()).await?;
 
     Ok(content)
 }
 
 pub(crate) async fn list_repository_artifacts(
     State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<ArtifactResponse>>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+
     let artifacts = state
         .list_repository_artifacts
-        .execute(RepositoryId::from(repository_id))
+        .execute(repository_id)
         .await?;
 
     Ok(Json(
@@ -68,14 +72,12 @@ pub(crate) async fn delete_artifact(
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path((repository_id, artifact_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
-    require_write_artifacts(&user)?;
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
 
     state
         .delete_artifact
-        .execute(
-            RepositoryId::from(repository_id),
-            ArtifactId::from(artifact_id),
-        )
+        .execute(repository_id, ArtifactId::from(artifact_id))
         .await?;
 
     Ok(StatusCode::NO_CONTENT)

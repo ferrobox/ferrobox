@@ -6,17 +6,19 @@ import { toast } from "sonner";
 import { ApiError } from "@/api/client";
 import { useDeleteRepository, useRepositories, useRepository } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
-import { canWriteArtifacts } from "@/auth/roles";
+import { canManageUsers, canWriteRepository } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
+import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -39,7 +41,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
     useRepository(repositoryId);
   const { data: repositories } = useRepositories();
   const deleteRepository = useDeleteRepository();
-  const canWrite = canWriteArtifacts(user?.role);
+  const canWrite = canWriteRepository(repository?.access);
+  const isAdmin = canManageUsers(user?.role);
   const [copiedPath, setCopiedPath] = useState(false);
 
   async function onDeleteRepository() {
@@ -63,8 +66,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   }
 
   if (isError) {
-    if (error instanceof ApiError && error.status === 404) {
-      return <NotFoundPage message="Ese repositorio no existe." />;
+    if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
+      return <NotFoundPage message="Ese repositorio no existe o no tienes acceso." />;
     }
 
     return (
@@ -121,6 +124,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <EcosystemBadge ecosystem={repository.ecosystem} />
               <RepositoryKindBadge kind={repository.kind} />
+              {repository.restricted ? <Badge variant="outline">Restringido</Badge> : null}
               <button
                 type="button"
                 onClick={() => void copyPath()}
@@ -200,6 +204,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="quota">Cuota</TabsTrigger>
           ) : null}
+          {isAdmin ? <TabsTrigger value="access">Acceso</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="packages" className="mt-4 space-y-3">
           <p className="text-xs text-muted-foreground">
@@ -209,6 +214,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             repositoryId={repositoryId}
             kind={repository.kind.type}
             ecosystem={repository.ecosystem}
+            canWrite={canWrite}
             memberNames={Object.fromEntries(
               alloyMembers.map((member) => [member.id, member.name]),
             )}
@@ -222,6 +228,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="quota" className="mt-4">
             <QuotaPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+        {isAdmin ? (
+          <TabsContent value="access" className="mt-4">
+            <RepositoryAccessPanel repositoryId={repositoryId} />
           </TabsContent>
         ) : null}
       </Tabs>

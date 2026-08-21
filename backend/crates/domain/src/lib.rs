@@ -29,6 +29,9 @@ pub mod package_coordinate;
 /// La entidad `User` y los objetos de valor `Username` y `Email`.
 pub mod user;
 
+/// La entidad `Group` y el acceso de un grupo a un repositorio.
+pub mod group;
+
 /// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.
 pub mod api_token;
 
