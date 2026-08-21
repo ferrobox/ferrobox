@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Loader2, UsersRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -26,6 +27,7 @@ function isValidGroupName(name: string): boolean {
 
 export function CreateGroupDialog() {
   const createGroup = useCreateGroup();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
 
@@ -37,10 +39,11 @@ export function CreateGroupDialog() {
       return;
     }
     try {
-      await createGroup.mutateAsync({ name: trimmed });
+      const created = await createGroup.mutateAsync({ name: trimmed });
       setName("");
       setOpen(false);
       toast.success("Grupo creado");
+      navigate(`/groups/${created.id}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo crear el grupo");
     }
@@ -68,7 +71,8 @@ export function CreateGroupDialog() {
             <DialogTitle>Crear grupo</DialogTitle>
             <DialogDescription>
               Los grupos agrupan usuarios y limitan qué repositorios pueden ver.
-              Un repositorio sin grupos sigue siendo visible para toda la instancia.
+              Quien pertenezca a un grupo solo verá los repositorios asignados a
+              sus grupos.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

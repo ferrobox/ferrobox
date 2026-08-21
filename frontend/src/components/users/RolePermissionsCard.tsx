@@ -74,9 +74,9 @@ export function RolePermissionsCard() {
         <CardTitle>Permisos por rol</CardTitle>
         <CardDescription>
           Los roles aplican a toda la instancia. Un Lector lee; un Desarrollador además publica y
-          administra repositorios; un Administrador también gestiona cuentas y grupos. Si un
-          repositorio tiene grupos asignados, solo esos grupos (y los administradores) pueden
-          verlo; el rol del grupo en ese repositorio puede conceder escritura a un Lector.
+          administra repositorios; un Administrador también gestiona cuentas y grupos. Un
+          miembro de grupo solo ve los repositorios asignados a sus grupos. Quien no está en
+          ningún grupo ve los repositorios sin restringir, según su rol de instancia.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-0 sm:px-6">

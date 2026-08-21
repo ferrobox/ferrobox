@@ -40,8 +40,8 @@ pub struct RepositoryVisibility {
 }
 
 impl RepositoryVisibility {
-    /// El usuario ve todos los repositorios (Admin, o todavía no hay
-    /// restricciones).
+    /// El usuario ve todos los repositorios (Admin, o un usuario sin
+    /// grupos cuando todavía no hay restricciones).
     #[must_use]
     pub fn all() -> Self {
         Self {
@@ -280,9 +280,11 @@ impl GroupService {
 
     /// Acceso efectivo de `user` al repositorio.
     ///
-    /// Un Admin de instancia siempre escribe. Si el repositorio no tiene
-    /// grupos, vale el rol de instancia. Si tiene grupos, solo cuentan
-    /// esos grupos (y el Admin).
+    /// Un Admin de instancia siempre escribe. Si el repositorio tiene
+    /// grupos, solo cuentan esos grupos (y el Admin). Si no tiene
+    /// grupos, vale el rol de instancia **salvo** que el usuario ya
+    /// pertenezca a algún grupo: entonces solo ve los repositorios
+    /// asignados a sus grupos.
     ///
     /// # Errors
     ///
@@ -298,6 +300,9 @@ impl GroupService {
 
         let grants = self.group_store.grants_for_repository(repository_id).await?;
         if grants.is_empty() {
+            if self.belongs_to_any_group(user.id()).await? {
+                return Ok(None);
+            }
             return Ok(Some(instance_access(user.role())));
         }
 
@@ -334,6 +339,10 @@ impl GroupService {
 
     /// Repositorios que `user` puede ver.
     ///
+    /// Un Admin ve todos. Un usuario que pertenece a algún grupo solo
+    /// ve los repositorios asignados a esos grupos. Quien no está en
+    /// ningún grupo ve los repositorios sin restringir (sin grupos).
+    ///
     /// # Errors
     ///
     /// [`GroupError`] si falla un puerto.
@@ -342,33 +351,42 @@ impl GroupService {
             return Ok(RepositoryVisibility::all());
         }
 
-        let all_repos = self.repository_store.find_all().await?;
-        let grants = self.group_store.all_grants().await?;
-        if grants.is_empty() {
-            return Ok(RepositoryVisibility::all());
-        }
-
-        let restricted: HashSet<RepositoryId> =
-            grants.iter().map(|grant| grant.repository_id).collect();
         let memberships: HashSet<GroupId> = self
             .group_store
             .groups_for_user(user.id())
             .await?
             .into_iter()
             .collect();
+        let grants = self.group_store.all_grants().await?;
 
-        let mut visible: HashSet<RepositoryId> = all_repos
-            .iter()
-            .map(Repository::id)
+        if !memberships.is_empty() {
+            let visible = grants
+                .into_iter()
+                .filter(|grant| memberships.contains(&grant.group_id))
+                .map(|grant| grant.repository_id)
+                .collect();
+            return Ok(RepositoryVisibility::only(visible));
+        }
+
+        if grants.is_empty() {
+            return Ok(RepositoryVisibility::all());
+        }
+
+        let restricted: HashSet<RepositoryId> =
+            grants.iter().map(|grant| grant.repository_id).collect();
+        let visible = self
+            .repository_store
+            .find_all()
+            .await?
+            .into_iter()
+            .map(|repository| repository.id())
             .filter(|id| !restricted.contains(id))
             .collect();
-
-        for grant in grants {
-            if memberships.contains(&grant.group_id) {
-                visible.insert(grant.repository_id);
-            }
-        }
         Ok(RepositoryVisibility::only(visible))
+    }
+
+    async fn belongs_to_any_group(&self, user_id: UserId) -> Result<bool, GroupError> {
+        Ok(!self.group_store.groups_for_user(user_id).await?.is_empty())
     }
 
     async fn ensure_group(&self, id: GroupId) -> Result<Group, GroupError> {
@@ -534,5 +552,81 @@ mod tests {
         let visibility = service.visibility(&reader).await.unwrap();
         assert!(!visibility.contains(repo.id()));
         assert!(visibility.contains(open.id()));
+    }
+
+    #[tokio::test]
+    async fn group_member_only_sees_granted_repositories() {
+        let (service, _admin, reader, repo, repos) = seeded().await;
+        let open = forge("public-crates");
+        repos.save(&open).await.unwrap();
+
+        let group = service
+            .create(GroupName::parse("team-a").unwrap())
+            .await
+            .unwrap();
+        service
+            .set_members(group.id(), vec![reader.id()])
+            .await
+            .unwrap();
+        service
+            .set_group_repositories(group.id(), vec![(repo.id(), Role::Developer)])
+            .await
+            .unwrap();
+
+        let visibility = service.visibility(&reader).await.unwrap();
+        assert!(visibility.contains(repo.id()));
+        assert!(!visibility.contains(open.id()));
+        assert_eq!(
+            service.access_on(&reader, repo.id()).await.unwrap(),
+            Some(RepositoryAccess::Write)
+        );
+        assert_eq!(service.access_on(&reader, open.id()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn instance_developer_in_a_group_is_sandboxed_to_grants() {
+        let users = Arc::new(InMemoryUserStore::default());
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let service = GroupService::new(
+            Arc::new(InMemoryGroupStore::default()),
+            users.clone(),
+            repos.clone(),
+        );
+        let hash = hash_password("Secret1a").unwrap();
+        let developer = User::new(Username::parse("developer").unwrap(), Role::Developer);
+        users
+            .save_with_password_hash(&developer, &hash)
+            .await
+            .unwrap();
+
+        let granted = forge("demo-repo");
+        let other = forge("other-repo");
+        repos.save(&granted).await.unwrap();
+        repos.save(&other).await.unwrap();
+
+        let group = service
+            .create(GroupName::parse("test").unwrap())
+            .await
+            .unwrap();
+        service
+            .set_members(group.id(), vec![developer.id()])
+            .await
+            .unwrap();
+        service
+            .set_group_repositories(group.id(), vec![(granted.id(), Role::Developer)])
+            .await
+            .unwrap();
+
+        let visibility = service.visibility(&developer).await.unwrap();
+        assert!(visibility.contains(granted.id()));
+        assert!(!visibility.contains(other.id()));
+        assert_eq!(
+            service.access_on(&developer, granted.id()).await.unwrap(),
+            Some(RepositoryAccess::Write)
+        );
+        assert_eq!(
+            service.access_on(&developer, other.id()).await.unwrap(),
+            None
+        );
     }
 }

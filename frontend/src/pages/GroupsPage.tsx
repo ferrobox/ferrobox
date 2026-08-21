@@ -1,5 +1,5 @@
-import { AlertCircle, RefreshCw, Trash2 } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
+import { AlertCircle, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -23,6 +23,7 @@ import {
 
 export function GroupsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { data, isPending, isError, error, refetch, isFetching } = useGroups();
   const deleteGroup = useDeleteGroup();
 
@@ -44,7 +45,7 @@ export function GroupsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Grupos"
-        description="Asigna usuarios a grupos y limita qué repositorios puede ver cada grupo. Si un repositorio no tiene grupos, sigue el rol de la instancia."
+        description="Asigna usuarios a grupos y elige a qué repositorios tienen acceso. Un miembro de grupo solo ve esos repositorios. Quien no esté en ningún grupo sigue el rol de la instancia en los repositorios sin restringir."
         actions={<CreateGroupDialog />}
       />
 
@@ -90,31 +91,34 @@ export function GroupsPage() {
             <TableBody>
               {data.map((group) => (
                 <TableRow key={group.id}>
-                  <TableCell className="font-medium">
-                    <Link
-                      to={`/groups/${group.id}`}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {group.name}
-                    </Link>
-                  </TableCell>
+                  <TableCell className="font-medium">{group.name}</TableCell>
                   <TableCell className="text-muted-foreground">{group.member_count}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {group.repository_count}
                   </TableCell>
                   <TableCell className="text-right">
-                    <ConfirmDeleteDialog
-                      title={`Eliminar «${group.name}»`}
-                      description="Se quitarán los miembros y el acceso a repositorios de este grupo. Los repositorios no se borran."
-                      pending={deleteGroup.isPending}
-                      onConfirm={() => onDelete(group.id, group.name)}
-                      trigger={
-                        <Button size="sm" variant="ghost">
-                          <Trash2 />
-                          Eliminar
-                        </Button>
-                      }
-                    />
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => navigate(`/groups/${group.id}`)}
+                      >
+                        <Pencil />
+                        Editar
+                      </Button>
+                      <ConfirmDeleteDialog
+                        title={`Eliminar «${group.name}»`}
+                        description="Se quitarán los miembros y el acceso a repositorios de este grupo. Los repositorios no se borran."
+                        pending={deleteGroup.isPending}
+                        onConfirm={() => onDelete(group.id, group.name)}
+                        trigger={
+                          <Button size="sm" variant="ghost">
+                            <Trash2 />
+                            Eliminar
+                          </Button>
+                        }
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
