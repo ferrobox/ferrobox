@@ -226,6 +226,78 @@ impl From<GroupId> for Uuid {
     }
 }
 
+/// Identificador único de un aviso HTTP (`webhook`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WebhookId(Uuid);
+
+impl WebhookId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for WebhookId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for WebhookId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for WebhookId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<WebhookId> for Uuid {
+    fn from(value: WebhookId) -> Self {
+        value.0
+    }
+}
+
+/// Identificador único de un envío de aviso HTTP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WebhookDeliveryId(Uuid);
+
+impl WebhookDeliveryId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for WebhookDeliveryId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for WebhookDeliveryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for WebhookDeliveryId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<WebhookDeliveryId> for Uuid {
+    fn from(value: WebhookDeliveryId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +330,12 @@ mod tests {
         assert_eq!(AssayId::from(Uuid::from(assay_id)), assay_id);
         let group_id = GroupId::new();
         assert_eq!(GroupId::from(Uuid::from(group_id)), group_id);
+        let webhook_id = WebhookId::new();
+        assert_eq!(WebhookId::from(Uuid::from(webhook_id)), webhook_id);
+        let delivery_id = WebhookDeliveryId::new();
+        assert_eq!(
+            WebhookDeliveryId::from(Uuid::from(delivery_id)),
+            delivery_id
+        );
     }
 }

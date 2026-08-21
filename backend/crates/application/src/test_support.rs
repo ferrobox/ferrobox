@@ -10,7 +10,8 @@ use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
 use ferrobox_domain::group::Group;
-use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId};
+use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
+use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId, WebhookId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::quota::StorageQuota;
@@ -29,6 +30,7 @@ use ferrobox_ports::quota_store::{QuotaStore, QuotaStoreError};
 use ferrobox_ports::retention_store::{RetentionStore, RetentionStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
+use ferrobox_ports::webhook_store::{WebhookStore, WebhookStoreError};
 
 #[derive(Default)]
 pub struct InMemoryRepositoryStore {
@@ -522,9 +524,17 @@ impl ApiTokenStore for InMemoryApiTokenStore {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RecordedHttpPost {
+    pub url: String,
+    pub body: Bytes,
+    pub headers: Vec<(String, String)>,
+}
+
 #[derive(Default)]
 pub struct InMemoryHttpClient {
     responses: Mutex<HashMap<String, VecDeque<HttpResponse>>>,
+    posts: Mutex<Vec<RecordedHttpPost>>,
 }
 
 impl InMemoryHttpClient {
@@ -541,6 +551,10 @@ impl InMemoryHttpClient {
             .lock()
             .unwrap()
             .insert(url.to_string(), VecDeque::from(responses));
+    }
+
+    pub fn take_posts(&self) -> Vec<RecordedHttpPost> {
+        std::mem::take(&mut *self.posts.lock().unwrap())
     }
 }
 
@@ -585,10 +599,38 @@ impl HttpClient for InMemoryHttpClient {
     async fn post(
         &self,
         url: &str,
-        _body: Bytes,
-        _content_type: &str,
+        body: Bytes,
+        content_type: &str,
     ) -> Result<HttpResponse, HttpClientError> {
-        self.get(url).await
+        self.post_with_headers(url, body, &[("content-type", content_type)])
+            .await
+            .and_then(|response| {
+                if response.is_success() {
+                    Ok(response)
+                } else {
+                    Err(HttpClientError::Status {
+                        status: response.status,
+                        url: url.to_string(),
+                    })
+                }
+            })
+    }
+
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        body: Bytes,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, HttpClientError> {
+        self.posts.lock().unwrap().push(RecordedHttpPost {
+            url: url.to_string(),
+            body: body.clone(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect(),
+        });
+        self.get_with_headers(url, headers).await
     }
 }
 
@@ -852,5 +894,69 @@ impl GroupStore for InMemoryGroupStore {
 
     async fn all_grants(&self) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError> {
         Ok(self.grants.lock().unwrap().clone())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryWebhookStore {
+    webhooks: Mutex<HashMap<WebhookId, Webhook>>,
+    deliveries: Mutex<HashMap<WebhookId, Vec<WebhookDelivery>>>,
+}
+
+#[async_trait]
+impl WebhookStore for InMemoryWebhookStore {
+    async fn save(&self, webhook: &Webhook) -> Result<(), WebhookStoreError> {
+        self.webhooks
+            .lock()
+            .unwrap()
+            .insert(webhook.id(), webhook.clone());
+        Ok(())
+    }
+
+    async fn find_by_id(&self, id: WebhookId) -> Result<Option<Webhook>, WebhookStoreError> {
+        Ok(self.webhooks.lock().unwrap().get(&id).cloned())
+    }
+
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<Webhook>, WebhookStoreError> {
+        let mut webhooks: Vec<_> = self
+            .webhooks
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|webhook| webhook.repository_id() == repository_id)
+            .cloned()
+            .collect();
+        webhooks.sort_by_key(|webhook| std::cmp::Reverse(webhook.id().to_string()));
+        Ok(webhooks)
+    }
+
+    async fn delete(&self, id: WebhookId) -> Result<bool, WebhookStoreError> {
+        self.deliveries.lock().unwrap().remove(&id);
+        Ok(self.webhooks.lock().unwrap().remove(&id).is_some())
+    }
+
+    async fn record_delivery(&self, delivery: &WebhookDelivery) -> Result<(), WebhookStoreError> {
+        let mut deliveries = self.deliveries.lock().unwrap();
+        let list = deliveries.entry(delivery.webhook_id()).or_default();
+        list.insert(0, delivery.clone());
+        list.truncate(20);
+        Ok(())
+    }
+
+    async fn deliveries(
+        &self,
+        webhook_id: WebhookId,
+        limit: usize,
+    ) -> Result<Vec<WebhookDelivery>, WebhookStoreError> {
+        Ok(self
+            .deliveries
+            .lock()
+            .unwrap()
+            .get(&webhook_id)
+            .map(|list| list.iter().take(limit).cloned().collect())
+            .unwrap_or_default())
     }
 }

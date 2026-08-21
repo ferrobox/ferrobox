@@ -10,6 +10,7 @@ ferrobox-ports = { path = "../ports" }
 async-trait.workspace = true
 bytes.workspace = true
 sha2.workspace = true
+hmac.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

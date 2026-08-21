@@ -21,6 +21,7 @@ mod retention;
 mod search;
 mod settings;
 mod users;
+mod webhooks;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -41,6 +42,7 @@ use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
 use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
+use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::assay::AssayService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
@@ -74,6 +76,7 @@ use ferrobox_application::quota::QuotaService;
 use ferrobox_application::retention::RetentionService;
 use ferrobox_application::search_packages::SearchPackagesUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
+use ferrobox_application::webhooks::WebhookService;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
@@ -108,6 +111,7 @@ struct AppState {
     change_user_role: ChangeUserRoleUseCase,
     reset_user_password: ResetUserPasswordUseCase,
     groups: GroupService,
+    webhooks: WebhookService,
 }
 
 #[tokio::main]
@@ -132,7 +136,8 @@ async fn main() {
     let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
-    let api_token_store = Arc::new(PostgresApiTokenStore::new(pool));
+    let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
+    let webhook_store = Arc::new(PostgresWebhookStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
     let http_client = Arc::new(ReqwestHttpClient::new());
 
@@ -149,6 +154,7 @@ async fn main() {
         user_store,
         group_store,
         api_token_store,
+        webhook_store,
         storage,
         http_client,
     ));
@@ -267,6 +273,22 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/repositories/{repository_id}/gc",
             post(retention::collect_garbage),
         )
+        .route(
+            "/repositories/{repository_id}/webhooks",
+            get(webhooks::list_webhooks).post(webhooks::create_webhook),
+        )
+        .route(
+            "/repositories/{repository_id}/webhooks/{webhook_id}",
+            put(webhooks::update_webhook).delete(webhooks::delete_webhook),
+        )
+        .route(
+            "/repositories/{repository_id}/webhooks/{webhook_id}/deliveries",
+            get(webhooks::list_deliveries),
+        )
+        .route(
+            "/repositories/{repository_id}/webhooks/{webhook_id}/ping",
+            post(webhooks::ping_webhook),
+        )
         .route("/gc/dry-run", post(retention::dry_run_garbage_collection))
         .route("/gc", post(retention::collect_garbage_all))
         .merge(cargo_registry::write_router())
@@ -323,16 +345,23 @@ fn build_app_state(
     user_store: Arc<PostgresUserStore>,
     group_store: Arc<PostgresGroupStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
+    webhook_store: Arc<PostgresWebhookStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
+    let webhooks = WebhookService::new(
+        webhook_store,
+        http_client.clone(),
+        repository_store.clone(),
+    );
     let assays = AssayService::new(
         assay_store.clone(),
         package_index_store.clone(),
         repository_store.clone(),
         storage.clone(),
         http_client.clone(),
-    );
+    )
+    .with_webhooks(webhooks.clone());
     let quota = QuotaService::new(
         repository_store.clone(),
         artifact_store.clone(),
@@ -417,6 +446,7 @@ fn build_app_state(
         change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
         reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
         groups: GroupService::new(group_store, user_store, repository_store),
+        webhooks,
     }
 }
 

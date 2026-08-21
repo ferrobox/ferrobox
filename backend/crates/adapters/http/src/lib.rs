@@ -89,23 +89,21 @@ impl HttpClient for ReqwestHttpClient {
         })
     }
 
-    async fn post(
+    async fn post_with_headers(
         &self,
         url: &str,
         body: Bytes,
-        content_type: &str,
+        headers: &[(&str, &str)],
     ) -> Result<HttpResponse, HttpClientError> {
-        let response = self
-            .client
-            .post(url)
-            .header("content-type", content_type)
-            .body(body.to_vec())
-            .send()
-            .await
-            .map_err(|err| HttpClientError::Transport {
-                url: url.to_string(),
-                message: err.to_string(),
-            })?;
+        let mut request = self.client.post(url).body(body.to_vec());
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+
+        let response = request.send().await.map_err(|err| HttpClientError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        })?;
 
         let status = response.status().as_u16();
         let header_pairs = response
@@ -123,18 +121,10 @@ impl HttpClient for ReqwestHttpClient {
             message: err.to_string(),
         })?;
 
-        let response = HttpResponse {
+        Ok(HttpResponse {
             status,
             body,
             headers: header_pairs,
-        };
-        if response.is_success() {
-            Ok(response)
-        } else {
-            Err(HttpClientError::Status {
-                status: response.status,
-                url: url.to_string(),
-            })
-        }
+        })
     }
 }

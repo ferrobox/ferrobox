@@ -25,6 +25,7 @@ use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
 use ferrobox_application::search_packages::SearchPackagesError;
 use ferrobox_application::manage_groups::GroupError;
+use ferrobox_application::webhooks::ManageWebhookError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
 use ferrobox_domain::quota::StorageQuotaError;
 use ferrobox_ports::group_store::GroupStoreError;
@@ -396,6 +397,25 @@ impl From<GroupError> for ApiError {
             GroupError::Groups(GroupStoreError::Backend(_))
             | GroupError::Users(_)
             | GroupError::Repositories(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<ManageWebhookError> for ApiError {
+    fn from(err: ManageWebhookError) -> Self {
+        match err {
+            ManageWebhookError::RepositoryNotFound(_) | ManageWebhookError::WebhookNotFound(_) => {
+                Self::NotFound(err.to_string())
+            }
+            ManageWebhookError::WebhookMismatch
+            | ManageWebhookError::AlloyRepository
+            | ManageWebhookError::Invalid(_) => Self::BadRequest(err.to_string()),
+            ManageWebhookError::Store(ferrobox_ports::webhook_store::WebhookStoreError::MissingSchema) => {
+                Self::BadRequest(err.to_string())
+            }
+            ManageWebhookError::Store(_) | ManageWebhookError::Repositories(_) => {
+                Self::Internal(err.to_string())
+            }
         }
     }
 }

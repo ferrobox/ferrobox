@@ -220,7 +220,8 @@ mod tests {
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore,
+        InMemoryHttpClient,
+        InMemoryWebhookStore, InMemoryPackageIndexStore, InMemoryQuotaStore,
         InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
@@ -300,7 +301,7 @@ mod tests {
                 package_index_store.clone(),
                 repository_store.clone(),
                 storage.clone(),
-                http_client,
+                http_client.clone(),
             ),
             retention: RetentionService::new(
                 repository_store.clone(),
@@ -330,8 +331,14 @@ mod tests {
             groups: GroupService::new(
                 Arc::new(InMemoryGroupStore::default()),
                 user_store,
+                repository_store.clone(),
+            ),
+            webhooks: ferrobox_application::webhooks::WebhookService::new(
+                Arc::new(InMemoryWebhookStore::default()),
+                http_client.clone(),
                 repository_store,
             ),
+
         });
 
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();

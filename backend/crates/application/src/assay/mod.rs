@@ -24,6 +24,8 @@ use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StoragePort};
 use thiserror::Error;
 
+use crate::webhooks::WebhookService;
+
 use self::extract::osv_query_target;
 use self::layers::extract_inventory;
 use self::osv::query_findings;
@@ -75,6 +77,7 @@ pub struct AssayService {
     repository_store: Arc<dyn RepositoryStore>,
     storage: Arc<dyn StoragePort>,
     http_client: Arc<dyn HttpClient>,
+    webhooks: Option<WebhookService>,
 }
 
 impl AssayService {
@@ -93,7 +96,16 @@ impl AssayService {
             repository_store,
             storage,
             http_client,
+            webhooks: None,
         }
+    }
+
+    /// Conecta el envío de avisos HTTP. Un fallo del destino no afecta
+    /// al ensaye ni al publish.
+    #[must_use]
+    pub fn with_webhooks(mut self, webhooks: WebhookService) -> Self {
+        self.webhooks = Some(webhooks);
+        self
     }
 
     /// Lista todos los ensayes de la instancia.
@@ -200,6 +212,19 @@ impl AssayService {
                 )
                 .await;
         });
+    }
+
+    /// Como [`schedule`], y además avisa `package.published` sin esperar
+    /// al destino.
+    pub fn schedule_after_publish(
+        &self,
+        repository_id: RepositoryId,
+        coordinate: PackageCoordinate,
+    ) {
+        if let Some(webhooks) = &self.webhooks {
+            webhooks.notify_package_published(repository_id, coordinate.clone());
+        }
+        self.schedule(repository_id, coordinate);
     }
 
     /// Vuelve a ensayar las coordenadas de una imagen OCI/Helm tras
@@ -335,6 +360,9 @@ impl AssayService {
         };
 
         self.assays.upsert(&assay).await?;
+        if let Some(webhooks) = &self.webhooks {
+            webhooks.notify_assay_completed(assay.clone());
+        }
         Ok(assay)
     }
 

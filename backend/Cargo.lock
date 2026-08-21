@@ -1009,6 +1009,7 @@ dependencies = [
  "ferrobox-ports",
  "flate2",
  "hex",
+ "hmac 0.12.1",
  "password-hash",
  "rand 0.8.7",
  "serde",

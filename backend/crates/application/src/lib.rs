@@ -68,6 +68,9 @@ pub mod manage_users;
 /// Casos de uso: grupos de usuarios y acceso a repositorios.
 pub mod manage_groups;
 
+/// Casos de uso: avisos HTTP por repositorio.
+pub mod webhooks;
+
 /// Caso de uso: resolver un secreto Bearer a un principal autenticado.
 pub mod authenticate_token;
 

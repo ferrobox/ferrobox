@@ -438,7 +438,7 @@ pub(crate) fn notify_assay(
     coordinate: &PackageCoordinate,
 ) {
     if let Some(assays) = assays {
-        assays.schedule(repository_id, coordinate.clone());
+        assays.schedule_after_publish(repository_id, coordinate.clone());
     }
 }
 

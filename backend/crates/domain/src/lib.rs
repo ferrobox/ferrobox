@@ -32,6 +32,9 @@ pub mod user;
 /// La entidad `Group` y el acceso de un grupo a un repositorio.
 pub mod group;
 
+/// Aviso HTTP (`webhook`) de un repositorio.
+pub mod webhook;
+
 /// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.
 pub mod api_token;
 

@@ -131,7 +131,7 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
         InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
         InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
     };
@@ -208,7 +208,7 @@ mod tests {
                 package_index_store.clone(),
                 repository_store.clone(),
                 storage.clone(),
-                http_client,
+                http_client.clone(),
             ),
             retention: RetentionService::new(
                 repository_store.clone(),
@@ -240,6 +240,12 @@ mod tests {
                 user_store.clone(),
                 repository_store.clone(),
             ),
+            webhooks: ferrobox_application::webhooks::WebhookService::new(
+                Arc::new(InMemoryWebhookStore::default()),
+                http_client.clone(),
+                repository_store.clone(),
+            ),
+
         });
 
         let developer = state

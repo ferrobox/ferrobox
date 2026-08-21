@@ -23,6 +23,9 @@ pub mod user_store;
 /// El puerto de persistencia de grupos y su acceso a repositorios.
 pub mod group_store;
 
+/// El puerto de persistencia de avisos HTTP y sus envíos.
+pub mod webhook_store;
+
 /// El puerto de persistencia de la entidad `ApiToken`.
 pub mod api_token_store;
 

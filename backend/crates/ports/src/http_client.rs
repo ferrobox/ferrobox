@@ -99,5 +99,31 @@ pub trait HttpClient: Send + Sync {
         url: &str,
         body: Bytes,
         content_type: &str,
+    ) -> Result<HttpResponse, HttpClientError> {
+        let response = self
+            .post_with_headers(url, body, &[("content-type", content_type)])
+            .await?;
+        if response.is_success() {
+            Ok(response)
+        } else {
+            Err(HttpClientError::Status {
+                status: response.status,
+                url: url.to_string(),
+            })
+        }
+    }
+
+    /// `POST` con cabeceras extra. Como [`get_with_headers`], devuelve
+    /// el cuerpo también fuera de 2xx: hace falta para registrar el
+    /// resultado de un aviso HTTP. Solo falla de transporte.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`HttpClientError::Transport`] si la red o TLS fallan.
+    async fn post_with_headers(
+        &self,
+        url: &str,
+        body: Bytes,
+        headers: &[(&str, &str)],
     ) -> Result<HttpResponse, HttpClientError>;
 }

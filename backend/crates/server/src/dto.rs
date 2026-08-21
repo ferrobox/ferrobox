@@ -889,3 +889,118 @@ pub(crate) struct PromotePackageResponse {
     #[ts(type = "number")]
     pub(crate) bytes_copied: u64,
 }
+
+/// Evento de un aviso HTTP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) enum WebhookEventDto {
+    /// Ensaye terminado.
+    #[serde(rename = "assay.completed")]
+    AssayCompleted,
+    /// Versión publicada o cacheada.
+    #[serde(rename = "package.published")]
+    PackagePublished,
+}
+
+impl From<ferrobox_domain::webhook::WebhookEvent> for WebhookEventDto {
+    fn from(event: ferrobox_domain::webhook::WebhookEvent) -> Self {
+        match event {
+            ferrobox_domain::webhook::WebhookEvent::AssayCompleted => Self::AssayCompleted,
+            ferrobox_domain::webhook::WebhookEvent::PackagePublished => Self::PackagePublished,
+        }
+    }
+}
+
+impl From<WebhookEventDto> for ferrobox_domain::webhook::WebhookEvent {
+    fn from(event: WebhookEventDto) -> Self {
+        match event {
+            WebhookEventDto::AssayCompleted => Self::AssayCompleted,
+            WebhookEventDto::PackagePublished => Self::PackagePublished,
+        }
+    }
+}
+
+/// Aviso HTTP de un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct WebhookResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) url: String,
+    /// `true` si hay un secreto HMAC configurado. El valor nunca se
+    /// devuelve.
+    pub(crate) has_secret: bool,
+    pub(crate) events: Vec<WebhookEventDto>,
+    pub(crate) enabled: bool,
+}
+
+impl From<&ferrobox_domain::webhook::Webhook> for WebhookResponse {
+    fn from(webhook: &ferrobox_domain::webhook::Webhook) -> Self {
+        Self {
+            id: webhook.id().to_string(),
+            name: webhook.name().to_string(),
+            url: webhook.url().to_string(),
+            has_secret: webhook.secret().is_some(),
+            events: webhook.events().iter().copied().map(WebhookEventDto::from).collect(),
+            enabled: webhook.enabled(),
+        }
+    }
+}
+
+/// Envío de un aviso HTTP.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct WebhookDeliveryResponse {
+    pub(crate) id: String,
+    pub(crate) event: String,
+    pub(crate) status: String,
+    #[ts(type = "number | null")]
+    pub(crate) http_status: Option<u16>,
+    pub(crate) error: Option<String>,
+    pub(crate) created_at: String,
+}
+
+impl From<&ferrobox_domain::webhook::WebhookDelivery> for WebhookDeliveryResponse {
+    fn from(delivery: &ferrobox_domain::webhook::WebhookDelivery) -> Self {
+        Self {
+            id: delivery.id().to_string(),
+            event: delivery.event().to_string(),
+            status: delivery.status().as_str().to_string(),
+            http_status: delivery.http_status(),
+            error: delivery.error().map(str::to_string),
+            created_at: delivery.created_at().to_string(),
+        }
+    }
+}
+
+/// Cuerpo para crear un aviso HTTP.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateWebhookRequest {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) secret: Option<String>,
+    pub(crate) events: Vec<WebhookEventDto>,
+    #[serde(default = "default_enabled")]
+    pub(crate) enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+/// Cuerpo para actualizar un aviso HTTP.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct UpdateWebhookRequest {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    /// Ausente: conserva el secreto. Cadena vacía: lo borra.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) secret: Option<String>,
+    pub(crate) events: Vec<WebhookEventDto>,
+    pub(crate) enabled: bool,
+}
