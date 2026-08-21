@@ -21,6 +21,9 @@ pub mod update_alloy_members;
 /// Caso de uso: publicar un artefacto en un repositorio existente.
 pub mod publish_artifact;
 
+/// Caso de uso: copiar una versión publicada de un Forge a otro Forge.
+pub mod promote_package;
+
 /// Caso de uso: eliminar un repositorio y todo su contenido.
 pub mod delete_repository;
 

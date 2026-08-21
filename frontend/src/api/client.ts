@@ -14,6 +14,8 @@ import type { ErrorResponse } from "@/api/generated/ErrorResponse";
 import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
+import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
+import type { PromotePackageResponse } from "@/api/generated/PromotePackageResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
@@ -222,6 +224,16 @@ export function listRepositoryArtifacts(repositoryId: string): Promise<ArtifactR
 export function deleteArtifact(repositoryId: string, artifactId: string): Promise<void> {
   return request<void>(`/repositories/${repositoryId}/artifacts/${artifactId}`, {
     method: "DELETE",
+  });
+}
+
+export function promotePackage(
+  repositoryId: string,
+  payload: PromotePackageRequest,
+): Promise<PromotePackageResponse> {
+  return request<PromotePackageResponse>(`/repositories/${repositoryId}/promote`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

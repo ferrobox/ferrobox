@@ -850,3 +850,42 @@ pub(crate) struct RepositoryAccessGrantRequest {
 pub(crate) struct SetRepositoryAccessRequest {
     pub(crate) grants: Vec<RepositoryAccessGrantRequest>,
 }
+
+/// Cuerpo de la petición para copiar una versión de un Forge a otro.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct PromotePackageRequest {
+    /// Identificador del Forge destino, del mismo ecosistema.
+    pub(crate) target_repository_id: String,
+    /// Nombre del paquete. Obligatorio salvo en repositorios genéricos.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) name: Option<String>,
+    /// Versión, etiqueta OCI o referencia Conan (`0.1@_/_`).
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) version: Option<String>,
+    /// Identificador del binario, para repositorios genéricos.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) artifact_id: Option<String>,
+    /// Si es `true`, la copia conserva el yank del origen.
+    #[serde(default)]
+    pub(crate) preserve_yanked: bool,
+}
+
+/// Resultado de copiar una versión a otro Forge.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct PromotePackageResponse {
+    /// Nombre copiado, si el ecosistema indexa por coordenada.
+    pub(crate) name: Option<String>,
+    /// Versión copiada.
+    pub(crate) version: Option<String>,
+    /// Binarios nuevos creados en el destino.
+    #[ts(type = "number")]
+    pub(crate) artifacts_copied: u32,
+    /// Bytes escritos en el destino.
+    #[ts(type = "number")]
+    pub(crate) bytes_copied: u64,
+}

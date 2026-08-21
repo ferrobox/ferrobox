@@ -23,6 +23,7 @@ import { useDeleteArtifact, useRepositoryArtifacts, useRepositoryAssays, useSetY
 import { AssayDialog } from "@/components/assay/AssayDialog";
 import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
+import { PromotePackageDialog } from "@/components/repository/PromotePackageDialog";
 import type { RepositoryStorageKind } from "@/components/repository/RepositoryKindBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -360,6 +361,7 @@ export function ArtifactsTable({
                   <VersionRows
                     key={bucket.key}
                     bucket={bucket}
+                    sourceRepositoryId={repositoryId}
                     kind={kind}
                     ecosystem={ecosystem}
                     memberNames={memberNames}
@@ -409,6 +411,7 @@ export function ArtifactsTable({
 
 function VersionRows({
   bucket,
+  sourceRepositoryId,
   kind,
   ecosystem,
   memberNames,
@@ -423,6 +426,7 @@ function VersionRows({
   onAssay,
 }: {
   bucket: VersionBucket;
+  sourceRepositoryId: string;
   kind: RepositoryStorageKind;
   ecosystem: PackageEcosystemDto;
   memberNames: Readonly<Record<string, string>>;
@@ -513,6 +517,16 @@ function VersionRows({
               <FlaskConical />
               Assay
             </Button>
+          ) : null}
+          {kind === "forge" ? (
+            <PromotePackageDialog
+              sourceRepositoryId={sourceRepositoryId}
+              ecosystem={ecosystem}
+              artifact={representative}
+              versionLabel={
+                bucket.version ? versionLabel(bucket.version, ecosystem) : representative.id
+              }
+            />
           ) : null}
           {canYank && representative.name && representative.version ? (
             <Button

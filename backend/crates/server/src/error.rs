@@ -19,6 +19,7 @@ use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
 use ferrobox_application::packaging::PackagingError;
+use ferrobox_application::promote_package::PromoteError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
@@ -103,6 +104,28 @@ impl From<PublishArtifactError> for ApiError {
             PublishArtifactError::ReadOnlyRepository => Self::BadRequest(err.to_string()),
             PublishArtifactError::Quota(inner) => inner.into(),
             other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<PromoteError> for ApiError {
+    fn from(err: PromoteError) -> Self {
+        match err {
+            PromoteError::SourceNotFound(_)
+            | PromoteError::TargetNotFound(_)
+            | PromoteError::ArtifactNotFound(_) => Self::NotFound(err.to_string()),
+            PromoteError::SameRepository
+            | PromoteError::SourceNotForge(_)
+            | PromoteError::TargetNotForge(_)
+            | PromoteError::EcosystemMismatch { .. }
+            | PromoteError::MissingCoordinate
+            | PromoteError::MissingArtifact
+            | PromoteError::ArtifactRepositoryMismatch(_) => Self::BadRequest(err.to_string()),
+            PromoteError::Quota(inner) => inner.into(),
+            PromoteError::Packaging(inner) => inner.into(),
+            PromoteError::Repository(_)
+            | PromoteError::Artifact(_)
+            | PromoteError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
 }

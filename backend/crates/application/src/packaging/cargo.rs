@@ -27,7 +27,8 @@ use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ensure_quota, notify_assay, PackageSearchHit, PackagingError, PackagingStrategy, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
+    PackagingStrategy, PromoteOutcome, PublishOutcome,
 };
 use crate::assay::AssayService;
 use crate::quota::QuotaService;
@@ -519,6 +520,65 @@ impl PackagingStrategy for CargoPackagingStrategy {
         self.download_one(repository, coordinate).await
     }
 
+    async fn promote_version(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        coordinate: &PackageCoordinate,
+        preserve_yanked: bool,
+    ) -> Result<PromoteOutcome, PackagingError> {
+        Self::ensure_cargo_repository(source)?;
+        Self::ensure_cargo_repository(target)?;
+        if Self::is_read_only(target) {
+            return Err(PackagingError::ReadOnlyRepository);
+        }
+
+        let mut entry = self
+            .find_local_index_entry(source, coordinate)
+            .await?
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        let source_artifact_id = self
+            .package_index_store
+            .artifact_for(source.id(), coordinate)
+            .await?
+            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+
+        if self
+            .package_index_store
+            .artifact_for(target.id(), coordinate)
+            .await?
+            .is_some()
+        {
+            return Err(PackagingError::AlreadyPublished(coordinate.clone()));
+        }
+
+        if !preserve_yanked {
+            entry.yanked = false;
+        }
+
+        let (artifact_id, bytes_copied) = copy_stored_artifact(
+            self.artifact_store.as_ref(),
+            self.storage.as_ref(),
+            self.quota.as_ref(),
+            source_artifact_id,
+            target.id(),
+        )
+        .await?;
+        let entry_bytes = Bytes::from(
+            serde_json::to_vec(&entry).expect("an IndexEntry always serializes to valid JSON"),
+        );
+        self.package_index_store
+            .upsert_entry(target.id(), coordinate, Some(artifact_id), entry_bytes)
+            .await?;
+        notify_assay(self.assays.as_ref(), target.id(), coordinate);
+
+        Ok(PromoteOutcome {
+            coordinate: coordinate.clone(),
+            artifacts_copied: 1,
+            bytes_copied,
+        })
+    }
+
     async fn set_yanked(
         &self,
         repository: &Repository,
@@ -904,6 +964,51 @@ mod tests {
 
         assert_eq!(coordinate.name().as_str(), "ferrobox-cli");
         assert_eq!(coordinate.version().as_str(), "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn promote_copies_crate_bytes_and_clears_yank() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let strategy = CargoPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
+        let source = cargo_repository("crates-dev");
+        let target = cargo_repository("crates-prod");
+        let payload =
+            encode_publish_payload(&minimal_metadata("ferrobox-cli", "0.1.0"), b"crate-bytes");
+        let coordinate = strategy.publish(&source, payload).await.unwrap();
+        strategy
+            .set_yanked(&source, &coordinate, true)
+            .await
+            .unwrap();
+
+        let outcome = strategy
+            .promote_version(&source, &target, &coordinate, false)
+            .await
+            .unwrap();
+        assert_eq!(outcome.artifacts_copied, 1);
+        assert_eq!(outcome.bytes_copied, 11);
+
+        let downloaded = strategy.download(&target, &coordinate).await.unwrap();
+        assert_eq!(downloaded.as_ref(), b"crate-bytes");
+        let entry = strategy
+            .find_local_index_entry(&target, &coordinate)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!entry.yanked);
+
+        let again = strategy
+            .promote_version(&source, &target, &coordinate, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(again, PackagingError::AlreadyPublished(_)));
     }
 
     #[tokio::test]
