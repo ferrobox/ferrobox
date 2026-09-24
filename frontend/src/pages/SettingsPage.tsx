@@ -1,14 +1,16 @@
 import { type FormEvent, useState } from "react";
-import { Check, Copy, KeyRound } from "lucide-react";
+import { AlertCircle, Check, Copy, KeyRound, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useChangePassword, useSettings } from "@/api/queries";
+import { useChangePassword, useMyGroups, useSettings } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { PASSWORD_POLICY_HINT, passwordMeetsPolicy } from "@/auth/passwordPolicy";
-import { roleLabel } from "@/auth/roles";
+import { canManageUsers, roleLabel } from "@/auth/roles";
 import { GarbageCollectionCard } from "@/components/cleanup/GarbageCollectionCard";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -193,8 +195,91 @@ export function SettingsPage() {
             )}
           </CardContent>
         </Card>
+        <div className="lg:col-span-2">
+          <MembershipsCard />
+        </div>
         <GarbageCollectionCard />
       </div>
     </div>
+  );
+}
+
+function MembershipsCard() {
+  const { user } = useAuth();
+  const { data, isPending, isError, error, refetch, isFetching } = useMyGroups();
+  const admin = canManageUsers(user?.role);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Grupos</CardTitle>
+        <CardDescription>
+          Los grupos a los que perteneces determinan qué repositorios ves.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isPending ? (
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-2/3 rounded-md" />
+          </div>
+        ) : null}
+
+        {isError ? (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>No se pudieron cargar tus grupos</AlertTitle>
+            <AlertDescription className="flex items-center justify-between gap-4">
+              <span>{error.message}</span>
+              <Button size="sm" variant="outline" onClick={() => void refetch()}>
+                <RefreshCw className={isFetching ? "animate-spin" : ""} />
+                Reintentar
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {data && data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {admin
+              ? "No perteneces a ningún grupo. Como Admin ves todos los repositorios."
+              : "No perteneces a ningún grupo. Ves los repositorios que no están restringidos, según tu rol de instancia."}
+          </p>
+        ) : null}
+
+        {data && data.length > 0 ? (
+          <ul className="space-y-3">
+            {data.map((group) => (
+              <li key={group.id} className="rounded-md border border-border px-3 py-2">
+                <p className="font-medium text-foreground">{group.name}</p>
+                {group.repositories.length === 0 ? (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Este grupo aún no tiene repositorios asignados.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-1">
+                    {group.repositories.map((grant) => (
+                      <li
+                        key={grant.repository_id}
+                        className="flex items-center justify-between gap-2 text-sm"
+                      >
+                        <span className="min-w-0 truncate">{grant.repository_name}</span>
+                        <Badge variant="outline">{roleLabel(grant.role)}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {admin ? (
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/groups">Gestionar grupos</Link>
+          </Button>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

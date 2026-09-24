@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use ferrobox_application::manage_groups::{GroupDetail, GroupSummary};
+use ferrobox_application::manage_groups::{GroupDetail, GroupMembership, GroupSummary};
 use ferrobox_domain::group::GroupName;
 use ferrobox_domain::ids::{GroupId, RepositoryId, UserId};
 use uuid::Uuid;
@@ -15,8 +15,8 @@ use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_manage_groups;
 use crate::dto::{
     CreateGroupRequest, GroupDetailResponse, GroupRepositoryGrantResponse, GroupSummaryResponse,
-    RepositoryAccessGrantResponse, SetGroupMembersRequest, SetGroupRepositoriesRequest,
-    SetRepositoryAccessRequest, UserResponse,
+    MyGroupMembershipResponse, RepositoryAccessGrantResponse, SetGroupMembersRequest,
+    SetGroupRepositoriesRequest, SetRepositoryAccessRequest, UserResponse,
 };
 use crate::error::ApiError;
 
@@ -27,6 +27,26 @@ impl From<&GroupSummary> for GroupSummaryResponse {
             name: summary.group.name().to_string(),
             member_count: summary.member_count,
             repository_count: summary.repository_count,
+            member_names: summary.member_names.clone(),
+            repository_names: summary.repository_names.clone(),
+        }
+    }
+}
+
+impl From<&GroupMembership> for MyGroupMembershipResponse {
+    fn from(membership: &GroupMembership) -> Self {
+        Self {
+            id: membership.group.id().to_string(),
+            name: membership.group.name().to_string(),
+            repositories: membership
+                .repositories
+                .iter()
+                .map(|(repository, role)| GroupRepositoryGrantResponse {
+                    repository_id: repository.id().to_string(),
+                    repository_name: repository.name().to_string(),
+                    role: (*role).into(),
+                })
+                .collect(),
         }
     }
 }
@@ -75,6 +95,8 @@ pub(crate) async fn create_group(
             name: group.name().to_string(),
             member_count: 0,
             repository_count: 0,
+            member_names: Vec::new(),
+            repository_names: Vec::new(),
         }),
     ))
 }
@@ -87,6 +109,19 @@ pub(crate) async fn get_group(
     require_manage_groups(&user)?;
     let detail = state.groups.get(GroupId::from(group_id)).await?;
     Ok(Json(GroupDetailResponse::from(&detail)))
+}
+
+pub(crate) async fn my_groups(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+) -> Result<Json<Vec<MyGroupMembershipResponse>>, ApiError> {
+    let memberships = state.groups.memberships_for(user.id()).await?;
+    Ok(Json(
+        memberships
+            .iter()
+            .map(MyGroupMembershipResponse::from)
+            .collect(),
+    ))
 }
 
 pub(crate) async fn delete_group(
@@ -591,5 +626,73 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn reader_lists_own_memberships_but_cannot_manage_groups() {
+        let fx = fixture().await;
+
+        let (status, created) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "POST",
+            "/groups",
+            json!({ "name": "team-a" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let group_id = created["id"].as_str().unwrap();
+
+        let (status, _) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "PUT",
+            &format!("/groups/{group_id}/members"),
+            json!({ "user_ids": [fx.reader_id] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, _) = send_json(
+            fx.app.clone(),
+            &fx.admin_token,
+            "PUT",
+            &format!("/groups/{group_id}/repositories"),
+            json!({ "grants": [{ "repository_id": fx.repo_id, "role": "developer" }] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, listed) = send(fx.app.clone(), &fx.admin_token, "GET", "/groups").await;
+        assert_eq!(status, StatusCode::OK);
+        let team = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "team-a")
+            .expect("team-a");
+        assert_eq!(team["member_names"], json!(["reader"]));
+        assert_eq!(team["repository_names"], json!(["secret-crates"]));
+
+        let (status, _) = send(fx.app.clone(), &fx.reader_token, "GET", "/groups").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, memberships) =
+            send(fx.app.clone(), &fx.reader_token, "GET", "/auth/me/groups").await;
+        assert_eq!(status, StatusCode::OK);
+        let items = memberships.as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["name"], "team-a");
+        assert_eq!(items[0]["repositories"][0]["repository_name"], "secret-crates");
+        assert_eq!(items[0]["repositories"][0]["role"], "developer");
+        assert!(items[0].get("members").is_none());
+    }
+
+    #[tokio::test]
+    async fn user_without_groups_sees_empty_memberships() {
+        let fx = fixture().await;
+        let (status, memberships) = send(fx.app, &fx.reader_token, "GET", "/auth/me/groups").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(memberships, json!([]));
     }
 }

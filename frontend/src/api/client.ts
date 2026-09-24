@@ -30,6 +30,7 @@ import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleReques
 import type { UserResponse } from "@/api/generated/UserResponse";
 import type { GroupSummaryResponse } from "@/api/generated/GroupSummaryResponse";
 import type { GroupDetailResponse } from "@/api/generated/GroupDetailResponse";
+import type { MyGroupMembershipResponse } from "@/api/generated/MyGroupMembershipResponse";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
 import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
@@ -516,6 +517,10 @@ export function dryRunGarbageCollection(): Promise<CleanupPreviewResponse> {
 
 export function collectGarbageAll(): Promise<CleanupPreviewResponse> {
   return request<CleanupPreviewResponse>("/gc", { method: "POST" });
+}
+
+export function listMyGroups(): Promise<MyGroupMembershipResponse[]> {
+  return request<MyGroupMembershipResponse[]>("/auth/me/groups");
 }
 
 export function listGroups(): Promise<GroupSummaryResponse[]> {

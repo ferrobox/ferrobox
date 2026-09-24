@@ -19,6 +19,10 @@ pub struct GroupSummary {
     pub member_count: usize,
     /// Número de repositorios asignados.
     pub repository_count: usize,
+    /// Nombres de usuario de los miembros, ordenados.
+    pub member_names: Vec<String>,
+    /// Nombres de los repositorios asignados, ordenados.
+    pub repository_names: Vec<String>,
 }
 
 /// Detalle de un grupo: miembros y repositorios.
@@ -29,6 +33,16 @@ pub struct GroupDetail {
     /// Usuarios miembros.
     pub members: Vec<User>,
     /// Repositorios asignados, con el rol del grupo en cada uno.
+    pub repositories: Vec<(Repository, Role)>,
+}
+
+/// Grupo al que pertenece un usuario, con los repositorios que le
+/// concede. No incluye el resto de miembros.
+#[derive(Debug, Clone)]
+pub struct GroupMembership {
+    /// El grupo.
+    pub group: Group,
+    /// Repositorios asignados a este grupo, con el rol concedido.
     pub repositories: Vec<(Repository, Role)>,
 }
 
@@ -130,7 +144,7 @@ impl GroupService {
         Ok(group)
     }
 
-    /// Lista grupos con recuentos.
+    /// Lista grupos con recuentos y nombres de miembros y repositorios.
     ///
     /// # Errors
     ///
@@ -139,15 +153,45 @@ impl GroupService {
         let groups = self.group_store.find_all().await?;
         let mut summaries = Vec::with_capacity(groups.len());
         for group in groups {
-            let member_count = self.group_store.members(group.id()).await?.len();
-            let repository_count = self.group_store.grants_for_group(group.id()).await?.len();
+            let member_names = self.member_names(group.id()).await?;
+            let repository_names = self.repository_names(group.id()).await?;
             summaries.push(GroupSummary {
+                member_count: member_names.len(),
+                repository_count: repository_names.len(),
+                member_names,
+                repository_names,
                 group,
-                member_count,
-                repository_count,
             });
         }
         Ok(summaries)
+    }
+
+    /// Grupos a los que pertenece `user_id`, con los repositorios que
+    /// esos grupos conceden. No incluye el resto de miembros.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupError`] si falla un puerto.
+    pub async fn memberships_for(
+        &self,
+        user_id: UserId,
+    ) -> Result<Vec<GroupMembership>, GroupError> {
+        let group_ids = self.group_store.groups_for_user(user_id).await?;
+        let mut memberships = Vec::with_capacity(group_ids.len());
+        for group_id in group_ids {
+            let Some(group) = self.group_store.find_by_id(group_id).await? else {
+                continue;
+            };
+            let repositories = self.granted_repositories(group_id).await?;
+            memberships.push(GroupMembership {
+                group,
+                repositories,
+            });
+        }
+        memberships.sort_by(|left, right| {
+            left.group.name().as_str().cmp(right.group.name().as_str())
+        });
+        Ok(memberships)
     }
 
     /// Detalle de un grupo.
@@ -170,15 +214,7 @@ impl GroupService {
         }
         members.sort_by(|a, b| a.username().as_str().cmp(b.username().as_str()));
 
-        let grants = self.group_store.grants_for_group(id).await?;
-        let mut repositories = Vec::with_capacity(grants.len());
-        for grant in grants {
-            if let Some(repository) = self.repository_store.find_by_id(grant.repository_id).await?
-            {
-                repositories.push((repository, grant.role));
-            }
-        }
-        repositories.sort_by(|a, b| a.0.name().as_str().cmp(b.0.name().as_str()));
+        let repositories = self.granted_repositories(id).await?;
 
         Ok(GroupDetail {
             group,
@@ -387,6 +423,43 @@ impl GroupService {
 
     async fn belongs_to_any_group(&self, user_id: UserId) -> Result<bool, GroupError> {
         Ok(!self.group_store.groups_for_user(user_id).await?.is_empty())
+    }
+
+    async fn member_names(&self, group_id: GroupId) -> Result<Vec<String>, GroupError> {
+        let member_ids = self.group_store.members(group_id).await?;
+        let mut names = Vec::with_capacity(member_ids.len());
+        for user_id in member_ids {
+            if let Some(user) = self.user_store.find_by_id(user_id).await? {
+                names.push(user.username().to_string());
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    async fn repository_names(&self, group_id: GroupId) -> Result<Vec<String>, GroupError> {
+        Ok(self
+            .granted_repositories(group_id)
+            .await?
+            .into_iter()
+            .map(|(repository, _)| repository.name().to_string())
+            .collect())
+    }
+
+    async fn granted_repositories(
+        &self,
+        group_id: GroupId,
+    ) -> Result<Vec<(Repository, Role)>, GroupError> {
+        let grants = self.group_store.grants_for_group(group_id).await?;
+        let mut repositories = Vec::with_capacity(grants.len());
+        for grant in grants {
+            if let Some(repository) = self.repository_store.find_by_id(grant.repository_id).await?
+            {
+                repositories.push((repository, grant.role));
+            }
+        }
+        repositories.sort_by(|left, right| left.0.name().as_str().cmp(right.0.name().as_str()));
+        Ok(repositories)
     }
 
     async fn ensure_group(&self, id: GroupId) -> Result<Group, GroupError> {
@@ -628,5 +701,52 @@ mod tests {
             service.access_on(&developer, other.id()).await.unwrap(),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn memberships_for_lists_only_the_users_groups_and_grants() {
+        let (service, admin, reader, repo, repos) = seeded().await;
+        let other = forge("other-repo");
+        repos.save(&other).await.unwrap();
+
+        let team = service
+            .create(GroupName::parse("team-a").unwrap())
+            .await
+            .unwrap();
+        let outsiders = service
+            .create(GroupName::parse("outsiders").unwrap())
+            .await
+            .unwrap();
+        service
+            .set_members(team.id(), vec![reader.id()])
+            .await
+            .unwrap();
+        service
+            .set_members(outsiders.id(), vec![admin.id()])
+            .await
+            .unwrap();
+        service
+            .set_group_repositories(team.id(), vec![(repo.id(), Role::Developer)])
+            .await
+            .unwrap();
+        service
+            .set_group_repositories(outsiders.id(), vec![(other.id(), Role::Reader)])
+            .await
+            .unwrap();
+
+        let memberships = service.memberships_for(reader.id()).await.unwrap();
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].group.id(), team.id());
+        assert_eq!(memberships[0].repositories.len(), 1);
+        assert_eq!(memberships[0].repositories[0].0.id(), repo.id());
+        assert_eq!(memberships[0].repositories[0].1, Role::Developer);
+
+        let listed = service.list().await.unwrap();
+        let team_summary = listed
+            .iter()
+            .find(|summary| summary.group.id() == team.id())
+            .expect("team-a");
+        assert_eq!(team_summary.member_names, vec!["reader".to_string()]);
+        assert_eq!(team_summary.repository_names, vec!["crates".to_string()]);
     }
 }

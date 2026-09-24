@@ -777,6 +777,22 @@ pub(crate) struct GroupSummaryResponse {
     pub(crate) member_count: usize,
     #[ts(type = "number")]
     pub(crate) repository_count: usize,
+    /// Nombres de usuario de los miembros, ordenados.
+    pub(crate) member_names: Vec<String>,
+    /// Nombres de los repositorios asignados, ordenados.
+    pub(crate) repository_names: Vec<String>,
+}
+
+/// Grupo al que pertenece el usuario autenticado.
+///
+/// No incluye el resto de miembros: eso solo lo ve un administrador
+/// en la ficha del grupo.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct MyGroupMembershipResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) repositories: Vec<GroupRepositoryGrantResponse>,
 }
 
 /// Repositorio asignado a un grupo, con el rol en ese repositorio.
