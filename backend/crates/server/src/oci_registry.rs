@@ -3,12 +3,14 @@
 //! Referencia: <https://github.com/opencontainers/distribution-spec>.
 //!
 //! Las lecturas de manifiestos, blobs y etiquetas son públicas. `GET /v2/`
-//! responde 200 sin desafío: Helm/ORAS (3.18+) hace ping sin credenciales y,
-//! si recibe 401, cachea el token anónimo de `/v2/token` y lo reutiliza en
-//! `helm push` sin reintentar. Las escrituras (subida de blobs y
-//! manifiestos, yank) exigen un token de API (`Bearer`, `Token` o Basic)
-//! y rol de escritura. Un `scope` con `push` en `/v2/token` no emite el
-//! token anónimo.
+//! desafía a Docker (`401` + Bearer): el motor (overlay2) decide si el
+//! registro pide auth solo con ese ping; un `200` hace que el push salga
+//! sin `Authorization` y muera con `missing Authorization credentials`.
+//! Helm/ORAS (3.18+) son la excepción: si el ping es 401 cachean el token
+//! anónimo de `/v2/token` y lo reutilizan en `helm push` sin reintentar.
+//! Las escrituras (subida de blobs y manifiestos, yank) exigen un token
+//! de API (`Bearer`, `Token` o Basic) y rol de escritura. Un `scope` con
+//! `push` en `/v2/token` no emite el token anónimo.
 //!
 //! El registro vive en la raíz del host (`/v2/`). El primer componente
 //! del nombre de imagen es el UUID del repositorio `FerroBox`; el resto
@@ -24,6 +26,7 @@ use std::sync::{Mutex, OnceLock};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use ferrobox_application::packaging::PackagingStrategy;
@@ -39,7 +42,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::{
     AuthenticatedUser, OCI_ANONYMOUS_TOKEN, extract_bearer_token, oci_bearer_challenge,
-    oci_realm_base,
+    oci_realm_base, oci_unauthorized_response,
 };
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
@@ -296,8 +299,29 @@ async fn dispatch_write(
     }
 }
 
-async fn version_check() -> (StatusCode, HeaderMap, Bytes) {
-    oci_json(StatusCode::OK, b"{}")
+async fn version_check(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if oci_client_skips_version_challenge(&headers) || extract_bearer_token(&headers).is_some() {
+        let (status, response_headers, body) = oci_json(StatusCode::OK, b"{}");
+        return (status, response_headers, body).into_response();
+    }
+    oci_unauthorized_response(
+        &state.public_base_url,
+        &headers,
+        "/v2/",
+        "authentication required",
+    )
+}
+
+/// Helm/ORAS cachean el token anónimo tras un ping 401 y no reintentan
+/// en el push. Docker (overlay2) solo adjunta credenciales si el ping
+/// ya dejó un desafío Bearer.
+fn oci_client_skips_version_challenge(headers: &HeaderMap) -> bool {
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let user_agent = user_agent.to_ascii_lowercase();
+    user_agent.contains("helm") || user_agent.contains("oras")
 }
 
 async fn issue_token(
@@ -1180,7 +1204,11 @@ mod tests {
         let fx = fixture().await;
         let (status, headers, body) = send(
             fx.app,
-            Request::builder().uri("/v2/").body(Body::empty()).unwrap(),
+            Request::builder()
+                .uri("/v2/")
+                .header("User-Agent", "oras/1.2.0+Helm")
+                .body(Body::empty())
+                .unwrap(),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1190,6 +1218,50 @@ mod tests {
             headers.get("docker-distribution-api-version").unwrap(),
             "registry/2.0"
         );
+    }
+
+    #[tokio::test]
+    async fn version_check_challenges_docker_so_push_sends_authorization() {
+        let fx = fixture().await;
+        let (status, headers, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri("/v2/")
+                .header(
+                    "User-Agent",
+                    "docker/27.0.3 go/go1.22.5 git-commit/deadbeef kernel/6.8.0 os/linux arch/amd64",
+                )
+                .header("Host", "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenge = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            challenge.contains(r#"realm="http://127.0.0.1:3000/v2/token""#),
+            "{challenge}"
+        );
+        assert!(challenge.contains(r#"service="ferrobox""#), "{challenge}");
+        assert!(!challenge.contains("scope="), "{challenge}");
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri("/v2/")
+                .header("User-Agent", "docker/27.0.3")
+                .header("Authorization", "Bearer anonymous")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_ref(), b"{}");
     }
 
     #[tokio::test]
