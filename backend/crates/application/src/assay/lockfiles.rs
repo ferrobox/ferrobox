@@ -15,6 +15,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use super::extract::{is_exact_version, merge_component, purl_for};
+use super::licenses;
 use crate::storage_key::storage_key_for;
 
 const MAX_LOCKFILE_BYTES: u64 = 8 * 1024 * 1024;
@@ -108,6 +109,7 @@ fn append_from_archive(
             };
             merge_component(components, name, version, kind, purl);
         }
+        apply_manifest_licenses(&path, &text, components);
     }
 }
 
@@ -142,7 +144,7 @@ fn is_metadata_path(path: &str) -> bool {
 }
 
 fn is_lockfile_path(path: &str) -> bool {
-    if path.contains("node_modules/") {
+    if path.contains("node_modules/") || path.contains("target/") {
         return false;
     }
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -160,6 +162,8 @@ fn is_lockfile_path(path: &str) -> bool {
             | "requirements.lock"
             | "METADATA"
             | "PKG-INFO"
+            | "package.json"
+            | "Cargo.toml"
     )
 }
 
@@ -449,6 +453,27 @@ fn parse_requirements(text: &str) -> Vec<(String, String)> {
     deps
 }
 
+fn apply_manifest_licenses(path: &str, text: &str, components: &mut [AssayComponent]) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    match name {
+        "package.json" => {
+            if let Ok(value) = serde_json::from_str::<Value>(text) {
+                let pkg_name = value.get("name").and_then(Value::as_str);
+                licenses::attach(components, pkg_name, licenses::from_npm_manifest(&value));
+            }
+        }
+        "Cargo.toml" => {
+            let (pkg_name, declared) = licenses::from_cargo_toml(text);
+            licenses::attach(components, pkg_name.as_deref(), declared);
+        }
+        "METADATA" | "PKG-INFO" => {
+            let (pkg_name, declared) = licenses::from_python_metadata(text);
+            licenses::attach(components, pkg_name.as_deref(), declared);
+        }
+        _ => {}
+    }
+}
+
 fn parse_python_metadata(text: &str) -> Vec<(String, String)> {
     let mut deps = Vec::new();
     for line in text.lines() {
@@ -639,5 +664,64 @@ mod tests {
         assert_eq!(lodash.version(), "4.17.21");
         assert_eq!(lodash.kind(), AssayComponentKind::Direct);
         assert_eq!(lodash.purl(), Some("pkg:npm/lodash@4.17.21"));
+    }
+
+    #[tokio::test]
+    async fn cargo_toml_in_the_crate_fills_root_licenses() {
+        use ferrobox_domain::ids::ArtifactId;
+        use ferrobox_domain::package_coordinate::{PackageName, PackageVersion};
+        use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+        use ferrobox_ports::package_index_store::PackageIndexStore;
+        use ferrobox_ports::storage::StoragePort;
+
+        use crate::storage_key::storage_key_for;
+        use crate::test_support::{InMemoryPackageIndexStore, InMemoryStorage};
+
+        use super::super::layers::extract_inventory;
+
+        let index = InMemoryPackageIndexStore::default();
+        let storage = InMemoryStorage::default();
+        let repository = Repository::new(
+            RepositoryName::parse("crates").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        let tarball = gzip_tar_file(
+            "smoke-avisos-0.1.0/Cargo.toml",
+            "[package]\nname = \"smoke-avisos\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\n",
+        );
+        let artifact_id = ArtifactId::new();
+        storage
+            .put(&storage_key_for(artifact_id), tarball)
+            .await
+            .unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Cargo,
+            PackageName::parse("smoke-avisos").unwrap(),
+            PackageVersion::parse("0.1.0").unwrap(),
+        );
+        let entry = Bytes::from(
+            serde_json::json!({
+                "name": "smoke-avisos",
+                "vers": "0.1.0",
+                "deps": []
+            })
+            .to_string(),
+        );
+        index
+            .upsert_entry(repository.id(), &coordinate, Some(artifact_id), entry.clone())
+            .await
+            .unwrap();
+
+        let components = extract_inventory(
+            &storage,
+            &index,
+            repository.id(),
+            &coordinate,
+            &entry,
+        )
+        .await;
+        assert_eq!(components[0].licenses(), &["MIT".to_string()]);
     }
 }

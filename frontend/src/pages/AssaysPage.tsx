@@ -22,6 +22,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+function AssayLicenseSummary({ assay }: { assay: AssayResponse }) {
+  const licenses = assay.components.flatMap((component) => component.licenses ?? []);
+  const unique = [...new Set(licenses)];
+  if (unique.length === 0) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {unique.map((license) => (
+        <Badge key={license} variant="secondary">
+          {license}
+        </Badge>
+      ))}
+    </span>
+  );
+}
+
 function statusLabel(status: string): string {
   if (status === "ready") {
     return "Listo";
@@ -48,7 +65,7 @@ export function AssaysPage() {
     <div>
       <PageHeader
         title="Assays"
-        description="Ensayes de la instancia: composición e impurezas de cada versión publicada o cacheada. Incluyen lockfiles, paquetes de distro e imágenes declaradas en Helm. Se lanzan solos al publicar o al cachear; no bloquean install ni publish."
+        description="Ensayes de la instancia: composición, licencias declaradas e impurezas de cada versión publicada o cacheada. Incluyen lockfiles, paquetes de distro e imágenes declaradas en Helm. Se lanzan solos al publicar o al cachear; no bloquean install ni publish."
         actions={
           canWrite && data && data.length > 0 ? (
             <Button
@@ -115,6 +132,7 @@ export function AssaysPage() {
                 <TableHead>Paquete</TableHead>
                 <TableHead>Repositorio</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead>Licencias</TableHead>
                 <TableHead>Hallazgos</TableHead>
                 <TableHead className="w-[1%]" />
               </TableRow>
@@ -136,6 +154,9 @@ export function AssaysPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{statusLabel(assay.status)}</Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-normal">
+                    <AssayLicenseSummary assay={assay} />
                   </TableCell>
                   <TableCell>
                     <AssayCountPills counts={assay.counts} />

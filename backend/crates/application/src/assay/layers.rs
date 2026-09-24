@@ -15,6 +15,7 @@ use tar::Archive;
 use uuid::Uuid;
 
 use super::extract::{extract_components, merge_component};
+use super::licenses;
 use super::lockfiles::append_from_stored_package;
 use crate::storage_key::storage_key_for;
 
@@ -187,6 +188,9 @@ async fn extract_conan(
         let Ok(text) = std::str::from_utf8(&body) else {
             continue;
         };
+        if file.filename.ends_with("conanfile.py") {
+            licenses::attach(&mut components, None, licenses::from_conanfile_py(text));
+        }
         let parsed = if file.filename.ends_with("conanfile.txt") {
             parse_conanfile_txt(text)
         } else if file.filename.ends_with("conanfile.py") {
@@ -385,7 +389,7 @@ fn append_os_packages(components: &mut Vec<AssayComponent>, files: &LayerFiles) 
     let distro = os_release_id(files.os_release.as_deref());
     if let Some(text) = &files.apk_installed {
         let namespace = apk_purl_namespace(&distro);
-        for (name, version) in parse_apk_installed(text) {
+        for (name, version, declared) in parse_apk_installed(text) {
             merge_component(
                 components,
                 name.clone(),
@@ -393,6 +397,7 @@ fn append_os_packages(components: &mut Vec<AssayComponent>, files: &LayerFiles) 
                 AssayComponentKind::Direct,
                 Some(format!("pkg:apk/{namespace}/{name}@{version}")),
             );
+            licenses::attach(components, Some(&name), declared);
         }
     }
     if let Some(text) = &files.dpkg_status {
@@ -420,7 +425,7 @@ fn append_os_packages(components: &mut Vec<AssayComponent>, files: &LayerFiles) 
         }
     }
     for text in &files.pacman_descs {
-        if let Some((name, version)) = parse_pacman_desc(text) {
+        if let Some((name, version, declared)) = parse_pacman_desc(text) {
             merge_component(
                 components,
                 name.clone(),
@@ -428,6 +433,7 @@ fn append_os_packages(components: &mut Vec<AssayComponent>, files: &LayerFiles) 
                 AssayComponentKind::Direct,
                 Some(format!("pkg:alpm/arch/{name}@{version}")),
             );
+            licenses::attach(components, Some(&name), declared);
         }
     }
 }
@@ -440,6 +446,7 @@ fn append_helm_chart(components: &mut Vec<AssayComponent>, files: &LayerFiles) {
     let Some(text) = text else {
         return;
     };
+    licenses::attach(components, None, licenses::from_chart_yaml(text));
     for (name, version) in parse_chart_dependencies(text) {
         merge_component(
             components,
@@ -509,21 +516,29 @@ fn os_release_id(text: Option<&str>) -> String {
     "debian".to_string()
 }
 
-fn parse_apk_installed(text: &str) -> Vec<(String, String)> {
+fn parse_apk_installed(text: &str) -> Vec<(String, String, Vec<String>)> {
     let mut name = None;
+    let mut version = None;
+    let mut declared = Vec::new();
     let mut packages = Vec::new();
     for line in text.lines() {
         if line.is_empty() {
-            name = None;
+            if let (Some(package), Some(ver)) = (name.take(), version.take()) {
+                packages.push((package, ver, std::mem::take(&mut declared)));
+            }
+            declared.clear();
             continue;
         }
         if let Some(value) = line.strip_prefix("P:") {
             name = Some(value.to_string());
-        } else if let Some(value) = line.strip_prefix("V:")
-            && let Some(package) = name.take()
-        {
-            packages.push((package, value.to_string()));
+        } else if let Some(value) = line.strip_prefix("V:") {
+            version = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("L:") {
+            declared = licenses::split_declared(value);
         }
+    }
+    if let (Some(package), Some(ver)) = (name, version) {
+        packages.push((package, ver, declared));
     }
     packages
 }
@@ -641,9 +656,10 @@ fn parse_rpm_manifest(text: &str) -> Vec<(String, String)> {
     packages
 }
 
-fn parse_pacman_desc(text: &str) -> Option<(String, String)> {
+fn parse_pacman_desc(text: &str) -> Option<(String, String, Vec<String>)> {
     let mut name = None;
     let mut version = None;
+    let mut declared = Vec::new();
     let mut section = "";
     for line in text.lines() {
         let trimmed = line.trim();
@@ -657,12 +673,13 @@ fn parse_pacman_desc(text: &str) -> Option<(String, String)> {
         match section {
             "%NAME%" => name = Some(trimmed.to_string()),
             "%VERSION%" => version = Some(trimmed.to_string()),
+            "%LICENSE%" => declared.extend(licenses::split_declared(trimmed)),
             _ => {}
         }
     }
     match (name, version) {
         (Some(name), Some(version)) if !name.is_empty() && !version.is_empty() => {
-            Some((name, version))
+            Some((name, version, declared))
         }
         _ => None,
     }
@@ -788,13 +805,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn apk_installed_parses_name_and_version() {
-        let text = "P:busybox\nV:1.36.1-r19\n\nP:musl\nV:1.2.4-r2\n";
+    fn apk_installed_parses_name_version_and_license() {
+        let text = "P:busybox\nV:1.36.1-r19\nL:GPL-2.0-only\n\nP:musl\nV:1.2.4-r2\nL:MIT\n";
         assert_eq!(
             parse_apk_installed(text),
             vec![
-                ("busybox".to_string(), "1.36.1-r19".to_string()),
-                ("musl".to_string(), "1.2.4-r2".to_string()),
+                (
+                    "busybox".to_string(),
+                    "1.36.1-r19".to_string(),
+                    vec!["GPL-2.0-only".to_string()]
+                ),
+                (
+                    "musl".to_string(),
+                    "1.2.4-r2".to_string(),
+                    vec!["MIT".to_string()]
+                ),
             ]
         );
     }
@@ -851,11 +876,15 @@ mod tests {
     }
 
     #[test]
-    fn pacman_desc_reads_name_and_version() {
-        let text = "%NAME%\nlinux\n\n%VERSION%\n6.6.1-1\n";
+    fn pacman_desc_reads_name_version_and_license() {
+        let text = "%NAME%\nlinux\n\n%VERSION%\n6.6.1-1\n\n%LICENSE%\nGPL2\n";
         assert_eq!(
             parse_pacman_desc(text),
-            Some(("linux".to_string(), "6.6.1-1".to_string()))
+            Some((
+                "linux".to_string(),
+                "6.6.1-1".to_string(),
+                vec!["GPL2".to_string()]
+            ))
         );
     }
 

@@ -5,6 +5,8 @@ use ferrobox_domain::package_coordinate::PackageEcosystem;
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::licenses;
+
 /// `true` si `spec` parece una versión concreta (`1.2.3`), no un rango.
 #[must_use]
 pub fn is_exact_version(spec: &str) -> bool {
@@ -155,8 +157,9 @@ pub(crate) fn merge_component(
             return;
         }
         let keep_kind = existing.kind();
+        let licenses = existing.licenses().to_vec();
         let purl = purl.or_else(|| existing.purl().map(ToOwned::to_owned));
-        components[index] = AssayComponent::new(name, version, purl, keep_kind);
+        components[index] = AssayComponent::new(name, version, purl, keep_kind).with_licenses(licenses);
         return;
     }
     components.push(AssayComponent::new(name, version, purl, kind));
@@ -178,8 +181,20 @@ pub fn extract_components(
     )];
 
     match ecosystem {
-        PackageEcosystem::Npm => append_npm_deps(&mut components, entry),
-        PackageEcosystem::Cargo => append_cargo_deps(&mut components, entry),
+        PackageEcosystem::Npm => {
+            append_npm_deps(&mut components, entry);
+            if let Ok(value) = serde_json::from_slice::<Value>(entry)
+                && let Some(manifest) = value.get("manifest")
+            {
+                licenses::attach(&mut components, Some(name), licenses::from_npm_manifest(manifest));
+            }
+        }
+        PackageEcosystem::Cargo => {
+            append_cargo_deps(&mut components, entry);
+            if let Ok(value) = serde_json::from_slice::<Value>(entry) {
+                licenses::attach(&mut components, Some(name), licenses::from_cargo_index(&value));
+            }
+        }
         PackageEcosystem::PyPi
         | PackageEcosystem::Generic
         | PackageEcosystem::Oci
@@ -266,6 +281,43 @@ mod tests {
         assert!(!is_exact_version("~1.2.3"));
         assert!(!is_exact_version("*"));
         assert!(!is_exact_version(">=1.0"));
+    }
+
+    #[test]
+    fn npm_extracts_declared_license_on_the_root() {
+        let entry = serde_json::json!({
+            "name": "demo",
+            "version": "1.0.0",
+            "manifest": { "license": "MIT", "dependencies": { "lodash": "4.17.20" } }
+        });
+        let components = extract_components(
+            PackageEcosystem::Npm,
+            "demo",
+            "1.0.0",
+            &serde_json::to_vec(&entry).unwrap(),
+        );
+        assert_eq!(components[0].licenses(), &["MIT".to_string()]);
+        assert!(components[1].licenses().is_empty());
+    }
+
+    #[test]
+    fn cargo_extracts_license_from_the_index_entry() {
+        let entry = serde_json::json!({
+            "name": "demo",
+            "vers": "1.0.0",
+            "license": "MIT OR Apache-2.0",
+            "deps": []
+        });
+        let components = extract_components(
+            PackageEcosystem::Cargo,
+            "demo",
+            "1.0.0",
+            &serde_json::to_vec(&entry).unwrap(),
+        );
+        assert_eq!(
+            components[0].licenses(),
+            &["MIT".to_string(), "Apache-2.0".to_string()]
+        );
     }
 
     #[test]
