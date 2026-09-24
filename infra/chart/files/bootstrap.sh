@@ -43,7 +43,7 @@ admin() {
 admin_code() {
   method="$1"
   path="$2"
-  curl -sS -o /dev/null -w "%{http_code}" -X "$method" \
+  curl -s -o /dev/null -w "%{http_code}" -X "$method" \
     -H "Authorization: Bearer ${GARAGE_ADMIN_TOKEN}" \
     "${ADMIN}${path}" || true
 }
