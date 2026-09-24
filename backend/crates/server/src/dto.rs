@@ -412,6 +412,8 @@ pub(crate) enum AssayStatusDto {
     Failed,
     /// El ecosistema todavía no admite ensaye.
     Unsupported,
+    /// Encolado o ejecutándose.
+    Running,
 }
 
 impl From<ferrobox_domain::assay::AssayStatus> for AssayStatusDto {
@@ -420,6 +422,7 @@ impl From<ferrobox_domain::assay::AssayStatus> for AssayStatusDto {
             ferrobox_domain::assay::AssayStatus::Ready => Self::Ready,
             ferrobox_domain::assay::AssayStatus::Failed => Self::Failed,
             ferrobox_domain::assay::AssayStatus::Unsupported => Self::Unsupported,
+            ferrobox_domain::assay::AssayStatus::Running => Self::Running,
         }
     }
 }

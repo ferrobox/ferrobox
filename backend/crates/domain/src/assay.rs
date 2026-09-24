@@ -13,6 +13,8 @@ pub enum AssayStatus {
     Failed,
     /// Este ecosistema todavía no admite ensaye.
     Unsupported,
+    /// Encolado o ejecutándose; el inventario previo se conserva.
+    Running,
 }
 
 impl AssayStatus {
@@ -23,6 +25,7 @@ impl AssayStatus {
             Self::Ready => "ready",
             Self::Failed => "failed",
             Self::Unsupported => "unsupported",
+            Self::Running => "running",
         }
     }
 
@@ -33,6 +36,7 @@ impl AssayStatus {
             "ready" => Some(Self::Ready),
             "failed" => Some(Self::Failed),
             "unsupported" => Some(Self::Unsupported),
+            "running" => Some(Self::Running),
             _ => None,
         }
     }
@@ -415,6 +419,16 @@ impl Assay {
         &self.findings
     }
 
+    /// Misma fila, marcada como en curso (el inventario previo se queda).
+    #[must_use]
+    pub fn mark_running(&self) -> Self {
+        Self {
+            status: AssayStatus::Running,
+            error_message: None,
+            ..self.clone()
+        }
+    }
+
     /// Recuento por severidad.
     #[must_use]
     pub fn counts(&self) -> AssayCounts {
@@ -483,8 +497,49 @@ mod tests {
     #[test]
     fn component_licenses_deduplicate_case_insensitively() {
         let mut component = AssayComponent::new("demo", "1.0.0", None, AssayComponentKind::Root);
-        component.add_licenses(["MIT".to_string(), "mit".to_string(), "Apache-2.0".to_string()]);
-        assert_eq!(component.licenses(), &["MIT".to_string(), "Apache-2.0".to_string()]);
+        component.add_licenses([
+            "MIT".to_string(),
+            "mit".to_string(),
+            "Apache-2.0".to_string(),
+        ]);
+        assert_eq!(
+            component.licenses(),
+            &["MIT".to_string(), "Apache-2.0".to_string()]
+        );
+    }
+
+    #[test]
+    fn running_roundtrips_the_stable_label() {
+        assert_eq!(AssayStatus::parse("running"), Some(AssayStatus::Running));
+        assert_eq!(AssayStatus::Running.as_str(), "running");
+    }
+
+    #[test]
+    fn mark_running_keeps_the_previous_inventory() {
+        let ready = Assay::from_parts(
+            AssayId::new(),
+            RepositoryId::new(),
+            PackageCoordinate::new(
+                PackageEcosystem::Npm,
+                PackageName::parse("lodash").unwrap(),
+                PackageVersion::parse("4.17.20").unwrap(),
+            ),
+            AssayStatus::Ready,
+            Some("2026-09-24T00:00:00Z".to_string()),
+            None,
+            vec![AssayComponent::new(
+                "lodash",
+                "4.17.20",
+                None,
+                AssayComponentKind::Root,
+            )],
+            Vec::new(),
+        );
+        let running = ready.mark_running();
+        assert_eq!(running.status(), AssayStatus::Running);
+        assert_eq!(running.components().len(), 1);
+        assert_eq!(running.scanned_at(), ready.scanned_at());
+        assert_eq!(running.error_message(), None);
     }
 
     #[test]

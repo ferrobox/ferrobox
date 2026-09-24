@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { AlertCircle, FlaskConical, RefreshCw } from "lucide-react";
+import { AlertCircle, FlaskConical, Loader2, RefreshCw } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { toast } from "sonner";
 
 import type { AssayResponse } from "@/api/generated/AssayResponse";
 import { useAssays, useRerunAllAssays, useRepositories } from "@/api/queries";
@@ -68,7 +69,17 @@ function statusLabel(status: string): string {
   if (status === "unsupported") {
     return "Aún no aplica";
   }
+  if (status === "running") {
+    return "En curso";
+  }
   return status;
+}
+
+function rerunAllMessage(scheduled: number): string {
+  if (scheduled === 1) {
+    return "1 ensaye en curso";
+  }
+  return `${scheduled} ensayes en curso`;
 }
 
 export function AssaysPage() {
@@ -79,6 +90,8 @@ export function AssaysPage() {
   const rerunAll = useRerunAllAssays();
   const names = new Map((repositories ?? []).map((repository) => [repository.id, repository.name]));
   const [openAssay, setOpenAssay] = useState<AssayResponse | null>(null);
+  const batchRunning =
+    rerunAll.isPending || (data?.some((assay) => assay.status === "running") ?? false);
 
   return (
     <div>
@@ -90,11 +103,18 @@ export function AssaysPage() {
             <Button
               type="button"
               variant="outline"
-              disabled={rerunAll.isPending}
-              onClick={() => void rerunAll.mutateAsync()}
+              disabled={batchRunning}
+              onClick={() => {
+                void rerunAll.mutateAsync().then(
+                  (result) => {
+                    toast.success(rerunAllMessage(result.scheduled));
+                  },
+                  () => undefined,
+                );
+              }}
             >
-              <RefreshCw className={rerunAll.isPending ? "animate-spin" : ""} />
-              Reensayar todos
+              <RefreshCw className={batchRunning ? "animate-spin" : ""} />
+              {batchRunning ? "Reensayando…" : "Reensayar todos"}
             </Button>
           ) : null
         }
@@ -172,7 +192,12 @@ export function AssaysPage() {
                     {names.get(assay.repository_id) ?? assay.repository_id}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{statusLabel(assay.status)}</Badge>
+                    <Badge variant="outline" className="gap-1">
+                      {assay.status === "running" ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : null}
+                      {statusLabel(assay.status)}
+                    </Badge>
                   </TableCell>
                   <TableCell className="whitespace-normal">
                     <AssayLicenseSummary assay={assay} />

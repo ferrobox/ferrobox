@@ -28,6 +28,8 @@ function statusLabel(status: AssayResponse["status"]): string {
       return "Fallido";
     case "unsupported":
       return "Aún no aplica";
+    case "running":
+      return "En curso";
     default:
       return status;
   }

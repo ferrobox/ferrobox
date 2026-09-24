@@ -240,6 +240,7 @@ impl AssayService {
             };
             for assay in assays {
                 if assay.coordinate().name().as_str() == name {
+                    let _ = service.assays.upsert(&assay.mark_running()).await;
                     let _ = service.run_on(repository_id, assay.coordinate()).await;
                 }
             }
@@ -260,6 +261,7 @@ impl AssayService {
             if !seen.insert(key) {
                 continue;
             }
+            self.assays.upsert(&assay.mark_running()).await?;
             self.schedule(assay.repository_id(), assay.coordinate().clone());
             scheduled += 1;
         }
@@ -1077,6 +1079,20 @@ mod tests {
         service.list_all().await.unwrap()
     }
 
+    async fn wait_until_not_running(service: &AssayService) -> Vec<Assay> {
+        for _ in 0..50 {
+            let assays = service.list_all().await.unwrap();
+            if assays
+                .iter()
+                .all(|assay| assay.status() != AssayStatus::Running)
+            {
+                return assays;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        service.list_all().await.unwrap()
+    }
+
     #[tokio::test]
     async fn schedule_runs_in_the_background_without_failing_the_caller() {
         let repos = Arc::new(InMemoryRepositoryStore::default());
@@ -1138,7 +1154,8 @@ mod tests {
             .unwrap();
         let scheduled = service.rerun_all().await.unwrap();
         assert_eq!(scheduled, 1);
-        let assays = wait_for_assays(&service, 1).await;
+        let assays = wait_until_not_running(&service).await;
         assert_eq!(assays.len(), 1);
+        assert_ne!(assays[0].status(), AssayStatus::Running);
     }
 }
