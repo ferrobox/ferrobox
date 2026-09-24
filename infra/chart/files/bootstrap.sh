@@ -91,13 +91,25 @@ fi
 
 KEY_CODE="$(admin_code GET "/v2/GetKeyInfo?id=${S3_ACCESS_KEY_ID}")"
 if [ "$KEY_CODE" != "200" ]; then
-  echo "Importando clave S3..."
-  admin POST /v2/ImportKey "$(
+  echo "Importando clave S3 (${S3_ACCESS_KEY_ID}, GetKeyInfo HTTP ${KEY_CODE})..."
+  KEY_BODY="$(
     jq -n \
       --arg accessKeyId "$S3_ACCESS_KEY_ID" \
       --arg secretAccessKey "$S3_SECRET_ACCESS_KEY" \
       '{accessKeyId:$accessKeyId,secretAccessKey:$secretAccessKey,name:"ferrobox"}'
-  )" >/dev/null
+  )"
+  KEY_RESP="$(mktemp)"
+  KEY_HTTP="$(
+    curl -sS -o "$KEY_RESP" -w "%{http_code}" -X POST \
+      -H "Authorization: Bearer ${GARAGE_ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$KEY_BODY" \
+      "${ADMIN}/v2/ImportKey" || true
+  )"
+  if [ "$KEY_HTTP" != "200" ]; then
+    echo "ImportKey HTTP ${KEY_HTTP}: $(cat "$KEY_RESP")" >&2
+    exit 1
+  fi
 fi
 
 BUCKET_ID=""
