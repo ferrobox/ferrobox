@@ -39,6 +39,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::{
     AuthenticatedUser, OCI_ANONYMOUS_TOKEN, extract_bearer_token, oci_bearer_challenge,
+    oci_realm_base,
 };
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
@@ -312,6 +313,7 @@ async fn issue_token(
         None if wants_push => {
             return Err(OciApiError::unauthorized(
                 &state.public_base_url,
+                &headers,
                 "/v2/token",
             ));
         }
@@ -321,7 +323,9 @@ async fn issue_token(
                 .authenticate_token
                 .execute(&secret)
                 .await
-                .map_err(|_| OciApiError::unauthorized(&state.public_base_url, "/v2/token"))?;
+                .map_err(|_| {
+                    OciApiError::unauthorized(&state.public_base_url, &headers, "/v2/token")
+                })?;
             secret
         }
     };
@@ -814,15 +818,16 @@ impl OciApiError {
         }
     }
 
-    fn unauthorized(public_base_url: &str, path: &str) -> Self {
+    fn unauthorized(public_base_url: &str, request_headers: &HeaderMap, path: &str) -> Self {
         let mut error = Self::from_code(
             StatusCode::UNAUTHORIZED,
             "UNAUTHORIZED",
             "authentication required",
         );
-        error
-            .challenges
-            .push(oci_bearer_challenge(public_base_url, path));
+        error.challenges.push(oci_bearer_challenge(
+            &oci_realm_base(public_base_url, request_headers),
+            path,
+        ));
         error
             .challenges
             .push(HeaderValue::from_static(r#"Basic realm="ferrobox""#));
@@ -1311,6 +1316,37 @@ mod tests {
             .join(",");
         assert!(challenge.contains("/v2/token"));
         assert!(challenge.contains(&format!("repository:{}/demo:pull,push", fx.repo_id)));
+    }
+
+    #[tokio::test]
+    async fn blob_upload_challenge_uses_request_host_as_token_realm() {
+        let fx = fixture().await;
+        let (status, headers, _) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v2/{}/busybox/blobs/uploads/", fx.repo_id))
+                .header("Host", "localhost:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let challenge = headers
+            .get_all("www-authenticate")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            challenge.contains(r#"realm="http://localhost:3000/v2/token""#),
+            "{challenge}"
+        );
+        assert!(
+            !challenge.contains(r#"realm="http://127.0.0.1:3000/v2/token""#),
+            "{challenge}"
+        );
+        assert!(challenge.contains(&format!("repository:{}/busybox:pull,push", fx.repo_id)));
     }
 
     #[tokio::test]
