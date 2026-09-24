@@ -7,7 +7,6 @@ metadata:
     {{- include "ferrobox.labels" . | nindent 4 }}
     app.kubernetes.io/component: garage
 spec:
-  clusterIP: None
   ports:
     - name: s3
       port: 3900
@@ -65,15 +64,17 @@ spec:
               mountPath: /var/lib/garage/meta
             - name: data
               mountPath: /var/lib/garage/data
+          # `garage status` exits 1 until the layout exists; using it as
+          # liveness restarts the process and bootstrap never sees :3903.
           readinessProbe:
-            exec:
-              command: ["/garage", "-c", "/config/garage.toml", "status"]
+            tcpSocket:
+              port: admin
             initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 5
           livenessProbe:
-            exec:
-              command: ["/garage", "-c", "/config/garage.toml", "status"]
-            initialDelaySeconds: 15
+            tcpSocket:
+              port: admin
+            initialDelaySeconds: 20
             periodSeconds: 20
       volumes:
         - name: config

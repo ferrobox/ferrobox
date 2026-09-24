@@ -48,15 +48,20 @@ admin_code() {
     "${ADMIN}${path}" || true
 }
 
-echo "Esperando a Garage..."
+echo "Esperando a Garage en ${ADMIN}..."
 i=0
-until [ "$(admin_code GET /v2/GetClusterStatus)" = "200" ]; do
+code="$(admin_code GET /v2/GetClusterStatus)"
+until [ "$code" = "200" ]; do
   i=$((i + 1))
-  if [ "$i" -gt 60 ]; then
-    echo "Garage no respondió" >&2
+  if [ "$i" -gt 180 ]; then
+    echo "Garage no respondió (último HTTP ${code}) en ${ADMIN}" >&2
     exit 1
   fi
+  if [ $((i % 15)) -eq 0 ]; then
+    echo "  aún no listo (HTTP ${code}), ${i}s..."
+  fi
   sleep 1
+  code="$(admin_code GET /v2/GetClusterStatus)"
 done
 
 STATUS="$(admin GET /v2/GetClusterStatus)"
