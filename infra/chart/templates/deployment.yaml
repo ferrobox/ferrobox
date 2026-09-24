@@ -39,7 +39,7 @@ spec:
           command: ["/bin/sh", "/bootstrap.sh"]
           env:
             - name: GARAGE_ADMIN_URL
-              value: http://{{ include "ferrobox.garageName" . }}:3903
+              value: http://{{ include "ferrobox.garagePodHost" . }}:3903
             - name: GARAGE_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:

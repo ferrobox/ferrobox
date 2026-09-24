@@ -7,8 +7,30 @@ metadata:
     {{- include "ferrobox.labels" . | nindent 4 }}
     app.kubernetes.io/component: garage
 spec:
-  # Headless: already installed this way; clusterIP is immutable.
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+    - name: rpc
+      port: 3901
+      targetPort: rpc
+    - name: admin
+      port: 3903
+      targetPort: admin
+  selector:
+    {{- include "ferrobox.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ferrobox.garageHeadlessName" . }}
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
     - name: s3
       port: 3900
@@ -31,7 +53,7 @@ metadata:
     {{- include "ferrobox.labels" . | nindent 4 }}
     app.kubernetes.io/component: garage
 spec:
-  serviceName: {{ include "ferrobox.garageName" . }}
+  serviceName: {{ include "ferrobox.garageHeadlessName" . }}
   replicas: 1
   selector:
     matchLabels:
