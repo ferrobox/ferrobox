@@ -45,6 +45,7 @@ pub(crate) fn oci_realm_base(public_base_url: &str, headers: &HeaderMap) -> Stri
             let host_matches_public =
                 public_host.is_some_and(|public_host| public_host.eq_ignore_ascii_case(&host));
             let scheme = forwarded_proto
+                .as_deref()
                 .or(if host_matches_public {
                     public_scheme
                 } else {
