@@ -27,7 +27,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, he
 use axum::routing::get;
 use axum::{Json, Router};
 use ferrobox_application::packaging::PackagingStrategy;
-use ferrobox_application::packaging::oci::DEFAULT_MANIFEST_MEDIA_TYPE;
+use ferrobox_application::packaging::oci::{DEFAULT_MANIFEST_MEDIA_TYPE, INDEX_MEDIA_TYPE};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -126,6 +126,7 @@ async fn load_distribution_repository(
 enum DistributionPath {
     Manifest { name: String, reference: String },
     Blob { name: String, digest: String },
+    Referrers { name: String, digest: String },
     Tags { name: String },
     StartUpload { name: String },
     Upload { name: String, upload_id: Uuid },
@@ -142,6 +143,19 @@ fn parse_distribution_path(rest: &str) -> Result<DistributionPath, OciApiError> 
     }
     if let Some(name) = trimmed.strip_suffix("/tags/list") {
         return require_image_name(name).map(|name| DistributionPath::Tags { name });
+    }
+    if let Some((name, digest)) = trimmed.rsplit_once("/referrers/") {
+        if digest.is_empty() {
+            return Err(OciApiError::from_code(
+                StatusCode::NOT_FOUND,
+                "MANIFEST_UNKNOWN",
+                "missing referrers digest",
+            ));
+        }
+        return require_image_name(name).map(|name| DistributionPath::Referrers {
+            name,
+            digest: digest.to_string(),
+        });
     }
     if let Some((name, reference)) = trimmed.rsplit_once("/manifests/") {
         if reference.is_empty() {
@@ -211,6 +225,7 @@ async fn dispatch_read(
     Path((repository_id, rest)): Path<(Uuid, String)>,
     method: Method,
     headers: HeaderMap,
+    Query(referrers): Query<ReferrersQuery>,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     require_public_repo_read(
         &state.groups,
@@ -225,6 +240,17 @@ async fn dispatch_read(
         }
         DistributionPath::Blob { name, digest } => {
             get_blob(&state, repository_id, &name, &digest, method).await
+        }
+        DistributionPath::Referrers { name, digest } => {
+            list_referrers(
+                &state,
+                repository_id,
+                &name,
+                &digest,
+                referrers.artifact_type.as_deref(),
+                method,
+            )
+            .await
         }
         DistributionPath::Tags { name } => list_tags(&state, repository_id, &name).await,
         DistributionPath::StartUpload { .. } | DistributionPath::Upload { .. } => {
@@ -242,15 +268,19 @@ async fn dispatch_write(
     Query(query): Query<DigestQuery>,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_repo_write(
-        &state.groups,
-        &user.user,
-        RepositoryId::from(repository_id),
-    )
-    .await?;
+    require_repo_write(&state.groups, &user.user, RepositoryId::from(repository_id)).await?;
     match (method, parse_distribution_path(&rest)?) {
         (Method::PUT, DistributionPath::Manifest { name, reference }) => {
-            put_manifest(&state, user, repository_id, &name, &reference, headers, body).await
+            put_manifest(
+                &state,
+                user,
+                repository_id,
+                &name,
+                &reference,
+                headers,
+                body,
+            )
+            .await
         }
         (Method::POST, DistributionPath::StartUpload { name }) => {
             start_or_monolithic_upload(&state, user, repository_id, &name, query, body).await
@@ -287,9 +317,11 @@ async fn issue_token(
         }
         None => OCI_ANONYMOUS_TOKEN.to_string(),
         Some(secret) => {
-            state.authenticate_token.execute(&secret).await.map_err(|_| {
-                OciApiError::unauthorized(&state.public_base_url, "/v2/token")
-            })?;
+            state
+                .authenticate_token
+                .execute(&secret)
+                .await
+                .map_err(|_| OciApiError::unauthorized(&state.public_base_url, "/v2/token"))?;
             secret
         }
     };
@@ -362,9 +394,7 @@ async fn get_manifest(
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
     let repository = load_distribution_repository(state, repository_id).await?;
     let strategy = distribution_strategy(state, &repository)?;
-    let document = strategy
-        .get_manifest(&repository, name, reference)
-        .await?;
+    let document = strategy.get_manifest(&repository, name, reference).await?;
     let mut headers = oci_headers();
     headers.insert(
         header::CONTENT_TYPE,
@@ -415,7 +445,8 @@ async fn put_manifest(
     );
     response_headers.insert(
         DOCKER_CONTENT_DIGEST.clone(),
-        HeaderValue::from_str(digest.as_str()).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+        HeaderValue::from_str(digest.as_str())
+            .unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
     );
     Ok((StatusCode::CREATED, response_headers, Bytes::new()))
 }
@@ -442,7 +473,8 @@ async fn get_blob(
     );
     headers.insert(
         DOCKER_CONTENT_DIGEST.clone(),
-        HeaderValue::from_str(digest).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+        HeaderValue::from_str(digest)
+            .unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
     );
     let body = if method == Method::HEAD {
         Bytes::new()
@@ -519,6 +551,54 @@ async fn finish_upload(
         .put_blob(&repository, &digest, Bytes::from(session))
         .await?;
     Ok(blob_created(repository_id, name, &digest))
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ReferrersQuery {
+    #[serde(rename = "artifactType", default)]
+    artifact_type: Option<String>,
+}
+
+async fn list_referrers(
+    state: &AppState,
+    repository_id: Uuid,
+    name: &str,
+    digest: &str,
+    artifact_type: Option<&str>,
+    method: Method,
+) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
+    let repository = load_distribution_repository(state, repository_id).await?;
+    let strategy = distribution_strategy(state, &repository)?;
+    let document = strategy
+        .list_referrers(&repository, name, digest, artifact_type)
+        .await?;
+    let mut headers = oci_headers();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(INDEX_MEDIA_TYPE),
+    );
+    headers.insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from_str(&document.body.len().to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("0")),
+    );
+    headers.insert(
+        DOCKER_CONTENT_DIGEST.clone(),
+        HeaderValue::from_str(&document.digest)
+            .unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+    );
+    if artifact_type.is_some() {
+        headers.insert(
+            HeaderName::from_static("oci-filters-applied"),
+            HeaderValue::from_static("artifactType"),
+        );
+    }
+    let body = if method == Method::HEAD {
+        Bytes::new()
+    } else {
+        document.body
+    };
+    Ok((StatusCode::OK, headers, body))
 }
 
 async fn list_tags(
@@ -605,7 +685,8 @@ fn blob_created(repository_id: Uuid, name: &str, digest: &str) -> (StatusCode, H
     );
     headers.insert(
         DOCKER_CONTENT_DIGEST.clone(),
-        HeaderValue::from_str(digest).unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
+        HeaderValue::from_str(digest)
+            .unwrap_or_else(|_| HeaderValue::from_static("sha256:invalid")),
     );
     (StatusCode::CREATED, headers, Bytes::new())
 }
@@ -662,9 +743,16 @@ impl UploadStore {
         name: &str,
         chunk: &[u8],
     ) -> Result<usize, OciApiError> {
-        let mut sessions = self.sessions.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let session = sessions.get_mut(&id).ok_or_else(|| {
-            OciApiError::from_code(StatusCode::NOT_FOUND, "BLOB_UPLOAD_UNKNOWN", "unknown upload")
+            OciApiError::from_code(
+                StatusCode::NOT_FOUND,
+                "BLOB_UPLOAD_UNKNOWN",
+                "unknown upload",
+            )
         })?;
         if session.repository_id != repository_id || session.name != name {
             return Err(OciApiError::from_code(
@@ -677,15 +765,17 @@ impl UploadStore {
         Ok(session.body.len())
     }
 
-    fn take(
-        &self,
-        id: Uuid,
-        repository_id: Uuid,
-        name: &str,
-    ) -> Result<Vec<u8>, OciApiError> {
-        let mut sessions = self.sessions.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    fn take(&self, id: Uuid, repository_id: Uuid, name: &str) -> Result<Vec<u8>, OciApiError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let session = sessions.remove(&id).ok_or_else(|| {
-            OciApiError::from_code(StatusCode::NOT_FOUND, "BLOB_UPLOAD_UNKNOWN", "unknown upload")
+            OciApiError::from_code(
+                StatusCode::NOT_FOUND,
+                "BLOB_UPLOAD_UNKNOWN",
+                "unknown upload",
+            )
         })?;
         if session.repository_id != repository_id || session.name != name {
             return Err(OciApiError::from_code(
@@ -730,7 +820,9 @@ impl OciApiError {
             "UNAUTHORIZED",
             "authentication required",
         );
-        error.challenges.push(oci_bearer_challenge(public_base_url, path));
+        error
+            .challenges
+            .push(oci_bearer_challenge(public_base_url, path));
         error
             .challenges
             .push(HeaderValue::from_static(r#"Basic realm="ferrobox""#));
@@ -850,13 +942,15 @@ mod tests {
     use ferrobox_application::packaging::PackagingRegistry;
     use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
     use ferrobox_application::packaging::npm::NpmPackagingStrategy;
-    use ferrobox_application::packaging::oci::{DEFAULT_MANIFEST_MEDIA_TYPE, OciPackagingStrategy};
+    use ferrobox_application::packaging::oci::{
+        DEFAULT_MANIFEST_MEDIA_TYPE, INDEX_MEDIA_TYPE, OciPackagingStrategy,
+    };
     use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -867,8 +961,8 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use crate::AppState;
     use super::{DistributionPath, parse_distribution_path, token_query_requests_push};
+    use crate::AppState;
 
     struct Fixture {
         app: Router,
@@ -1020,7 +1114,6 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
         });
 
         let developer = state
@@ -1106,7 +1199,10 @@ mod tests {
         );
         let (status, _, body) = send(
             fx.app.clone(),
-            Request::builder().uri(&pull_scope).body(Body::empty()).unwrap(),
+            Request::builder()
+                .uri(&pull_scope)
+                .body(Body::empty())
+                .unwrap(),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1315,6 +1411,154 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn referrers_lists_a_pushed_cosign_signature() {
+        let fx = fixture().await;
+        let token = format!("Bearer {}", fx.developer_token);
+        let config = br#"{"architecture":"amd64"}"#;
+        let layer = b"signed-layer";
+        let payload = br#"{"critical":{}}"#;
+        let config_digest = digest_of(config);
+        let layer_digest = digest_of(layer);
+        let payload_digest = digest_of(payload);
+
+        for (digest, content) in [
+            (config_digest.as_str(), config.as_slice()),
+            (layer_digest.as_str(), layer.as_slice()),
+            (payload_digest.as_str(), payload.as_slice()),
+        ] {
+            let (status, headers, _) = send(
+                fx.app.clone(),
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/v2/{}/demo/blobs/uploads/", fx.repo_id))
+                    .header("Authorization", token.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::ACCEPTED);
+            let location = headers.get("location").unwrap().to_str().unwrap();
+            let (status, _, _) = send(
+                fx.app.clone(),
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("{location}?digest={digest}"))
+                    .header("Authorization", token.clone())
+                    .body(Body::from(content.to_vec()))
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED);
+        }
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": config_digest,
+                "size": config.len()
+            },
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": layer_digest,
+                "size": layer.len()
+            }]
+        });
+        let (status, headers, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v2/{}/demo/manifests/latest", fx.repo_id))
+                .header("Authorization", token.clone())
+                .header("Content-Type", DEFAULT_MANIFEST_MEDIA_TYPE)
+                .body(Body::from(serde_json::to_vec(&manifest).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let image_digest = headers
+            .get("docker-content-digest")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let signature = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+            "artifactType": "application/vnd.dev.cosign.simplesigning.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.empty.v1+json",
+                "digest": payload_digest,
+                "size": payload.len()
+            },
+            "layers": [{
+                "mediaType": "application/vnd.dev.cosign.simplesigning.v1+json",
+                "digest": payload_digest,
+                "size": payload.len()
+            }],
+            "subject": {
+                "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                "digest": image_digest,
+                "size": 1
+            }
+        });
+        let sig_tag = format!("{}.sig", image_digest.replace(':', "-"));
+        let (status, _, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/v2/{}/demo/manifests/{sig_tag}", fx.repo_id))
+                .header("Authorization", token)
+                .header("Content-Type", DEFAULT_MANIFEST_MEDIA_TYPE)
+                .body(Body::from(serde_json::to_vec(&signature).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, headers, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .uri(format!("/v2/{}/demo/referrers/{image_digest}", fx.repo_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers.get("content-type").unwrap(), INDEX_MEDIA_TYPE);
+        let index: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(index["manifests"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            index["manifests"][0]["artifactType"],
+            "application/vnd.dev.cosign.simplesigning.v1+json"
+        );
+
+        let (status, _, body) = send(
+            fx.app,
+            Request::builder()
+                .uri(format!("/repositories/{}/artifacts", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let artifacts: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let images: Vec<_> = artifacts
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["name"] == "demo")
+            .collect();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0]["version"], "latest");
+        assert!(images[0]["signed"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
     async fn mirror_pulls_a_manifest_from_upstream() {
         let fx = fixture().await;
         let mirror_id = fx
@@ -1391,6 +1635,17 @@ mod tests {
             parse_distribution_path("demo/tags/list").ok(),
             Some(DistributionPath::Tags {
                 name: "demo".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_distribution_path(
+                "demo/referrers/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            )
+            .ok(),
+            Some(DistributionPath::Referrers {
+                name: "demo".to_string(),
+                digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
             })
         );
     }
@@ -1533,7 +1788,10 @@ mod tests {
                 .method("PUT")
                 .uri(format!("/v2/{helm_id}/demo/manifests/0.1.0"))
                 .header("Authorization", token)
-                .header("Content-Type", "application/vnd.cncf.helm.chart.manifest.v1+json")
+                .header(
+                    "Content-Type",
+                    "application/vnd.cncf.helm.chart.manifest.v1+json",
+                )
                 .body(Body::from(serde_json::to_vec(&manifest).unwrap()))
                 .unwrap(),
         )

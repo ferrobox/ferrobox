@@ -43,6 +43,9 @@ pub mod npm;
 /// simple PEP 503) del patrón Strategy.
 pub mod pypi;
 
+/// Detección de firmas Cosign / Sigstore y otros accesorios OCI.
+pub mod cosign;
+
 /// La implementación de OCI (Distribution Spec v2: `docker push` /
 /// `docker pull`) del patrón Strategy.
 pub mod oci;
@@ -372,6 +375,23 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
+    /// Lista los manifiestos que apuntan a `digest` como `subject`
+    /// (Referrers API del Distribution Spec).
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`PackagingError::PackageNotFound`] si el ecosistema no
+    /// implementa referrers o la imagen no existe.
+    async fn list_referrers(
+        &self,
+        _repository: &Repository,
+        _name: &str,
+        _digest: &str,
+        _artifact_type: Option<&str>,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        Err(PackagingError::PackageNotFound(_name.to_string()))
+    }
+
     /// Marca (o desmarca) una versión ya publicada como *yanked*. No
     /// borra el binario: `cargo` sigue pudiendo descargarlo si está
     /// fijado en un `Cargo.lock`, pero deja de considerarlo para
@@ -448,7 +468,9 @@ pub(crate) async fn ensure_quota(
     additional_bytes: u64,
 ) -> Result<(), PackagingError> {
     if let Some(quota) = quota {
-        quota.ensure_can_store(repository_id, additional_bytes).await?;
+        quota
+            .ensure_can_store(repository_id, additional_bytes)
+            .await?;
     }
     Ok(())
 }
@@ -478,16 +500,9 @@ pub(crate) async fn copy_stored_artifact(
 
     let size_bytes = source.size_bytes();
     ensure_quota(quota, target_repository_id, size_bytes).await?;
-    let copied = Artifact::new(
-        target_repository_id,
-        source.checksum().clone(),
-        size_bytes,
-    );
+    let copied = Artifact::new(target_repository_id, source.checksum().clone(), size_bytes);
     storage
-        .put(
-            &crate::storage_key::storage_key_for(copied.id()),
-            content,
-        )
+        .put(&crate::storage_key::storage_key_for(copied.id()), content)
         .await?;
     artifact_store.save(&copied).await?;
     Ok((copied.id(), size_bytes))

@@ -221,6 +221,8 @@ pub(crate) struct ArtifactResponse {
     pub(crate) size_bytes: u64,
     /// `true` si el índice marca esta versión como *yanked*.
     pub(crate) yanked: bool,
+    /// `true` si hay una firma Cosign / Notation enlazada a este artefacto.
+    pub(crate) signed: bool,
     /// Repositorio que almacena el binario. En un `Alloy` es el
     /// miembro del que proviene el paquete.
     pub(crate) repository_id: String,
@@ -236,6 +238,7 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
             checksum: listed.artifact().checksum().to_string(),
             size_bytes: listed.artifact().size_bytes(),
             yanked: listed.yanked(),
+            signed: listed.signed(),
             repository_id: listed.artifact().repository_id().to_string(),
         }
     }
@@ -960,7 +963,12 @@ impl From<&ferrobox_domain::webhook::Webhook> for WebhookResponse {
             name: webhook.name().to_string(),
             url: webhook.url().to_string(),
             has_secret: webhook.secret().is_some(),
-            events: webhook.events().iter().copied().map(WebhookEventDto::from).collect(),
+            events: webhook
+                .events()
+                .iter()
+                .copied()
+                .map(WebhookEventDto::from)
+                .collect(),
             enabled: webhook.enabled(),
         }
     }

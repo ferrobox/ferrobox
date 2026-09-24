@@ -32,12 +32,12 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, OciManifestDocument, PackageSearchHit,
-    PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome,
+    PublishOutcome, copy_stored_artifact, cosign, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
-use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
+use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
 /// Nombre reservado en el índice para los blobs (capas y configs).
@@ -45,6 +45,9 @@ const BLOB_PACKAGE: &str = "_blob";
 
 /// Media type por defecto de un manifiesto OCI.
 pub const DEFAULT_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
+
+/// Media type de un índice OCI (listas multi-arch y Referrers API).
+pub const INDEX_MEDIA_TYPE: &str = "application/vnd.oci.image.index.v1+json";
 
 const MANIFEST_ACCEPT: &str = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.artifact.manifest.v1+json";
 
@@ -291,6 +294,7 @@ impl OciPackagingStrategy {
         } else {
             media_type.trim().to_string()
         };
+        let accessory = cosign::inspect(&reference, &media_type, &body);
 
         let tag_entry = ManifestEntry {
             name: name.clone(),
@@ -300,6 +304,9 @@ impl OciPackagingStrategy {
             size: body.len() as u64,
             yanked: false,
             artifact_id: artifact.id().to_string(),
+            subject: accessory.subject.clone(),
+            accessory: accessory.kind.map(|kind| kind.as_str().to_string()),
+            artifact_type: accessory.artifact_type.clone(),
         };
         self.package_index_store
             .upsert_entry(
@@ -327,7 +334,9 @@ impl OciPackagingStrategy {
                     encode_entry(&digest_entry),
                 )
                 .await?;
-            notify_assay(self.assays.as_ref(), repository.id(), &tag_coordinate);
+            if accessory.kind.is_none() {
+                notify_assay(self.assays.as_ref(), repository.id(), &tag_coordinate);
+            }
         }
 
         Ok(digest)
@@ -387,6 +396,148 @@ impl OciPackagingStrategy {
         Ok(tags)
     }
 
+    async fn list_referrers_one(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+        artifact_type: Option<&str>,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        let name = normalize_oci_name(name)?;
+        let digest = parse_oci_digest(digest)?;
+        let package_name = PackageName::parse(name)
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+        let entries = self
+            .package_index_store
+            .entries_for_package(repository.id(), self.ecosystem, &package_name)
+            .await?;
+        let mut manifests = Vec::new();
+        let mut seen = HashSet::new();
+        for entry_bytes in entries {
+            let Ok(entry) = serde_json::from_slice::<ManifestEntry>(&entry_bytes) else {
+                continue;
+            };
+            let Some(subject) =
+                cosign::signature_subject(entry.subject.as_deref(), &entry.reference)
+            else {
+                continue;
+            };
+            if subject != digest || !seen.insert(entry.digest.clone()) {
+                continue;
+            }
+            if let Some(filter) = artifact_type
+                && entry
+                    .artifact_type
+                    .as_deref()
+                    .is_none_or(|value| !value.eq_ignore_ascii_case(filter))
+            {
+                continue;
+            }
+            let mut descriptor = serde_json::json!({
+                "mediaType": entry.media_type,
+                "digest": entry.digest,
+                "size": entry.size,
+            });
+            if let Some(artifact) = entry.artifact_type {
+                descriptor
+                    .as_object_mut()
+                    .expect("descriptor is an object")
+                    .insert(
+                        "artifactType".to_string(),
+                        serde_json::Value::String(artifact),
+                    );
+            }
+            manifests.push(descriptor);
+        }
+        Ok(referrers_index(manifests))
+    }
+
+    async fn refresh_referrers_from_upstream(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+        artifact_type: Option<&str>,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        let Some(upstream) = Self::mirror_upstream(repository) else {
+            return Err(PackagingError::PackageNotFound(name.to_string()));
+        };
+        let local_name = normalize_oci_name(name)?;
+        let digest = parse_oci_digest(digest)?;
+        let image = upstream_image_name(upstream, &local_name, self.ecosystem);
+        let mut url = join_v2_path(upstream, &format!("{image}/referrers/{digest}"));
+        if let Some(filter) = artifact_type {
+            url.push_str("?artifactType=");
+            url.push_str(&query_escape(filter));
+        }
+        let response = self
+            .registry_get_authed(
+                &url,
+                vec![("Accept".to_string(), INDEX_MEDIA_TYPE.to_string())],
+            )
+            .await?;
+        Ok(OciManifestDocument {
+            media_type: content_type_of(&response, INDEX_MEDIA_TYPE),
+            digest: content_digest(&response.body),
+            body: response.body,
+        })
+    }
+
+    async fn copy_accessories_for(
+        &self,
+        source: &Repository,
+        target: &Repository,
+        image_name: &str,
+        subject_digest: &str,
+    ) -> Result<(u32, u64), PackagingError> {
+        let package_name = PackageName::parse(image_name.to_string())
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+        let entries = self
+            .package_index_store
+            .entries_for_package(source.id(), self.ecosystem, &package_name)
+            .await?;
+        let mut artifacts_copied = 0_u32;
+        let mut bytes_copied = 0_u64;
+        let mut seen = HashSet::new();
+        for entry_bytes in entries {
+            let Ok(entry) = serde_json::from_slice::<ManifestEntry>(&entry_bytes) else {
+                continue;
+            };
+            let Some(subject) =
+                cosign::signature_subject(entry.subject.as_deref(), &entry.reference)
+            else {
+                continue;
+            };
+            if subject != subject_digest || !seen.insert(entry.digest.clone()) {
+                continue;
+            }
+            let (artifact_id, mut copied, copied_count, copied_bytes) = self
+                .copy_image_into(source, target, image_name, &entry.digest)
+                .await?;
+            artifacts_copied += copied_count;
+            bytes_copied += copied_bytes;
+            if is_digest_reference(&entry.reference) {
+                continue;
+            }
+            copied.reference = entry.reference.clone();
+            copied.artifact_id = artifact_id.to_string();
+            copied.yanked = false;
+            let tag_version = PackageVersion::parse(entry.reference)
+                .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+            let tag_coordinate =
+                PackageCoordinate::new(self.ecosystem, package_name.clone(), tag_version);
+            self.package_index_store
+                .upsert_entry(
+                    target.id(),
+                    &tag_coordinate,
+                    Some(artifact_id),
+                    encode_entry(&copied),
+                )
+                .await?;
+        }
+        Ok((artifacts_copied, bytes_copied))
+    }
+
     async fn ensure_referenced_blobs(
         &self,
         repository: &Repository,
@@ -402,16 +553,27 @@ impl OciPackagingStrategy {
         if let Some(config) = manifest.config
             && self
                 .package_index_store
-                .artifact_for(repository.id(), &blob_coordinate(self.ecosystem, &config.digest)?)
+                .artifact_for(
+                    repository.id(),
+                    &blob_coordinate(self.ecosystem, &config.digest)?,
+                )
                 .await?
                 .is_none()
         {
             missing.push(config.digest);
         }
-        for layer in manifest.layers.unwrap_or_default() {
+        for layer in manifest
+            .layers
+            .into_iter()
+            .flatten()
+            .chain(manifest.blobs.into_iter().flatten())
+        {
             if self
                 .package_index_store
-                .artifact_for(repository.id(), &blob_coordinate(self.ecosystem, &layer.digest)?)
+                .artifact_for(
+                    repository.id(),
+                    &blob_coordinate(self.ecosystem, &layer.digest)?,
+                )
                 .await?
                 .is_none()
             {
@@ -567,8 +729,7 @@ impl OciPackagingStrategy {
 
             let digest_version = PackageVersion::parse(digest.clone())
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-            let digest_coord =
-                PackageCoordinate::new(self.ecosystem, package_name, digest_version);
+            let digest_coord = PackageCoordinate::new(self.ecosystem, package_name, digest_version);
             let (artifact_id, copied, size) = self
                 .copy_manifest_if_missing(source_id, target, &digest, &entry, &digest_coord)
                 .await?;
@@ -580,10 +741,10 @@ impl OciPackagingStrategy {
             }
         }
 
-        let artifact_id = root_artifact
-            .ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
-        let entry = root_entry
-            .ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
+        let artifact_id =
+            root_artifact.ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
+        let entry =
+            root_entry.ok_or_else(|| PackagingError::FileNotFound(root_digest.to_string()))?;
         Ok((artifact_id, entry, artifacts_copied, bytes_copied))
     }
 
@@ -604,7 +765,11 @@ impl OciPackagingStrategy {
             let Ok(entry) = serde_json::from_slice::<ManifestEntry>(&entry_bytes) else {
                 continue;
             };
-            if entry.name == BLOB_PACKAGE || is_digest_reference(&entry.reference) {
+            if entry.name == BLOB_PACKAGE
+                || is_digest_reference(&entry.reference)
+                || entry.accessory.is_some()
+                || cosign::is_accessory_tag(&entry.reference)
+            {
                 continue;
             }
             if !query.is_empty() && !entry.name.to_ascii_lowercase().contains(&query) {
@@ -698,9 +863,7 @@ impl OciPackagingStrategy {
         url: &str,
         extra_headers: Vec<(String, String)>,
     ) -> Result<HttpResponse, PackagingError> {
-        let response = self
-            .exchange(url, extra_headers.clone(), None)
-            .await?;
+        let response = self.exchange(url, extra_headers.clone(), None).await?;
         if response.is_success() {
             return Ok(response);
         }
@@ -952,6 +1115,60 @@ impl PackagingStrategy for OciPackagingStrategy {
         self.list_tags_one(repository, name).await
     }
 
+    async fn list_referrers(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+        artifact_type: Option<&str>,
+    ) -> Result<OciManifestDocument, PackagingError> {
+        self.ensure_repository(repository)?;
+        if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
+            let targets = self.resolve_read_targets(repository).await?;
+            let mut manifests = Vec::new();
+            let mut seen = HashSet::new();
+            for target in &targets {
+                match self
+                    .list_referrers_one(target, name, digest, artifact_type)
+                    .await
+                {
+                    Ok(document) => {
+                        append_referrer_descriptors(&document.body, &mut manifests, &mut seen);
+                    }
+                    Err(PackagingError::PackageNotFound(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            return Ok(referrers_index(manifests));
+        }
+        match self
+            .list_referrers_one(repository, name, digest, artifact_type)
+            .await
+        {
+            Ok(document) if referrer_count(&document.body) > 0 => Ok(document),
+            Ok(local) => {
+                if Self::mirror_upstream(repository).is_some() {
+                    match self
+                        .refresh_referrers_from_upstream(repository, name, digest, artifact_type)
+                        .await
+                    {
+                        Ok(upstream) => Ok(upstream),
+                        Err(
+                            PackagingError::PackageNotFound(_)
+                            | PackagingError::FileNotFound(_)
+                            | PackagingError::InvalidUpstream(_)
+                            | PackagingError::Upstream(_),
+                        ) => Ok(local),
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    Ok(local)
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn promote_version(
         &self,
         source: &Repository,
@@ -987,8 +1204,13 @@ impl PackagingStrategy for OciPackagingStrategy {
             return Err(PackagingError::AlreadyPublished(coordinate.clone()));
         }
 
-        let (artifact_id, mut entry, artifacts_copied, bytes_copied) = self
-            .copy_image_into(source, target, coordinate.name().as_str(), &source_entry.digest)
+        let (artifact_id, mut entry, mut artifacts_copied, mut bytes_copied) = self
+            .copy_image_into(
+                source,
+                target,
+                coordinate.name().as_str(),
+                &source_entry.digest,
+            )
             .await?;
 
         if !is_digest_reference(reference) {
@@ -1007,7 +1229,20 @@ impl PackagingStrategy for OciPackagingStrategy {
                 .await?;
         }
 
-        notify_assay(self.assays.as_ref(), target.id(), coordinate);
+        if source_entry.accessory.is_none() {
+            let (copied, size) = self
+                .copy_accessories_for(
+                    source,
+                    target,
+                    coordinate.name().as_str(),
+                    &source_entry.digest,
+                )
+                .await?;
+            artifacts_copied += copied;
+            bytes_copied += size;
+            notify_assay(self.assays.as_ref(), target.id(), coordinate);
+        }
+
         Ok(PromoteOutcome {
             coordinate: coordinate.clone(),
             artifacts_copied,
@@ -1026,11 +1261,7 @@ impl PackagingStrategy for OciPackagingStrategy {
             return Err(PackagingError::ReadOnlyRepository);
         }
         let Some(mut entry) = self
-            .load_manifest_entry(
-                repository,
-                coordinate.name(),
-                coordinate.version().as_str(),
-            )
+            .load_manifest_entry(repository, coordinate.name(), coordinate.version().as_str())
             .await?
         else {
             return Err(PackagingError::VersionNotFound(coordinate.clone()));
@@ -1104,7 +1335,8 @@ impl OciPackagingStrategy {
                         match self.refresh_blob_from_upstream(target, name, digest).await {
                             Ok(body) => return Ok(body),
                             Err(
-                                PackagingError::FileNotFound(_) | PackagingError::PackageNotFound(_),
+                                PackagingError::FileNotFound(_)
+                                | PackagingError::PackageNotFound(_),
                             ) => {}
                             Err(error) => last_error = error,
                         }
@@ -1210,13 +1442,80 @@ fn is_valid_tag(value: &str) -> bool {
     }
     let rest: String = characters.collect();
     rest.len() < 128
-        && rest
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
+        && rest.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
 }
 
 fn content_digest(body: &[u8]) -> String {
     format!("sha256:{}", sha256_checksum(body))
+}
+
+fn query_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                escaped.push(char::from(byte));
+            }
+            _ => {
+                escaped.push('%');
+                escaped.push(char::from(hex_digit(byte >> 4)));
+                escaped.push(char::from(hex_digit(byte & 0x0f)));
+            }
+        }
+    }
+    escaped
+}
+
+fn hex_digit(value: u8) -> u8 {
+    if value < 10 {
+        b'0' + value
+    } else {
+        b'A' + (value - 10)
+    }
+}
+
+fn referrers_index(manifests: Vec<serde_json::Value>) -> OciManifestDocument {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": 2,
+        "mediaType": INDEX_MEDIA_TYPE,
+        "manifests": serde_json::Value::Array(manifests),
+    }))
+    .expect("referrers index always serializes");
+    OciManifestDocument {
+        media_type: INDEX_MEDIA_TYPE.to_string(),
+        digest: content_digest(&body),
+        body: Bytes::from(body),
+    }
+}
+
+fn referrer_count(body: &[u8]) -> usize {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("manifests")?.as_array().map(Vec::len))
+        .unwrap_or(0)
+}
+
+fn append_referrer_descriptors(
+    body: &[u8],
+    manifests: &mut Vec<serde_json::Value>,
+    seen: &mut HashSet<String>,
+) {
+    let Some(items) = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("manifests")?.as_array().cloned())
+    else {
+        return;
+    };
+    for item in items {
+        let Some(digest) = item.get("digest").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if seen.insert(digest.to_string()) {
+            manifests.push(item);
+        }
+    }
 }
 
 fn join_v2_path(upstream: &Url, path: &str) -> String {
@@ -1268,7 +1567,9 @@ fn parse_bearer_challenge(header: &str) -> Result<BearerChallenge, PackagingErro
         .trim()
         .strip_prefix("Bearer")
         .ok_or_else(|| {
-            PackagingError::InvalidUpstream("WWW-Authenticate is not a Bearer challenge".to_string())
+            PackagingError::InvalidUpstream(
+                "WWW-Authenticate is not a Bearer challenge".to_string(),
+            )
         })?
         .trim();
     let mut realm = None;
@@ -1303,7 +1604,8 @@ fn token_request_url(
     service: &str,
     scope: Option<&str>,
 ) -> Result<String, PackagingError> {
-    let mut url = Url::parse(realm).map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+    let mut url =
+        Url::parse(realm).map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
     {
         let mut pairs = url.query_pairs_mut();
         pairs.append_pair("service", service);
@@ -1367,6 +1669,9 @@ fn enqueue_manifest_digests(body: &[u8], pending: &mut Vec<String>) {
     for nested in loose.manifests.unwrap_or_default() {
         pending.push(nested.digest);
     }
+    for blob in loose.blobs.unwrap_or_default() {
+        pending.push(blob.digest);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1379,6 +1684,12 @@ struct ManifestEntry {
     #[serde(default)]
     yanked: bool,
     artifact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accessory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifact_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1409,6 +1720,7 @@ struct LooseManifest {
     config: Option<LooseDescriptor>,
     layers: Option<Vec<LooseDescriptor>>,
     manifests: Option<Vec<LooseDescriptor>>,
+    blobs: Option<Vec<LooseDescriptor>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1533,10 +1845,7 @@ mod tests {
             .unwrap();
         let downloaded = strategy.download_file(&repository, &digest).await.unwrap();
         assert_eq!(downloaded, body);
-        let again = strategy
-            .put_blob(&repository, &digest, body)
-            .await
-            .unwrap();
+        let again = strategy.put_blob(&repository, &digest, body).await.unwrap();
         assert_eq!(again, 11);
     }
 
@@ -1554,12 +1863,7 @@ mod tests {
             .put_blob(&repository, &layer_digest, layer.clone())
             .await
             .unwrap();
-        let manifest = manifest_for(
-            &config_digest,
-            &layer_digest,
-            config.len(),
-            layer.len(),
-        );
+        let manifest = manifest_for(&config_digest, &layer_digest, config.len(), layer.len());
         let digest = strategy
             .put_manifest(
                 &repository,
@@ -1587,6 +1891,111 @@ mod tests {
         );
     }
 
+    fn signature_manifest(subject: &str, payload: &str, payload_size: usize) -> Bytes {
+        Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 2,
+                "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                "artifactType": crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE,
+                "config": {
+                    "mediaType": "application/vnd.oci.empty.v1+json",
+                    "digest": payload,
+                    "size": payload_size
+                },
+                "layers": [{
+                    "mediaType": crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE,
+                    "digest": payload,
+                    "size": payload_size
+                }],
+                "subject": {
+                    "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                    "digest": subject,
+                    "size": 100
+                }
+            }))
+            .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn put_cosign_signature_lists_referrers_and_keeps_sig_tag() {
+        let strategy = strategy();
+        let repository = oci_forge("oci-local");
+        let (config_digest, config) = blob(b"{\"architecture\":\"amd64\"}");
+        let (layer_digest, layer) = blob(b"layer");
+        strategy
+            .put_blob(&repository, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&repository, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        let manifest = manifest_for(&config_digest, &layer_digest, config.len(), layer.len());
+        let image_digest = strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest,
+            )
+            .await
+            .unwrap();
+
+        let (payload_digest, payload) =
+            blob(br#"{"critical":{"identity":{"docker-reference":"demo"}}}"#);
+        strategy
+            .put_blob(&repository, &payload_digest, payload.clone())
+            .await
+            .unwrap();
+        let sig_tag = format!("{}.sig", image_digest.replace(':', "-"));
+        let signature = signature_manifest(&image_digest, &payload_digest, payload.len());
+        strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                &sig_tag,
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                signature,
+            )
+            .await
+            .unwrap();
+
+        let referrers = strategy
+            .list_referrers(&repository, "demo", &image_digest, None)
+            .await
+            .unwrap();
+        assert_eq!(referrers.media_type, INDEX_MEDIA_TYPE);
+        let parsed: serde_json::Value = serde_json::from_slice(&referrers.body).unwrap();
+        let manifests = parsed["manifests"].as_array().unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(
+            manifests[0]["artifactType"].as_str(),
+            Some(crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE)
+        );
+
+        let filtered = strategy
+            .list_referrers(
+                &repository,
+                "demo",
+                &image_digest,
+                Some(crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE),
+            )
+            .await
+            .unwrap();
+        let filtered: serde_json::Value = serde_json::from_slice(&filtered.body).unwrap();
+        assert_eq!(filtered["manifests"].as_array().unwrap().len(), 1);
+
+        let tags = strategy.list_tags(&repository, "demo").await.unwrap();
+        assert!(tags.contains(&"latest".to_string()));
+        assert!(tags.contains(&sig_tag));
+
+        let hits = strategy.search(&repository, "demo", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].max_version, "latest");
+    }
+
     #[tokio::test]
     async fn promote_copies_manifest_and_blobs() {
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
@@ -1611,12 +2020,7 @@ mod tests {
             .put_blob(&source, &layer_digest, layer.clone())
             .await
             .unwrap();
-        let manifest = manifest_for(
-            &config_digest,
-            &layer_digest,
-            config.len(),
-            layer.len(),
-        );
+        let manifest = manifest_for(&config_digest, &layer_digest, config.len(), layer.len());
         strategy
             .put_manifest(
                 &source,
@@ -1644,7 +2048,10 @@ mod tests {
             .unwrap();
         assert_eq!(copied.body, manifest);
         assert_eq!(
-            strategy.get_blob(&target, "demo", &layer_digest).await.unwrap(),
+            strategy
+                .get_blob(&target, "demo", &layer_digest)
+                .await
+                .unwrap(),
             layer
         );
     }
@@ -1768,10 +2175,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!pulled.body.is_empty());
-        let layer_body = strategy
-            .download_file(&alloy, &layer_digest)
-            .await
-            .unwrap();
+        let layer_body = strategy.download_file(&alloy, &layer_digest).await.unwrap();
         assert_eq!(layer_body.as_ref(), b"lyr");
     }
 
@@ -1814,7 +2218,10 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.realm, "https://auth.docker.io/token");
         assert_eq!(parsed.service, "registry.docker.io");
-        assert_eq!(parsed.scope.as_deref(), Some("repository:library/alpine:pull"));
+        assert_eq!(
+            parsed.scope.as_deref(),
+            Some("repository:library/alpine:pull")
+        );
     }
 
     #[tokio::test]
@@ -1837,9 +2244,9 @@ mod tests {
             }))
             .unwrap(),
         );
-        let manifest_url =
-            "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
-        let blob_url = format!("https://registry-1.docker.io/v2/library/alpine/blobs/{layer_digest}");
+        let manifest_url = "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
+        let blob_url =
+            format!("https://registry-1.docker.io/v2/library/alpine/blobs/{layer_digest}");
         http.stub(manifest_url, 200, manifest.clone());
         http.stub(&blob_url, 200, layer.clone());
 
@@ -1879,8 +2286,7 @@ mod tests {
         let strategy = strategy_with_http(http.clone());
         let repository = oci_mirror("oci-proxy", "https://registry-1.docker.io");
         let manifest = Bytes::from_static(br#"{"schemaVersion":2,"layers":[]}"#);
-        let manifest_url =
-            "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
+        let manifest_url = "https://registry-1.docker.io/v2/library/alpine/manifests/latest";
         let challenge = r#"Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/alpine:pull""#;
         let token_url = token_request_url(
             "https://auth.docker.io/token",
@@ -1890,10 +2296,9 @@ mod tests {
         .unwrap();
 
         let mut unauthorized = HttpResponse::new(401, Bytes::from_static(b"unauthorized"));
-        unauthorized.headers.push((
-            "www-authenticate".to_string(),
-            challenge.to_string(),
-        ));
+        unauthorized
+            .headers
+            .push(("www-authenticate".to_string(), challenge.to_string()));
         let mut ok = HttpResponse::new(200, manifest.clone());
         ok.headers.push((
             "content-type".to_string(),
@@ -1966,24 +2371,21 @@ mod tests {
         let repository = helm_forge("charts-local");
         let (config_digest, config) = blob(b"helm-config");
         let (layer_digest, layer) = blob(b"chart-tgz");
-        helm
-            .put_blob(&repository, &config_digest, config.clone())
+        helm.put_blob(&repository, &config_digest, config.clone())
             .await
             .unwrap();
-        helm
-            .put_blob(&repository, &layer_digest, layer.clone())
+        helm.put_blob(&repository, &layer_digest, layer.clone())
             .await
             .unwrap();
-        helm
-            .put_manifest(
-                &repository,
-                "demo",
-                "0.1.0",
-                "application/vnd.cncf.helm.chart.manifest.v1+json",
-                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
-            )
-            .await
-            .unwrap();
+        helm.put_manifest(
+            &repository,
+            "demo",
+            "0.1.0",
+            "application/vnd.cncf.helm.chart.manifest.v1+json",
+            manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+        )
+        .await
+        .unwrap();
         let pulled = helm
             .get_manifest(&repository, "demo", "0.1.0")
             .await

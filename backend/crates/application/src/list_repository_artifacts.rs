@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ferrobox_domain::artifact::Artifact;
@@ -22,6 +22,7 @@ pub struct ListedArtifact {
     package_version: Option<String>,
     yanked: bool,
     filename: Option<String>,
+    signed: bool,
 }
 
 impl ListedArtifact {
@@ -53,6 +54,12 @@ impl ListedArtifact {
     #[must_use]
     pub fn filename(&self) -> Option<&str> {
         self.filename.as_deref()
+    }
+
+    /// `true` si hay una firma Cosign / Notation enlazada a este artefacto.
+    #[must_use]
+    pub fn signed(&self) -> bool {
+        self.signed
     }
 }
 
@@ -144,8 +151,10 @@ impl ListRepositoryArtifactsUseCase {
             .await?;
 
         let mut names_by_artifact = HashMap::new();
-        for item in indexed {
-            apply_index_item(&mut names_by_artifact, &item);
+        let mut signed_subjects = HashSet::new();
+        for item in &indexed {
+            collect_signature_subject(&mut signed_subjects, item);
+            apply_index_item(&mut names_by_artifact, item);
         }
 
         Ok(artifacts
@@ -155,12 +164,19 @@ impl ListRepositoryArtifactsUseCase {
                 if hide_unindexed && meta.is_none() {
                     return None;
                 }
+                let signed = signed_subjects.iter().any(|digest| {
+                    crate::packaging::cosign::digest_matches_checksum(
+                        digest,
+                        &artifact.checksum().to_string(),
+                    )
+                });
                 Some(ListedArtifact {
                     artifact,
                     package_name: meta.as_ref().map(|item| item.name.clone()),
                     package_version: meta.as_ref().map(|item| item.version.clone()),
                     yanked: meta.as_ref().is_some_and(|item| item.yanked),
                     filename: meta.and_then(|item| item.filename),
+                    signed,
                 })
             })
             .collect())
@@ -174,12 +190,16 @@ struct ArtifactIndexMeta {
     filename: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct IndexEntryMeta {
     #[serde(default)]
     yanked: bool,
     #[serde(default)]
     files: Vec<IndexFileMeta>,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    accessory: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -191,16 +211,36 @@ struct IndexFileMeta {
     filename: Option<String>,
 }
 
+fn collect_signature_subject(
+    signed_subjects: &mut HashSet<String>,
+    item: &ferrobox_ports::package_index_store::IndexedArtifact,
+) {
+    let meta = serde_json::from_slice::<IndexEntryMeta>(&item.entry).unwrap_or_default();
+    let version = item.coordinate.version().as_str();
+    if !crate::packaging::cosign::is_signature_accessory(meta.accessory.as_deref(), version) {
+        return;
+    }
+    if let Some(subject) =
+        crate::packaging::cosign::signature_subject(meta.subject.as_deref(), version)
+    {
+        signed_subjects.insert(subject);
+    }
+}
+
 fn apply_index_item(
     names_by_artifact: &mut HashMap<ArtifactId, ArtifactIndexMeta>,
     item: &ferrobox_ports::package_index_store::IndexedArtifact,
 ) {
     let name = item.coordinate.name().as_str().to_owned();
     let version = item.coordinate.version().as_str().to_owned();
-    let meta = serde_json::from_slice::<IndexEntryMeta>(&item.entry).unwrap_or(IndexEntryMeta {
-        yanked: false,
-        files: Vec::new(),
-    });
+    let meta = serde_json::from_slice::<IndexEntryMeta>(&item.entry).unwrap_or_default();
+    if crate::packaging::cosign::should_hide_from_listing(
+        &name,
+        &version,
+        meta.accessory.as_deref(),
+    ) {
+        return;
+    }
 
     let mut mapped_file = false;
     for file in &meta.files {
@@ -225,20 +265,30 @@ fn apply_index_item(
     }
 
     if !mapped_file {
-        names_by_artifact
-            .entry(item.artifact_id)
-            .or_insert_with(|| ArtifactIndexMeta {
-                name,
-                version,
-                yanked: meta.yanked,
-                filename: None,
-            });
+        let incoming = ArtifactIndexMeta {
+            name,
+            version,
+            yanked: meta.yanked,
+            filename: None,
+        };
+        match names_by_artifact.entry(item.artifact_id) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(incoming);
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if crate::packaging::cosign::is_digest_reference(&slot.get().version)
+                    && !crate::packaging::cosign::is_digest_reference(&incoming.version)
+                {
+                    slot.insert(incoming);
+                }
+            }
+        }
     }
 }
 
 fn sort_listed(listed: &mut [ListedArtifact]) {
-    listed.sort_by(|left, right| {
-        match (left.package_name(), right.package_name()) {
+    listed.sort_by(
+        |left, right| match (left.package_name(), right.package_name()) {
             (Some(left_name), Some(right_name)) => left_name
                 .cmp(right_name)
                 .then_with(|| left.package_version().cmp(&right.package_version()))
@@ -250,8 +300,8 @@ fn sort_listed(listed: &mut [ListedArtifact]) {
                 .id()
                 .to_string()
                 .cmp(&right.artifact().id().to_string()),
-        }
-    });
+        },
+    );
 }
 
 #[cfg(test)]
@@ -284,6 +334,29 @@ mod tests {
         package_index_store: Arc<InMemoryPackageIndexStore>,
     ) -> ListRepositoryArtifactsUseCase {
         ListRepositoryArtifactsUseCase::new(repository_store, artifact_store, package_index_store)
+    }
+
+    async fn upsert_oci(
+        store: &InMemoryPackageIndexStore,
+        repository_id: RepositoryId,
+        name: &str,
+        version: &str,
+        artifact_id: ArtifactId,
+        entry: serde_json::Value,
+    ) {
+        store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Oci,
+                    PackageName::parse(name).unwrap(),
+                    PackageVersion::parse(version).unwrap(),
+                ),
+                Some(artifact_id),
+                Bytes::from(entry.to_string()),
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -596,11 +669,114 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|item| item.package_name() == Some("hello")
-            && item.package_version() == Some("0.1@_:_")
-            && !item.yanked()));
+        assert!(
+            result
+                .iter()
+                .all(|item| item.package_name() == Some("hello")
+                    && item.package_version() == Some("0.1@_:_")
+                    && !item.yanked())
+        );
         let filenames: Vec<_> = result.iter().filter_map(ListedArtifact::filename).collect();
         assert!(filenames.contains(&"conanfile.py"));
         assert!(filenames.contains(&"conanmanifest.txt"));
+    }
+
+    #[tokio::test]
+    async fn hides_oci_blobs_digests_and_signatures_and_marks_signed() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("oci-local").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repository_store.save(&repository).await.unwrap();
+        let repository_id = repository.id();
+        let hex = "ab".repeat(32);
+        let image = Artifact::new(
+            repository_id,
+            Sha256Checksum::parse(hex.clone()).unwrap(),
+            80,
+        );
+        let signature = Artifact::new(repository_id, checksum(), 20);
+        let blob = Artifact::new(repository_id, checksum(), 4);
+        artifact_store.save(&image).await.unwrap();
+        artifact_store.save(&signature).await.unwrap();
+        artifact_store.save(&blob).await.unwrap();
+
+        let digest = format!("sha256:{hex}");
+        let sig_tag = format!("sha256-{hex}.sig");
+        upsert_oci(
+            &package_index_store,
+            repository_id,
+            "demo",
+            "latest",
+            image.id(),
+            serde_json::json!({
+                "name": "demo",
+                "reference": "latest",
+                "digest": digest,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "size": 80,
+                "artifact_id": image.id().to_string()
+            }),
+        )
+        .await;
+        upsert_oci(
+            &package_index_store,
+            repository_id,
+            "demo",
+            &digest,
+            image.id(),
+            serde_json::json!({
+                "name": "demo",
+                "reference": digest,
+                "digest": digest,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "size": 80,
+                "artifact_id": image.id().to_string()
+            }),
+        )
+        .await;
+        upsert_oci(
+            &package_index_store,
+            repository_id,
+            "demo",
+            &sig_tag,
+            signature.id(),
+            serde_json::json!({
+                "name": "demo",
+                "reference": sig_tag,
+                "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "size": 20,
+                "artifact_id": signature.id().to_string(),
+                "subject": digest,
+                "accessory": "signature",
+                "artifact_type": "application/vnd.dev.cosign.simplesigning.v1+json"
+            }),
+        )
+        .await;
+        upsert_oci(
+            &package_index_store,
+            repository_id,
+            "_blob",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            blob.id(),
+            serde_json::json!({"digest":"sha256:bb"}),
+        )
+        .await;
+
+        let result = use_case(repository_store, artifact_store, package_index_store)
+            .execute(repository_id)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].package_name(), Some("demo"));
+        assert_eq!(result[0].package_version(), Some("latest"));
+        assert!(result[0].signed());
     }
 }
