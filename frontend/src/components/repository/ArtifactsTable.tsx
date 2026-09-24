@@ -11,6 +11,7 @@ import {
   Package,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -86,13 +87,30 @@ function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
   return version;
 }
 
+function isHiddenOciReference(
+  artifact: ArtifactResponse,
+  ecosystem: PackageEcosystemDto,
+): boolean {
+  if (ecosystem !== "oci" && ecosystem !== "helm") {
+    return artifact.name === "_blob";
+  }
+  const version = artifact.version ?? "";
+  return (
+    artifact.name === "_blob" ||
+    version.startsWith("sha256:") ||
+    version.endsWith(".sig") ||
+    version.endsWith(".att") ||
+    version.endsWith(".sbom")
+  );
+}
+
 function groupArtifacts(
   data: ArtifactResponse[],
   ecosystem: PackageEcosystemDto,
 ): PackageGroup[] {
   const byName = new Map<string, ArtifactResponse[]>();
   for (const artifact of data) {
-    if (artifact.name === "_blob") {
+    if (isHiddenOciReference(artifact, ecosystem)) {
       continue;
     }
     const key = artifact.name ?? artifact.id;
@@ -325,6 +343,9 @@ export function ArtifactsTable({
         const yankedCount = group.versions.filter((bucket) =>
           bucket.artifacts.some((artifact) => artifact.yanked),
         ).length;
+        const signedCount = group.versions.filter((bucket) =>
+          bucket.artifacts.some((artifact) => artifact.signed),
+        ).length;
 
         return (
           <section key={group.name} className="border-b border-border last:border-b-0">
@@ -351,6 +372,9 @@ export function ArtifactsTable({
                     : `${group.versions.length} versiones`}
                   {yankedCount > 0
                     ? ` · ${yankedCount === 1 ? "1 yanked" : `${yankedCount} yanked`}`
+                    : null}
+                  {signedCount > 0
+                    ? ` · ${signedCount === 1 ? "1 firmada" : `${signedCount} firmadas`}`
                     : null}
                 </span>
               </span>
@@ -445,6 +469,7 @@ function VersionRows({
     return null;
   }
   const yanked = bucket.artifacts.some((artifact) => artifact.yanked);
+  const signed = bucket.artifacts.some((artifact) => artifact.signed);
   const totalBytes = bucket.artifacts.reduce((sum, artifact) => sum + artifact.size_bytes, 0);
   const nested = bucket.artifacts.length > 1;
   const memberName =
@@ -478,6 +503,16 @@ function VersionRows({
             {yanked ? (
               <Badge variant="outline" className="border-destructive/40 text-destructive">
                 Yanked
+              </Badge>
+            ) : null}
+            {signed ? (
+              <Badge
+                variant="outline"
+                className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                title="Hay una firma Cosign o Notation enlazada a esta etiqueta"
+              >
+                <ShieldCheck />
+                Firmada
               </Badge>
             ) : null}
             <span className="text-xs text-muted-foreground">

@@ -41,7 +41,8 @@ export function SetMeUpDialog({
     ) : ecosystem === "oci" ? (
       <>
         Copia estos fragmentos para <code className="font-mono">docker login</code> /{" "}
-        <code className="font-mono">docker push</code>. El token se crea en Seguridad.
+        <code className="font-mono">docker push</code> y, si quieres,{" "}
+        <code className="font-mono">cosign sign</code>. El token se crea en Seguridad.
       </>
     ) : ecosystem === "helm" ? (
       <>

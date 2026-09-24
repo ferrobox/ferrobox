@@ -22,6 +22,10 @@ filename: string | null, checksum: string, size_bytes: number,
  */
 yanked: boolean, 
 /**
+ * `true` si hay una firma Cosign / Notation enlazada a este artefacto.
+ */
+signed: boolean, 
+/**
  * Repositorio que almacena el binario. En un `Alloy` es el
  * miembro del que proviene el paquete.
  */

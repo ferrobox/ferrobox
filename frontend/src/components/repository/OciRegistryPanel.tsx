@@ -118,6 +118,40 @@ export function OciRegistryPanel({
           ) : null}
         </p>
       </div>
+      {readOnly ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            2. Verificar firma Cosign
+          </p>
+          <CopyableCodeBlock
+            code={`cosign verify --key cosign.pub ${imageRef}`}
+          />
+          <p className="text-xs text-muted-foreground">
+            FerroBox expone el Referrers API y las etiquetas{" "}
+            <code className="font-mono">sha256-&lt;digest&gt;.sig</code>. Cosign las resuelve contra
+            el mismo registro. En HTTP local añade{" "}
+            <code className="font-mono">--allow-insecure-registry</code>.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            3. Firmar y verificar (Cosign)
+          </p>
+          <CopyableCodeBlock
+            code={`cosign generate-key-pair
+cosign sign --key cosign.key ${imageRef}
+cosign verify --key cosign.pub ${imageRef}`}
+          />
+          <p className="text-xs text-muted-foreground">
+            La firma queda como accesorio OCI de la imagen (etiqueta{" "}
+            <code className="font-mono">.sig</code> o Referrers API). La UI muestra el badge
+            Firmada. En HTTP local añade{" "}
+            <code className="font-mono">--allow-insecure-registry</code>. Este paso no exige la
+            firma al hacer <code className="font-mono">docker pull</code>.
+          </p>
+        </div>
+      )}
     </div>
   );
 
