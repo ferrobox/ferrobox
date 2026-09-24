@@ -22,4 +22,8 @@ predicate: AdmissionPredicateDto,
 /**
  * Efecto si la condición se cumple.
  */
-effect: AdmissionEffectDto, };
+effect: AdmissionEffectDto, 
+/**
+ * PEM de claves públicas Cosign (`cosign generate-key-pair`).
+ */
+public_keys_pem: string, };

@@ -432,8 +432,12 @@ impl OciPackagingStrategy {
         let signed = self
             .image_is_signed(repository, name, &document.digest)
             .await?;
+        let keys = admission.public_keys_pem(repository.id()).await;
+        let verified = self
+            .image_is_verified(repository, name, &document.digest, &keys)
+            .await?;
         admission
-            .enforce_pull(repository.id(), name, reference, signed)
+            .enforce_pull(repository.id(), name, reference, signed, verified)
             .await
     }
 
@@ -478,6 +482,57 @@ impl OciPackagingStrategy {
             if cosign::signature_subject(entry.subject.as_deref(), &entry.reference).as_deref()
                 == Some(digest)
             {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    async fn image_is_verified(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+        keys_pem: &str,
+    ) -> Result<bool, PackagingError> {
+        if keys_pem.trim().is_empty() {
+            return Ok(false);
+        }
+        let Ok(package_name) = PackageName::parse(name.to_string()) else {
+            return Ok(false);
+        };
+        let entries = self
+            .package_index_store
+            .entries_for_package(repository.id(), self.ecosystem, &package_name)
+            .await?;
+        for entry_bytes in entries {
+            let Ok(entry) = serde_json::from_slice::<ManifestEntry>(&entry_bytes) else {
+                continue;
+            };
+            if !cosign::is_signature_accessory(entry.accessory.as_deref(), &entry.reference) {
+                continue;
+            }
+            if cosign::signature_subject(entry.subject.as_deref(), &entry.reference).as_deref()
+                != Some(digest)
+            {
+                continue;
+            }
+            let Ok(artifact_id) = parse_artifact_id(&entry.artifact_id) else {
+                continue;
+            };
+            let Ok(manifest) = self.download_stored(artifact_id).await else {
+                continue;
+            };
+            let Some(signature) = cosign::extract_simple_signature(&manifest) else {
+                continue;
+            };
+            let Ok(payload) = self
+                .get_blob_one(repository, &signature.payload_digest)
+                .await
+            else {
+                continue;
+            };
+            if cosign::verify_simple(&payload, &signature.signature_b64, keys_pem, Some(digest)) {
                 return Ok(true);
             }
         }
@@ -559,10 +614,10 @@ impl OciPackagingStrategy {
             url.push_str(&query_escape(filter));
         }
         let response = self
-            .registry_get_authed(
-                &url,
-                vec![("Accept".to_string(), INDEX_MEDIA_TYPE.to_string())],
-            )
+            .registry_get_authed(&url, vec![(
+                "Accept".to_string(),
+                INDEX_MEDIA_TYPE.to_string(),
+            )])
             .await?;
         Ok(OciManifestDocument {
             media_type: content_type_of(&response, INDEX_MEDIA_TYPE),
@@ -891,10 +946,10 @@ impl OciPackagingStrategy {
         let image = upstream_image_name(upstream, &local_name, self.ecosystem);
         let url = join_v2_path(upstream, &format!("{image}/manifests/{reference}"));
         let response = self
-            .registry_get_authed(
-                &url,
-                vec![("Accept".to_string(), MANIFEST_ACCEPT.to_string())],
-            )
+            .registry_get_authed(&url, vec![(
+                "Accept".to_string(),
+                MANIFEST_ACCEPT.to_string(),
+            )])
             .await
             .map_err(|err| match err {
                 PackagingError::FileNotFound(_) => {
@@ -2017,6 +2072,60 @@ mod tests {
         )
     }
 
+    fn signed_cosign(subject: &str) -> (String, Bytes, Bytes, String) {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        use p256::ecdsa::signature::Signer;
+        use p256::ecdsa::{Signature, SigningKey};
+        use p256::pkcs8::EncodePublicKey;
+
+        let signing = SigningKey::random(&mut rand::rngs::OsRng);
+        let pem = signing
+            .verifying_key()
+            .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+            .unwrap();
+        let payload = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "critical": {
+                    "identity": { "docker-reference": "demo" },
+                    "image": { "docker-manifest-digest": subject },
+                    "type": "cosign container image signature"
+                }
+            }))
+            .unwrap(),
+        );
+        let payload_digest = content_digest(&payload);
+        let signature: Signature = signing.sign(&payload);
+        let encoded = STANDARD.encode(signature.to_der());
+        let manifest = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 2,
+                "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                "artifactType": crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE,
+                "config": {
+                    "mediaType": "application/vnd.oci.empty.v1+json",
+                    "digest": payload_digest,
+                    "size": payload.len()
+                },
+                "layers": [{
+                    "mediaType": crate::packaging::cosign::COSIGN_SIMPLE_MEDIA_TYPE,
+                    "digest": payload_digest,
+                    "size": payload.len(),
+                    "annotations": {
+                        crate::packaging::cosign::COSIGN_SIGNATURE_ANNOTATION: encoded
+                    }
+                }],
+                "subject": {
+                    "mediaType": DEFAULT_MANIFEST_MEDIA_TYPE,
+                    "digest": subject,
+                    "size": 100
+                }
+            }))
+            .unwrap(),
+        );
+        (payload_digest, payload, manifest, pem)
+    }
+
     #[tokio::test]
     async fn put_cosign_signature_lists_referrers_and_keeps_sig_tag() {
         let strategy = strategy();
@@ -2109,6 +2218,7 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
@@ -2196,6 +2306,7 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
@@ -2246,6 +2357,7 @@ mod tests {
             .save(
                 forge.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
@@ -2291,6 +2403,106 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, PackagingError::PolicyDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn admission_denies_unverified_pull_and_allows_verified() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let admission_store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = oci_forge("oci-local");
+        repositories.save(&repository).await.unwrap();
+        let admission = AdmissionService::new(
+            admission_store.clone(),
+            repositories.clone(),
+            ListRepositoryArtifactsUseCase::new(
+                repositories.clone(),
+                artifact_store.clone(),
+                index.clone(),
+            ),
+        );
+        let strategy = OciPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            repositories,
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_admission(admission);
+
+        let (config_digest, config) = blob(b"cfg");
+        let (layer_digest, layer) = blob(b"lyr");
+        strategy
+            .put_blob(&repository, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&repository, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        let image_digest = strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+            )
+            .await
+            .unwrap();
+
+        let (payload_digest, payload, signature, pem) = signed_cosign(&image_digest);
+        admission_store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_verified", "deny").unwrap(),
+                &pem,
+            )
+            .await
+            .unwrap();
+
+        let (detect_digest, detect_payload) = blob(br#"{"critical":{}}"#);
+        strategy
+            .put_blob(&repository, &detect_digest, detect_payload.clone())
+            .await
+            .unwrap();
+        let sig_tag = format!("{}.sig", image_digest.replace(':', "-"));
+        strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                &sig_tag,
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                signature_manifest(&image_digest, &detect_digest, detect_payload.len()),
+            )
+            .await
+            .unwrap();
+        let error = strategy
+            .get_manifest(&repository, "demo", "latest")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+
+        strategy
+            .put_blob(&repository, &payload_digest, payload.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                &sig_tag,
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                signature,
+            )
+            .await
+            .unwrap();
+        strategy
+            .get_manifest(&repository, "demo", "latest")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2463,10 +2675,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            strategy.list_tags(&alloy, "demo").await.unwrap(),
-            vec!["latest".to_string()]
-        );
+        assert_eq!(strategy.list_tags(&alloy, "demo").await.unwrap(), vec![
+            "latest".to_string()
+        ]);
         let pulled = strategy
             .get_manifest(&alloy, "demo", "latest")
             .await

@@ -9,7 +9,7 @@ use ferrobox_domain::admission::{
 use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::RepositoryKind;
-use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
+use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
@@ -104,16 +104,28 @@ impl AdmissionService {
     pub async fn get_policy(
         &self,
         repository_id: RepositoryId,
-    ) -> Result<AdmissionPolicy, AdmissionError> {
+    ) -> Result<AdmissionRecord, AdmissionError> {
         self.require_target(repository_id).await?;
         match self.store.find_by_repository(repository_id).await {
-            Ok(policy) => Ok(policy),
-            Err(AdmissionStoreError::MissingSchema) => Ok(AdmissionPolicy::inactive()),
+            Ok(record) => Ok(record),
+            Err(AdmissionStoreError::MissingSchema) => Ok(AdmissionRecord {
+                policy: AdmissionPolicy::inactive(),
+                public_keys_pem: String::new(),
+            }),
             Err(err) => Err(err.into()),
         }
     }
 
-    /// Persiste la política.
+    /// PEM de claves Cosign del repositorio. Vacío si no hay o falla.
+    pub async fn public_keys_pem(&self, repository_id: RepositoryId) -> String {
+        self.store
+            .find_by_repository(repository_id)
+            .await
+            .map(|record| record.public_keys_pem)
+            .unwrap_or_default()
+    }
+
+    /// Persiste la política y las claves Cosign.
     ///
     /// # Errors
     ///
@@ -122,10 +134,17 @@ impl AdmissionService {
         &self,
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
-    ) -> Result<AdmissionPolicy, AdmissionError> {
+        public_keys_pem: impl Into<String>,
+    ) -> Result<AdmissionRecord, AdmissionError> {
         self.require_target(repository_id).await?;
-        self.store.save(repository_id, policy).await?;
-        Ok(policy)
+        let public_keys_pem = public_keys_pem.into();
+        self.store
+            .save(repository_id, policy, &public_keys_pem)
+            .await?;
+        Ok(AdmissionRecord {
+            policy,
+            public_keys_pem,
+        })
     }
 
     /// Simula la política contra el inventario (ignora `enabled`).
@@ -137,9 +156,13 @@ impl AdmissionService {
         &self,
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
+        public_keys_pem: impl Into<String>,
     ) -> Result<AdmissionPreview, AdmissionError> {
         self.require_target(repository_id).await?;
-        let listed = self.list_artifacts.execute(repository_id).await?;
+        let listed = self
+            .list_artifacts
+            .execute_with_keys(repository_id, &public_keys_pem.into())
+            .await?;
         Ok(preview_against(&listed, policy))
     }
 
@@ -172,16 +195,26 @@ impl AdmissionService {
         name: &str,
         reference: &str,
         signed: bool,
+        verified: bool,
     ) -> Result<(), PackagingError> {
-        let Ok(policy) = self.store.find_by_repository(repository_id).await else {
+        let Ok(record) = self.store.find_by_repository(repository_id).await else {
             return Ok(());
         };
-        let Some(effect) = policy.apply_pull(signed) else {
+        let policy = record.policy;
+        let Some(effect) = policy.apply_pull(signed, verified) else {
             return Ok(());
         };
-        let reason = match effect {
-            AdmissionEffect::Deny => "no está firmada: se denegó el pull".to_string(),
-            AdmissionEffect::Warn => "no está firmada: solo aviso, el pull siguió".to_string(),
+        let reason = match (policy.predicate(), effect) {
+            (
+                ferrobox_domain::admission::AdmissionPredicate::NotVerified,
+                AdmissionEffect::Deny,
+            ) => "no está verificada: se denegó el pull".to_string(),
+            (
+                ferrobox_domain::admission::AdmissionPredicate::NotVerified,
+                AdmissionEffect::Warn,
+            ) => "no está verificada: solo aviso, el pull siguió".to_string(),
+            (_, AdmissionEffect::Deny) => "no está firmada: se denegó el pull".to_string(),
+            (_, AdmissionEffect::Warn) => "no está firmada: solo aviso, el pull siguió".to_string(),
         };
         let now = Utc::now();
         let recent = self
@@ -203,7 +236,11 @@ impl AdmissionService {
         }
         if matches!(effect, AdmissionEffect::Deny) {
             return Err(PackagingError::PolicyDenied(format!(
-                "admission policy denies pull of {name}:{reference}: artifact is not signed"
+                "admission policy denies pull of {name}:{reference}: artifact is not {}",
+                match policy.predicate() {
+                    ferrobox_domain::admission::AdmissionPredicate::NotVerified => "verified",
+                    ferrobox_domain::admission::AdmissionPredicate::NotSigned => "signed",
+                }
             )));
         }
         Ok(())
@@ -274,17 +311,29 @@ fn preview_against(listed: &[ListedArtifact], policy: AdmissionPolicy) -> Admiss
         let Some(version) = item.package_version() else {
             continue;
         };
-        match policy.preview_pull(item.signed()) {
+        match policy.preview_pull(item.signed(), item.verified()) {
             None => allowed += 1,
             Some(effect) => matches.push(AdmissionPreviewItem {
                 name: name.to_string(),
                 version: version.to_string(),
                 effect,
-                reason: match effect {
-                    AdmissionEffect::Deny => "no está firmada: se denegaría el pull".to_string(),
-                    AdmissionEffect::Warn => {
-                        "no está firmada: solo aviso, el pull seguiría".to_string()
-                    }
+                reason: match policy.predicate() {
+                    ferrobox_domain::admission::AdmissionPredicate::NotVerified => match effect {
+                        AdmissionEffect::Deny => {
+                            "no está verificada: se denegaría el pull".to_string()
+                        }
+                        AdmissionEffect::Warn => {
+                            "no está verificada: solo aviso, el pull seguiría".to_string()
+                        }
+                    },
+                    ferrobox_domain::admission::AdmissionPredicate::NotSigned => match effect {
+                        AdmissionEffect::Deny => {
+                            "no está firmada: se denegaría el pull".to_string()
+                        }
+                        AdmissionEffect::Warn => {
+                            "no está firmada: solo aviso, el pull seguiría".to_string()
+                        }
+                    },
                 },
             }),
         }
@@ -380,6 +429,7 @@ mod tests {
             .dry_run(
                 repository.id(),
                 AdmissionPolicy::parse(false, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
@@ -398,7 +448,7 @@ mod tests {
         let admission = service(store.clone(), repositories, artifacts, index);
 
         admission
-            .enforce_pull(repository.id(), "alpine", "latest", false)
+            .enforce_pull(repository.id(), "alpine", "latest", false, false)
             .await
             .unwrap();
 
@@ -406,16 +456,17 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
         let error = admission
-            .enforce_pull(repository.id(), "alpine", "latest", false)
+            .enforce_pull(repository.id(), "alpine", "latest", false, false)
             .await
             .unwrap_err();
         assert!(matches!(error, PackagingError::PolicyDenied(_)));
         admission
-            .enforce_pull(repository.id(), "alpine", "latest", true)
+            .enforce_pull(repository.id(), "alpine", "latest", true, false)
             .await
             .unwrap();
         let events = admission.list_events(repository.id()).await.unwrap();
@@ -435,12 +486,13 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap(),
+                "",
             )
             .await
             .unwrap();
         let admission = service(store, repositories, artifacts, index);
         admission
-            .enforce_pull(repository.id(), "alpine", "latest", false)
+            .enforce_pull(repository.id(), "alpine", "latest", false, false)
             .await
             .unwrap();
         let events = admission.list_events(repository.id()).await.unwrap();
@@ -459,21 +511,22 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap(),
+                "",
             )
             .await
             .unwrap();
         let admission = service(store, repositories, artifacts, index);
         let digest = "sha256:cc58b463f0e3772e56c92408102e282ed4bbcb88eeb40bf7cc9a2ff1cc713562";
         admission
-            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .enforce_pull(repository.id(), "busybox", "unsigned", false, false)
             .await
             .unwrap();
         admission
-            .enforce_pull(repository.id(), "busybox", digest, false)
+            .enforce_pull(repository.id(), "busybox", digest, false, false)
             .await
             .unwrap();
         admission
-            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .enforce_pull(repository.id(), "busybox", "unsigned", false, false)
             .await
             .unwrap();
         let events = admission.list_events(repository.id()).await.unwrap();
@@ -493,22 +546,50 @@ mod tests {
             .save(
                 repository.id(),
                 AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
             )
             .await
             .unwrap();
         let admission = service(store, repositories, artifacts, index);
         let first = admission
-            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .enforce_pull(repository.id(), "busybox", "unsigned", false, false)
             .await
             .unwrap_err();
         let second = admission
-            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .enforce_pull(repository.id(), "busybox", "unsigned", false, false)
             .await
             .unwrap_err();
         assert!(matches!(first, PackagingError::PolicyDenied(_)));
         assert!(matches!(second, PackagingError::PolicyDenied(_)));
         let events = admission.list_events(repository.id()).await.unwrap();
         assert_eq!(events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn enforce_not_verified_ignores_detect_only() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = forge_oci(&repositories).await;
+        store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_verified", "deny").unwrap(),
+                "",
+            )
+            .await
+            .unwrap();
+        let admission = service(store, repositories, artifacts, index);
+        let error = admission
+            .enforce_pull(repository.id(), "alpine", "latest", true, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+        admission
+            .enforce_pull(repository.id(), "alpine", "latest", true, true)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -579,9 +660,10 @@ mod tests {
         .save_policy(
             mirror.id(),
             AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+            "",
         )
         .await
         .unwrap();
-        assert!(policy.enabled());
+        assert!(policy.policy.enabled());
     }
 }

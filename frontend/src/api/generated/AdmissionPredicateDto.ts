@@ -3,4 +3,4 @@
 /**
  * Condición que dispara el efecto de una política de admisión.
  */
-export type AdmissionPredicateDto = "not_signed";
+export type AdmissionPredicateDto = "not_signed" | "not_verified";
