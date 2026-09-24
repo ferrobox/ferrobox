@@ -8,4 +8,8 @@ export type AssayComponentResponse = { name: string, version: string, purl: stri
  * `root` es el paquete ensayado; `direct` una dependencia declarada;
  * `transitive` una resuelta desde lockfile.
  */
-kind: string, };
+kind: string, 
+/**
+ * Licencias declaradas en el manifiesto o en metadatos de distro.
+ */
+licenses: Array<string>, };

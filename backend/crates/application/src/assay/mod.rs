@@ -3,6 +3,7 @@
 mod cyclonedx;
 mod extract;
 mod layers;
+mod licenses;
 mod lockfiles;
 mod osv;
 
@@ -516,7 +517,7 @@ mod tests {
             serde_json::json!({
                 "name": "lodash",
                 "version": "4.17.20",
-                "manifest": { "dependencies": { "foo": "^1.0.0" } }
+                "manifest": { "license": "MIT", "dependencies": { "foo": "^1.0.0" } }
             })
             .to_string(),
         );
@@ -597,6 +598,14 @@ mod tests {
         assert_eq!(assay.status(), AssayStatus::Ready);
         assert!(assay.components().iter().any(|c| c.name() == "lodash"));
         assert!(assay.components().iter().any(|c| c.name() == "foo"));
+        assert_eq!(
+            assay
+                .components()
+                .iter()
+                .find(|component| component.name() == "lodash")
+                .map(ferrobox_domain::assay::AssayComponent::licenses),
+            Some(["MIT".to_string()].as_slice())
+        );
         assert_eq!(assay.counts().high, 1);
         assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
         let document: serde_json::Value = serde_json::from_slice(&to_cyclonedx(&assay)).unwrap();

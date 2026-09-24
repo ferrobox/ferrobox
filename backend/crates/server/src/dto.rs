@@ -488,6 +488,8 @@ pub(crate) struct AssayComponentResponse {
     /// `root` es el paquete ensayado; `direct` una dependencia declarada;
     /// `transitive` una resuelta desde lockfile.
     pub(crate) kind: String,
+    /// Licencias declaradas en el manifiesto o en metadatos de distro.
+    pub(crate) licenses: Vec<String>,
 }
 
 /// Hallazgo (impureza) de un ensaye.
@@ -541,6 +543,7 @@ impl From<&ferrobox_domain::assay::Assay> for AssayResponse {
                     version: component.version().to_string(),
                     purl: component.purl().map(ToOwned::to_owned),
                     kind: component.kind().as_str().to_string(),
+                    licenses: component.licenses().to_vec(),
                 })
                 .collect(),
             findings: assay

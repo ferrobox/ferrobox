@@ -46,6 +46,7 @@ fn components_json(components: &[AssayComponent]) -> Value {
                     "version": component.version(),
                     "purl": component.purl(),
                     "kind": component.kind().as_str(),
+                    "licenses": component.licenses(),
                 })
             })
             .collect(),
@@ -86,7 +87,18 @@ fn parse_components(value: Value) -> Vec<AssayComponent> {
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
             let kind = AssayComponentKind::parse(item.get("kind").and_then(Value::as_str).unwrap_or("direct"));
-            Some(AssayComponent::new(name, version, purl, kind))
+            let licenses = item
+                .get("licenses")
+                .and_then(Value::as_array)
+                .map(|licenses| {
+                    licenses
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(AssayComponent::new(name, version, purl, kind).with_licenses(licenses))
         })
         .collect()
 }

@@ -8,6 +8,7 @@ import { useAssay, useRunAssay } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
 import { AssayCountPills, SeverityBadge } from "@/components/assay/SeverityBadges";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -90,9 +91,9 @@ export function AssayDialog({
             Assay · {name} {version}
           </DialogTitle>
           <DialogDescription>
-            Ensaye metalúrgico del artefacto: composición (inventario de software) e impurezas
-            (vulnerabilidades conocidas según OSV, Open Source Vulnerabilities). No bloquea
-            descargas ni publicaciones.
+            Ensaye metalúrgico del artefacto: composición (inventario, licencias declaradas) e
+            impurezas (vulnerabilidades conocidas según OSV, Open Source Vulnerabilities). No
+            bloquea descargas ni publicaciones.
           </DialogDescription>
         </DialogHeader>
 
@@ -145,6 +146,7 @@ function AssayBody({
               : null}
           </p>
           <AssayCountPills counts={assay.counts} />
+          <LicenseChips licenses={uniqueLicenses(assay)} empty="Sin licencia declarada" />
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onDownload}>
@@ -223,18 +225,21 @@ function AssayBody({
             {assay.components.map((component) => (
               <li
                 key={`${component.kind}-${component.name}-${component.version}`}
-                className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm"
               >
                 <span>
                   <span className="font-mono text-foreground">{component.name}</span>
                   <span className="ml-2 font-mono text-muted-foreground">{component.version}</span>
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {component.kind === "root"
-                    ? "ensayado"
-                    : component.kind === "transitive"
-                      ? "transitiva"
-                      : "dependencia"}
+                <span className="flex flex-wrap items-center justify-end gap-2">
+                  <LicenseChips licenses={component.licenses ?? []} empty="—" />
+                  <span className="text-xs text-muted-foreground">
+                    {component.kind === "root"
+                      ? "ensayado"
+                      : component.kind === "transitive"
+                        ? "transitiva"
+                        : "dependencia"}
+                  </span>
                 </span>
               </li>
             ))}
@@ -242,5 +247,42 @@ function AssayBody({
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function uniqueLicenses(assay: AssayResponse): string[] {
+  const seen = new Set<string>();
+  const licenses: string[] = [];
+  for (const component of assay.components) {
+    for (const license of component.licenses ?? []) {
+      const key = license.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      licenses.push(license);
+    }
+  }
+  return licenses;
+}
+
+function LicenseChips({
+  licenses,
+  empty,
+}: {
+  licenses: readonly string[];
+  empty: string;
+}) {
+  if (licenses.length === 0) {
+    return <span className="text-xs text-muted-foreground">{empty}</span>;
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {licenses.map((license) => (
+        <Badge key={license} variant="secondary">
+          {license}
+        </Badge>
+      ))}
+    </span>
   );
 }

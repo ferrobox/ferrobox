@@ -136,6 +136,7 @@ pub struct AssayComponent {
     version: String,
     purl: Option<String>,
     kind: AssayComponentKind,
+    licenses: Vec<String>,
 }
 
 impl AssayComponent {
@@ -152,7 +153,33 @@ impl AssayComponent {
             version: version.into(),
             purl,
             kind,
+            licenses: Vec::new(),
         }
+    }
+
+    /// Añade licencias declaradas, sin duplicar.
+    pub fn add_licenses(&mut self, licenses: impl IntoIterator<Item = String>) {
+        for license in licenses {
+            let license = license.trim();
+            if license.is_empty() {
+                continue;
+            }
+            if !self
+                .licenses
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(license))
+            {
+                self.licenses.push(license.to_string());
+            }
+        }
+    }
+
+    /// Sustituye las licencias declaradas.
+    #[must_use]
+    pub fn with_licenses(mut self, licenses: Vec<String>) -> Self {
+        self.licenses.clear();
+        self.add_licenses(licenses);
+        self
     }
 
     /// Nombre del componente.
@@ -177,6 +204,12 @@ impl AssayComponent {
     #[must_use]
     pub fn kind(&self) -> AssayComponentKind {
         self.kind
+    }
+
+    /// Licencias declaradas (SPDX u otras etiquetas del manifiesto).
+    #[must_use]
+    pub fn licenses(&self) -> &[String] {
+        &self.licenses
     }
 }
 
@@ -445,6 +478,13 @@ mod tests {
         assert_eq!(counts.critical, 1);
         assert_eq!(counts.high, 1);
         assert_eq!(counts.total(), 2);
+    }
+
+    #[test]
+    fn component_licenses_deduplicate_case_insensitively() {
+        let mut component = AssayComponent::new("demo", "1.0.0", None, AssayComponentKind::Root);
+        component.add_licenses(["MIT".to_string(), "mit".to_string(), "Apache-2.0".to_string()]);
+        assert_eq!(component.licenses(), &["MIT".to_string(), "Apache-2.0".to_string()]);
     }
 
     #[test]

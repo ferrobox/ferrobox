@@ -731,6 +731,8 @@ struct PublishMetadata {
     features: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     links: Option<String>,
+    #[serde(default)]
+    license: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -770,6 +772,9 @@ pub struct IndexEntry {
     links: Option<String>,
     #[serde(default = "default_index_schema_version")]
     v: u32,
+    /// Licencia declarada en el publish; `cargo` ignora campos extra.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    license: Option<String>,
 }
 
 fn default_index_schema_version() -> u32 {
@@ -814,6 +819,7 @@ impl IndexEntry {
             features: metadata.features.clone(),
             yanked: false,
             links: metadata.links.clone(),
+            license: metadata.license.clone(),
             // Se fija deliberadamente en 1: esta versión de esquema le
             // indica a `cargo` que no busque un campo `features2`, que
             // esta estrategia nunca genera (solo es necesario para
