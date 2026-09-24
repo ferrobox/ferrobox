@@ -42,6 +42,7 @@ export const queryKeys = {
   webhookDeliveries: (repositoryId: string, webhookId: string) =>
     ["repositories", repositoryId, "webhooks", webhookId, "deliveries"] as const,
   packageSearch: (query: string) => ["search", query] as const,
+  audit: ["audit"] as const,
 };
 
 export function useRepositories() {
@@ -576,6 +577,14 @@ export function useAdmissionEvents(repositoryId: string, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.repositoryAdmissionEvents(repositoryId),
     queryFn: () => api.listAdmissionEvents(repositoryId),
+    enabled,
+  });
+}
+
+export function useAuditEvents(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.audit,
+    queryFn: api.listAuditEvents,
     enabled,
   });
 }

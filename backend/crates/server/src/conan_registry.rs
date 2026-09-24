@@ -12,6 +12,7 @@ use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -56,10 +57,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
 /// Rutas de escritura (`PUT` de ficheros y yank).
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/conan/{repository_id}/v2/conans/{*rest}",
-            put(conan_put),
-        )
+        .route("/conan/{repository_id}/v2/conans/{*rest}", put(conan_put))
         .route(
             "/conan/{repository_id}/recipes/{name}/{version}/yank",
             delete(yank),
@@ -133,10 +131,7 @@ async fn authenticate(
     };
     state.authenticate_token.execute(&secret).await?;
     let mut response_headers = HeaderMap::new();
-    response_headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/plain"),
-    );
+    response_headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
     Ok((StatusCode::OK, response_headers, secret))
 }
 
@@ -169,8 +164,13 @@ async fn conan_head(
     Query(search): Query<SearchParams>,
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
-    let (status, headers, _) =
-        conan_get(State(state), Path((repository_id, rest)), Query(search), headers).await?;
+    let (status, headers, _) = conan_get(
+        State(state),
+        Path((repository_id, rest)),
+        Query(search),
+        headers,
+    )
+    .await?;
     Ok((status, headers, Bytes::new()))
 }
 
@@ -231,6 +231,15 @@ async fn yank(
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageYanked,
+        AuditTargetKind::Package,
+        name,
+        version,
+    )
+    .await;
     Ok((StatusCode::OK, Json(ConanOk { ok: true })))
 }
 
@@ -241,6 +250,15 @@ async fn unyank(
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageUnyanked,
+        AuditTargetKind::Package,
+        name,
+        version,
+    )
+    .await;
     Ok((StatusCode::OK, Json(ConanOk { ok: true })))
 }
 
@@ -267,9 +285,9 @@ async fn set_yanked(
 mod tests {
     use std::sync::Arc;
 
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{HeaderMap, Request, StatusCode};
-    use axum::Router;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use bytes::Bytes;
@@ -296,9 +314,9 @@ mod tests {
     use ferrobox_application::packaging::conan::ConanPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -442,7 +460,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state
@@ -597,10 +617,7 @@ mod tests {
             fx.app.clone(),
             Request::builder()
                 .method("DELETE")
-                .uri(format!(
-                    "/conan/{}/recipes/hello/0.1@_:_/yank",
-                    fx.repo_id
-                ))
+                .uri(format!("/conan/{}/recipes/hello/0.1@_:_/yank", fx.repo_id))
                 .header("Authorization", token)
                 .body(Body::empty())
                 .unwrap(),

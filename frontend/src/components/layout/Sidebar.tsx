@@ -1,4 +1,4 @@
-import { Boxes, FlaskConical, Package, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Boxes, FlaskConical, Package, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthProvider";
@@ -20,6 +20,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label: "Seguridad", to: "/security", icon: ShieldCheck },
   { label: "Usuarios", to: "/users", icon: Users, adminOnly: true },
   { label: "Grupos", to: "/groups", icon: UsersRound, adminOnly: true },
+  { label: "Auditoría", to: "/audit", icon: ScrollText, adminOnly: true },
   { label: "Configuración", to: "/settings", icon: Settings2 },
 ];
 

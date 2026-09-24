@@ -1,55 +1,42 @@
-//! Rutas HTTP de cuota de almacenamiento.
+//! Rutas HTTP del registro de auditoría (solo rol `Admin`).
 
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
-use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::quota::StorageQuota;
-use uuid::Uuid;
+use ferrobox_domain::user::User;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{QuotaRequest, QuotaResponse};
+use crate::authz::require_manage_users;
+use crate::dto::AuditEventResponse;
 use crate::error::ApiError;
 
-pub(crate) async fn get_quota(
-    State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-) -> Result<Json<QuotaResponse>, ApiError> {
-    let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
-    let snapshot = state.quota.get_snapshot(repository_id).await?;
-    Ok(Json(QuotaResponse::from(snapshot)))
+/// Deja constancia de una escritura. No falla la petición.
+pub(crate) async fn record(
+    state: &AppState,
+    actor: &User,
+    action: AuditAction,
+    target_kind: AuditTargetKind,
+    target: impl Into<String>,
+    detail: impl Into<String>,
+) {
+    state
+        .audit
+        .record(actor, action, target_kind, target, detail)
+        .await;
 }
 
-pub(crate) async fn save_quota(
+pub(crate) async fn list_events(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
-    Path(repository_id): Path<Uuid>,
-    Json(payload): Json<QuotaRequest>,
-) -> Result<Json<QuotaResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
-    let quota = StorageQuota::new(payload.limit_bytes)?;
-    let snapshot = state
-        .quota
-        .save(RepositoryId::from(repository_id), quota)
-        .await?;
-    crate::audit::record(
-        &state,
-        &user,
-        AuditAction::QuotaChanged,
-        AuditTargetKind::Quota,
-        repository_id.to_string(),
-        snapshot
-            .limit_bytes
-            .map_or_else(|| "unlimited".to_string(), |bytes| bytes.to_string()),
-    )
-    .await;
-    Ok(Json(QuotaResponse::from(snapshot)))
+) -> Result<Json<Vec<AuditEventResponse>>, ApiError> {
+    require_manage_users(&user)?;
+    let events = state.audit.list().await?;
+    Ok(Json(
+        events.into_iter().map(AuditEventResponse::from).collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -58,9 +45,10 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use ferrobox_application::assay::AssayService;
     use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
     use ferrobox_application::change_password::ChangePasswordUseCase;
-    use ferrobox_application::create_repository::{CreateRepositoryKind, CreateRepositoryUseCase};
+    use ferrobox_application::create_repository::CreateRepositoryUseCase;
     use ferrobox_application::delete_artifact::DeleteArtifactUseCase;
     use ferrobox_application::delete_repository::DeleteRepositoryUseCase;
     use ferrobox_application::download_artifact::DownloadArtifactUseCase;
@@ -80,22 +68,22 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::quota::QuotaService;
     use ferrobox_application::retention::RetentionService;
+    use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
+        InMemoryAdmissionStore, InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore,
+        InMemoryAuditStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryQuotaStore, InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage,
+        InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
-    use ferrobox_domain::package_coordinate::PackageEcosystem;
-    use ferrobox_domain::repository::RepositoryName;
     use ferrobox_domain::user::Role;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::sync::Arc;
     use tower::ServiceExt;
 
     #[allow(clippy::too_many_lines)]
-    async fn fixture() -> (Router, String, String, String) {
+    async fn fixture() -> (Router, String, String) {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
@@ -110,11 +98,8 @@ mod tests {
             artifact_store.clone(),
             Arc::new(InMemoryQuotaStore::default()),
         );
-
-        let search_packages = ferrobox_application::search_packages::SearchPackagesUseCase::new(
-            repository_store.clone(),
-            package_index_store.clone(),
-        );
+        let search_packages =
+            SearchPackagesUseCase::new(repository_store.clone(), package_index_store.clone());
 
         let state = Arc::new(AppState {
             create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
@@ -155,7 +140,7 @@ mod tests {
                 quota.clone(),
             ),
             packaging: PackagingRegistry::new(),
-            assays: ferrobox_application::assay::AssayService::new(
+            assays: AssayService::new(
                 assay_store.clone(),
                 package_index_store.clone(),
                 repository_store.clone(),
@@ -163,7 +148,7 @@ mod tests {
                 http_client.clone(),
             ),
             admission: ferrobox_application::admission::AdmissionService::new(
-                Arc::new(ferrobox_application::test_support::InMemoryAdmissionStore::default()),
+                Arc::new(InMemoryAdmissionStore::default()),
                 repository_store.clone(),
                 ListRepositoryArtifactsUseCase::new(
                     repository_store.clone(),
@@ -207,18 +192,14 @@ mod tests {
                 repository_store.clone(),
             ),
             audit: ferrobox_application::audit::AuditService::new(Arc::new(
-                ferrobox_application::test_support::InMemoryAuditStore::default(),
+                InMemoryAuditStore::default(),
             )),
         });
 
-        let developer = state
-            .create_user
-            .seed("developer", Role::Developer)
-            .await
-            .unwrap();
-        let token = state
+        let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
+        let admin_token = state
             .create_api_token
-            .execute(developer.id(), ApiTokenName::parse("dev").unwrap())
+            .execute(admin.id(), ApiTokenName::parse("admin").unwrap())
             .await
             .unwrap()
             .plaintext_secret;
@@ -233,110 +214,80 @@ mod tests {
             .await
             .unwrap()
             .plaintext_secret;
-        let repo = state
-            .create_repository
-            .execute(
-                RepositoryName::parse("binaries").unwrap(),
-                PackageEcosystem::Generic,
-                CreateRepositoryKind::Forge,
-            )
+
+        (crate::build_router(state), admin_token, reader_token)
+    }
+
+    async fn json_body(response: axum::http::Response<Body>) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-
-        (
-            crate::build_router(state),
-            token,
-            reader_token,
-            repo.to_string(),
-        )
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     #[tokio::test]
-    async fn get_quota_defaults_to_unlimited() {
-        let (app, token, _, repo) = fixture().await;
+    async fn reader_cannot_list_audit() {
+        let (app, _admin, reader_token) = fixture().await;
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], Value::Null);
-        assert_eq!(json["used_bytes"], 0);
-    }
-
-    #[tokio::test]
-    async fn save_requires_write_role_and_publish_conflicts_when_exceeded() {
-        let (app, token, reader_token, repo) = fixture().await;
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
+                    .uri("/audit")
                     .header("Authorization", format!("Bearer {reader_token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
+                    .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+    #[tokio::test]
+    async fn creating_a_user_is_recorded() {
+        let (app, admin_token, _reader) = fixture().await;
 
-        let response = app
+        let created = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/repositories/{repo}/artifacts"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::from("too-big"))
+                    .uri("/users")
+                    .header("Authorization", format!("Bearer {admin_token}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "username": "dev",
+                            "email": "dev@example.com",
+                            "password": "Secret1a",
+                            "role": "developer"
+                        })
+                        .to_string(),
+                    ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(created.status(), StatusCode::CREATED);
 
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
+                    .uri("/audit")
+                    .header("Authorization", format!("Bearer {admin_token}"))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], 4);
-        assert_eq!(json["used_bytes"], 0);
+        let body = json_body(response).await;
+        let events = body.as_array().expect("audit list");
+        assert!(
+            events.iter().any(|event| {
+                event["action"] == "user.created"
+                    && event["actor"] == "admin"
+                    && event["target"] == "dev"
+            }),
+            "expected user.created for dev, got {body}"
+        );
     }
 }

@@ -21,6 +21,7 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
 use ferrobox_application::packaging::cargo::cargo_index_shard_path;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -269,6 +270,16 @@ async fn publish(
 
     strategy.publish(&repository, body).await?;
 
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackagePublished,
+        AuditTargetKind::Package,
+        repository.name().to_string(),
+        "cargo",
+    )
+    .await;
+
     Ok((StatusCode::OK, Json(PublishResponse::default())))
 }
 
@@ -341,6 +352,20 @@ async fn set_yanked(
         .set_yanked(&repository, &coordinate, yanked)
         .await?;
 
+    crate::audit::record(
+        state,
+        user,
+        if yanked {
+            AuditAction::PackageYanked
+        } else {
+            AuditAction::PackageUnyanked
+        },
+        AuditTargetKind::Package,
+        coordinate.name().as_str(),
+        coordinate.version().as_str(),
+    )
+    .await;
+
     Ok(Json(YankResponse { ok: true }))
 }
 
@@ -412,9 +437,9 @@ mod tests {
     use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -553,7 +578,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state
@@ -1068,7 +1095,9 @@ mod tests {
         let (status, body) = send(
             fx.app.clone(),
             Request::builder()
-                .uri(format!("/cargo/{target_id}/api/v1/crates/ferrobox-cli/0.1.0/download"))
+                .uri(format!(
+                    "/cargo/{target_id}/api/v1/crates/ferrobox-cli/0.1.0/download"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

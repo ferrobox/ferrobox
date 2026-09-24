@@ -6,6 +6,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use ferrobox_domain::api_token::ApiTokenName;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::ApiTokenId;
 use ferrobox_domain::user::Username;
 use uuid::Uuid;
@@ -33,9 +34,7 @@ pub(crate) async fn login(
     }))
 }
 
-pub(crate) async fn me(
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
-) -> Json<UserResponse> {
+pub(crate) async fn me(AuthenticatedUser { user, .. }: AuthenticatedUser) -> Json<UserResponse> {
     Json(UserResponse::from(&user))
 }
 
@@ -56,6 +55,16 @@ pub(crate) async fn change_password(
             &payload.new_password,
         )
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserPasswordChanged,
+        AuditTargetKind::User,
+        user.username().to_string(),
+        "",
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -89,6 +98,16 @@ pub(crate) async fn create_token(
 
     let result = state.create_api_token.execute(user.id(), name).await?;
 
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::TokenCreated,
+        AuditTargetKind::Token,
+        result.token.name().to_string(),
+        result.token.prefix().to_string(),
+    )
+    .await;
+
     Ok((
         StatusCode::CREATED,
         Json(ApiTokenCreatedResponse {
@@ -109,6 +128,16 @@ pub(crate) async fn revoke_token(
         .revoke_api_token
         .execute(user.id(), ApiTokenId::from(token_id))
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::TokenRevoked,
+        AuditTargetKind::Token,
+        token_id.to_string(),
+        "",
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::UserId;
 use ferrobox_domain::user::{Email, Username};
 use uuid::Uuid;
@@ -42,6 +43,16 @@ pub(crate) async fn create_user(
         .execute(username, email, &payload.password, payload.role.into())
         .await?;
 
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserCreated,
+        AuditTargetKind::User,
+        created.username().to_string(),
+        created.role().as_str(),
+    )
+    .await;
+
     Ok((StatusCode::CREATED, Json(UserResponse::from(&created))))
 }
 
@@ -56,6 +67,16 @@ pub(crate) async fn delete_user(
         .delete_user
         .execute(user.id(), UserId::from(user_id))
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserDeleted,
+        AuditTargetKind::User,
+        user_id.to_string(),
+        "",
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -73,6 +94,16 @@ pub(crate) async fn update_user_role(
         .execute(UserId::from(user_id), payload.role.into())
         .await?;
 
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserRoleChanged,
+        AuditTargetKind::User,
+        updated.username().to_string(),
+        updated.role().as_str(),
+    )
+    .await;
+
     Ok(Json(UserResponse::from(&updated)))
 }
 
@@ -88,6 +119,16 @@ pub(crate) async fn reset_user_password(
         .reset_user_password
         .execute(user.id(), UserId::from(user_id), &payload.password)
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserPasswordReset,
+        AuditTargetKind::User,
+        user_id.to_string(),
+        "",
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -122,9 +163,9 @@ mod tests {
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -165,7 +206,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -241,14 +285,12 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
-        let admin = state
-            .create_user
-            .seed("admin", Role::Admin)
-            .await
-            .unwrap();
+        let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
         let admin_token = state
             .create_api_token
             .execute(admin.id(), ApiTokenName::parse("admin").unwrap())

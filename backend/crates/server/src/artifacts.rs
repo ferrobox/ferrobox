@@ -7,13 +7,16 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use bytes::Bytes;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{ArtifactResponse, PromotePackageRequest, PromotePackageResponse, PublishResponse};
+use crate::dto::{
+    ArtifactResponse, PromotePackageRequest, PromotePackageResponse, PublishResponse,
+};
 use crate::error::ApiError;
 
 pub(crate) async fn publish_artifact(
@@ -26,6 +29,16 @@ pub(crate) async fn publish_artifact(
     require_repo_write(&state.groups, &user, repository_id).await?;
 
     let artifact_id = state.publish_artifact.execute(repository_id, body).await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::ArtifactPublished,
+        AuditTargetKind::Artifact,
+        artifact_id.to_string(),
+        repository_id.to_string(),
+    )
+    .await;
 
     Ok((
         StatusCode::CREATED,
@@ -80,6 +93,16 @@ pub(crate) async fn delete_artifact(
         .execute(repository_id, ArtifactId::from(artifact_id))
         .await?;
 
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::ArtifactDeleted,
+        AuditTargetKind::Artifact,
+        artifact_id.to_string(),
+        repository_id.to_string(),
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -117,6 +140,20 @@ pub(crate) async fn promote_package(
             payload.preserve_yanked,
         )
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackagePromoted,
+        AuditTargetKind::Package,
+        format!(
+            "{}@{}",
+            outcome.name.as_deref().unwrap_or("?"),
+            outcome.version.as_deref().unwrap_or("?")
+        ),
+        target_id.to_string(),
+    )
+    .await;
 
     Ok((
         StatusCode::CREATED,

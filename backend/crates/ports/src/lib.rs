@@ -38,6 +38,9 @@ pub mod retention_store;
 /// El puerto de persistencia de la política de admisión.
 pub mod admission_store;
 
+/// El puerto de persistencia del registro de auditoría.
+pub mod audit_store;
+
 /// El puerto de persistencia de la cuota de almacenamiento.
 pub mod quota_store;
 

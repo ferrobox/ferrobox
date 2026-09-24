@@ -4,6 +4,7 @@
 mod admission;
 mod artifacts;
 mod assays;
+mod audit;
 mod auth;
 mod auth_extract;
 mod authz;
@@ -38,6 +39,7 @@ use ferrobox_adapter_postgres::admission_store::PostgresAdmissionStore;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
+use ferrobox_adapter_postgres::audit_store::PostgresAuditStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
@@ -48,6 +50,7 @@ use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::admission::AdmissionService;
 use ferrobox_application::assay::AssayService;
+use ferrobox_application::audit::AuditService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
 use ferrobox_application::change_password::ChangePasswordUseCase;
@@ -116,6 +119,7 @@ struct AppState {
     reset_user_password: ResetUserPasswordUseCase,
     groups: GroupService,
     webhooks: WebhookService,
+    audit: AuditService,
 }
 
 #[tokio::main]
@@ -138,6 +142,7 @@ async fn main() {
     let assay_store = Arc::new(PostgresAssayStore::new(pool.clone()));
     let retention_store = Arc::new(PostgresRetentionStore::new(pool.clone()));
     let admission_store = Arc::new(PostgresAdmissionStore::new(pool.clone()));
+    let audit_store = Arc::new(PostgresAuditStore::new(pool.clone()));
     let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
@@ -156,6 +161,7 @@ async fn main() {
         assay_store,
         retention_store,
         admission_store,
+        audit_store,
         quota_store,
         user_store,
         group_store,
@@ -198,6 +204,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             get(auth::list_tokens).post(auth::create_token),
         )
         .route("/auth/tokens/{token_id}", delete(auth::revoke_token))
+        .route("/audit", get(audit::list_events))
         .route("/users", get(users::list_users).post(users::create_user))
         .route(
             "/users/{user_id}",
@@ -364,6 +371,7 @@ fn build_app_state(
     assay_store: Arc<PostgresAssayStore>,
     retention_store: Arc<PostgresRetentionStore>,
     admission_store: Arc<PostgresAdmissionStore>,
+    audit_store: Arc<PostgresAuditStore>,
     quota_store: Arc<PostgresQuotaStore>,
     user_store: Arc<PostgresUserStore>,
     group_store: Arc<PostgresGroupStore>,
@@ -473,6 +481,7 @@ fn build_app_state(
         reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
         groups: GroupService::new(group_store, user_store, repository_store),
         webhooks,
+        audit: AuditService::new(audit_store),
     }
 }
 

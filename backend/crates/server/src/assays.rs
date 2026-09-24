@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
-use crate::dto::{AssayLookupRequest, AssayResponse, AssayRerunResponse};
+use crate::dto::{AssayLookupRequest, AssayRerunResponse, AssayResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn list_all(
@@ -111,11 +111,7 @@ pub(crate) async fn download_sbom(
     let body = to_cyclonedx(&assay);
     let filename = format!(
         "{}-{}.cdx.json",
-        assay
-            .coordinate()
-            .name()
-            .as_str()
-            .replace(['/', '\\'], "_"),
+        assay.coordinate().name().as_str().replace(['/', '\\'], "_"),
         assay.coordinate().version().as_str()
     );
     let mut response = Response::new(Body::from(body));
@@ -175,9 +171,9 @@ mod tests {
     use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -228,7 +224,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -304,7 +303,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state
@@ -348,7 +349,12 @@ mod tests {
 
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/assays").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/assays")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
