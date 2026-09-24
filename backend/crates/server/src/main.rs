@@ -1,6 +1,7 @@
 //! Punto de composición de `FerroBox`: el único lugar del proyecto que
 //! conoce todas las implementaciones concretas de cada puerto.
 
+mod admission;
 mod artifacts;
 mod assays;
 mod auth;
@@ -33,17 +34,19 @@ use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 use config::Config;
 use ferrobox_adapter_http::ReqwestHttpClient;
+use ferrobox_adapter_postgres::admission_store::PostgresAdmissionStore;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
 use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
-use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
+use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
+use ferrobox_application::admission::AdmissionService;
 use ferrobox_application::assay::AssayService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
@@ -95,6 +98,7 @@ struct AppState {
     promote_package: PromotePackageUseCase,
     packaging: PackagingRegistry,
     assays: AssayService,
+    admission: AdmissionService,
     retention: RetentionService,
     quota: QuotaService,
     search_packages: SearchPackagesUseCase,
@@ -133,6 +137,7 @@ async fn main() {
     let package_index_store = Arc::new(PostgresPackageIndexStore::new(pool.clone()));
     let assay_store = Arc::new(PostgresAssayStore::new(pool.clone()));
     let retention_store = Arc::new(PostgresRetentionStore::new(pool.clone()));
+    let admission_store = Arc::new(PostgresAdmissionStore::new(pool.clone()));
     let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
@@ -150,6 +155,7 @@ async fn main() {
         package_index_store,
         assay_store,
         retention_store,
+        admission_store,
         quota_store,
         user_store,
         group_store,
@@ -201,7 +207,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             "/users/{user_id}/password",
             post(users::reset_user_password),
         )
-        .route("/groups", get(groups::list_groups).post(groups::create_group))
+        .route(
+            "/groups",
+            get(groups::list_groups).post(groups::create_group),
+        )
         .route(
             "/groups/{group_id}",
             get(groups::get_group).delete(groups::delete_group),
@@ -253,6 +262,14 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         .route(
             "/repositories/{repository_id}/assay",
             get(assays::get_or_run),
+        )
+        .route(
+            "/repositories/{repository_id}/admission",
+            get(admission::get_policy).put(admission::save_policy),
+        )
+        .route(
+            "/repositories/{repository_id}/admission/dry-run",
+            post(admission::dry_run),
         )
         .route(
             "/repositories/{repository_id}/quota",
@@ -334,7 +351,7 @@ async fn bootstrap_admin(config: &Config, user_store: Arc<PostgresUserStore>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn build_app_state(
     config: &Config,
     repository_store: Arc<PostgresRepositoryStore>,
@@ -342,6 +359,7 @@ fn build_app_state(
     package_index_store: Arc<PostgresPackageIndexStore>,
     assay_store: Arc<PostgresAssayStore>,
     retention_store: Arc<PostgresRetentionStore>,
+    admission_store: Arc<PostgresAdmissionStore>,
     quota_store: Arc<PostgresQuotaStore>,
     user_store: Arc<PostgresUserStore>,
     group_store: Arc<PostgresGroupStore>,
@@ -350,11 +368,8 @@ fn build_app_state(
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
-    let webhooks = WebhookService::new(
-        webhook_store,
-        http_client.clone(),
-        repository_store.clone(),
-    );
+    let webhooks =
+        WebhookService::new(webhook_store, http_client.clone(), repository_store.clone());
     let assays = AssayService::new(
         assay_store.clone(),
         package_index_store.clone(),
@@ -368,6 +383,16 @@ fn build_app_state(
         artifact_store.clone(),
         quota_store,
     );
+    let list_repository_artifacts = ListRepositoryArtifactsUseCase::new(
+        repository_store.clone(),
+        artifact_store.clone(),
+        package_index_store.clone(),
+    );
+    let admission = AdmissionService::new(
+        admission_store,
+        repository_store.clone(),
+        list_repository_artifacts.clone(),
+    );
     let packaging = packaging_registry(
         &config.public_base_url,
         &repository_store,
@@ -377,11 +402,10 @@ fn build_app_state(
         http_client,
         &assays,
         quota.clone(),
+        admission.clone(),
     );
-    let search_packages = SearchPackagesUseCase::new(
-        repository_store.clone(),
-        package_index_store.clone(),
-    );
+    let search_packages =
+        SearchPackagesUseCase::new(repository_store.clone(), package_index_store.clone());
     let retention = RetentionService::new(
         repository_store.clone(),
         artifact_store.clone(),
@@ -403,11 +427,7 @@ fn build_app_state(
             quota.clone(),
         ),
         download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
-        list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
-            repository_store.clone(),
-            artifact_store.clone(),
-            package_index_store.clone(),
-        ),
+        list_repository_artifacts,
         delete_repository: DeleteRepositoryUseCase::new(
             repository_store.clone(),
             artifact_store.clone(),
@@ -428,6 +448,7 @@ fn build_app_state(
         ),
         packaging,
         assays,
+        admission,
         retention,
         quota,
         search_packages,
@@ -461,6 +482,7 @@ fn packaging_registry(
     http_client: Arc<ReqwestHttpClient>,
     assays: &AssayService,
     quota: QuotaService,
+    admission: AdmissionService,
 ) -> PackagingRegistry {
     PackagingRegistry::new()
         .register(Arc::new(
@@ -507,7 +529,8 @@ fn packaging_registry(
                 http_client.clone(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_admission(admission.clone()),
         ))
         .register(Arc::new(
             OciPackagingStrategy::for_ecosystem(
@@ -519,7 +542,8 @@ fn packaging_registry(
                 http_client,
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_admission(admission),
         ))
         .register(Arc::new(
             ConanPackagingStrategy::new(

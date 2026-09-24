@@ -1018,6 +1018,167 @@ fn default_enabled() -> bool {
     true
 }
 
+/// Momento de evaluación de una política de admisión.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AdmissionWhenDto {
+    /// Al resolver un manifiesto o un paquete para instalarlo.
+    Pull,
+}
+
+impl AdmissionWhenDto {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pull => "pull",
+        }
+    }
+}
+
+impl From<ferrobox_domain::admission::AdmissionWhen> for AdmissionWhenDto {
+    fn from(value: ferrobox_domain::admission::AdmissionWhen) -> Self {
+        match value {
+            ferrobox_domain::admission::AdmissionWhen::Pull => Self::Pull,
+        }
+    }
+}
+
+/// Condición que dispara el efecto de una política de admisión.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AdmissionPredicateDto {
+    /// El artefacto no tiene una firma Cosign / Notation enlazada.
+    NotSigned,
+}
+
+impl AdmissionPredicateDto {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::NotSigned => "not_signed",
+        }
+    }
+}
+
+impl From<ferrobox_domain::admission::AdmissionPredicate> for AdmissionPredicateDto {
+    fn from(value: ferrobox_domain::admission::AdmissionPredicate) -> Self {
+        match value {
+            ferrobox_domain::admission::AdmissionPredicate::NotSigned => Self::NotSigned,
+        }
+    }
+}
+
+/// Qué hacer si la condición de admisión se cumple.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AdmissionEffectDto {
+    /// Bloquea la operación.
+    Deny,
+    /// Deja pasar y solo deja constancia.
+    Warn,
+}
+
+impl AdmissionEffectDto {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Deny => "deny",
+            Self::Warn => "warn",
+        }
+    }
+}
+
+impl From<ferrobox_domain::admission::AdmissionEffect> for AdmissionEffectDto {
+    fn from(value: ferrobox_domain::admission::AdmissionEffect) -> Self {
+        match value {
+            ferrobox_domain::admission::AdmissionEffect::Deny => Self::Deny,
+            ferrobox_domain::admission::AdmissionEffect::Warn => Self::Warn,
+        }
+    }
+}
+
+/// Política de admisión enviada al guardar o simular.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AdmissionPolicyRequest {
+    /// `true` si la regla se aplica en el pull.
+    pub(crate) enabled: bool,
+    /// Momento de evaluación.
+    pub(crate) when: AdmissionWhenDto,
+    /// Condición que dispara el efecto.
+    pub(crate) predicate: AdmissionPredicateDto,
+    /// Efecto si la condición se cumple.
+    pub(crate) effect: AdmissionEffectDto,
+}
+
+/// Política de admisión de un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AdmissionPolicyResponse {
+    /// `true` si la regla se aplica en el pull.
+    pub(crate) enabled: bool,
+    /// Momento de evaluación.
+    pub(crate) when: AdmissionWhenDto,
+    /// Condición que dispara el efecto.
+    pub(crate) predicate: AdmissionPredicateDto,
+    /// Efecto si la condición se cumple.
+    pub(crate) effect: AdmissionEffectDto,
+}
+
+impl From<ferrobox_domain::admission::AdmissionPolicy> for AdmissionPolicyResponse {
+    fn from(policy: ferrobox_domain::admission::AdmissionPolicy) -> Self {
+        Self {
+            enabled: policy.enabled(),
+            when: policy.when().into(),
+            predicate: policy.predicate().into(),
+            effect: policy.effect().into(),
+        }
+    }
+}
+
+/// Un artefacto que la política tocaría en un pull.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AdmissionPreviewItemResponse {
+    /// Nombre del paquete o de la imagen.
+    pub(crate) name: String,
+    /// Versión o etiqueta.
+    pub(crate) version: String,
+    /// `deny` o `warn`.
+    pub(crate) effect: AdmissionEffectDto,
+    /// Motivo legible.
+    pub(crate) reason: String,
+}
+
+/// Resultado de simular la política contra el inventario.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AdmissionPreviewResponse {
+    /// Artefactos que disparan la condición.
+    pub(crate) matches: Vec<AdmissionPreviewItemResponse>,
+    /// Versiones listadas que no disparan la condición.
+    #[ts(type = "number")]
+    pub(crate) allowed: usize,
+}
+
+impl From<ferrobox_application::admission::AdmissionPreview> for AdmissionPreviewResponse {
+    fn from(preview: ferrobox_application::admission::AdmissionPreview) -> Self {
+        Self {
+            matches: preview
+                .matches
+                .into_iter()
+                .map(|item| AdmissionPreviewItemResponse {
+                    name: item.name,
+                    version: item.version,
+                    effect: item.effect.into(),
+                    reason: item.reason,
+                })
+                .collect(),
+            allowed: preview.allowed,
+        }
+    }
+}
+
 /// Cuerpo para actualizar un aviso HTTP.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]

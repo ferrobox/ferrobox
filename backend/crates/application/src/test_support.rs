@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use ferrobox_domain::admission::AdmissionPolicy;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
@@ -17,6 +18,7 @@ use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::quota::StorageQuota;
 use ferrobox_domain::retention::RetentionPolicy;
 use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
@@ -697,6 +699,36 @@ impl AssayStore for InMemoryAssayStore {
         self.assays.lock().unwrap().retain(|_, assay| {
             !(assay.repository_id() == repository_id && assay.coordinate() == coordinate)
         });
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryAdmissionStore {
+    policies: Mutex<HashMap<RepositoryId, AdmissionPolicy>>,
+}
+
+#[async_trait]
+impl AdmissionStore for InMemoryAdmissionStore {
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<AdmissionPolicy, AdmissionStoreError> {
+        Ok(self
+            .policies
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .copied()
+            .unwrap_or_else(AdmissionPolicy::inactive))
+    }
+
+    async fn save(
+        &self,
+        repository_id: RepositoryId,
+        policy: AdmissionPolicy,
+    ) -> Result<(), AdmissionStoreError> {
+        self.policies.lock().unwrap().insert(repository_id, policy);
         Ok(())
     }
 }

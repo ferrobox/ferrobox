@@ -20,6 +20,9 @@ import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
 import type { SearchResponse } from "@/api/generated/SearchResponse";
+import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
+import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyResponse";
+import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
@@ -464,6 +467,30 @@ export function getQuota(repositoryId: string): Promise<QuotaResponse> {
 export function saveQuota(repositoryId: string, payload: QuotaRequest): Promise<QuotaResponse> {
   return request<QuotaResponse>(`/repositories/${repositoryId}/quota`, {
     method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAdmissionPolicy(repositoryId: string): Promise<AdmissionPolicyResponse> {
+  return request<AdmissionPolicyResponse>(`/repositories/${repositoryId}/admission`);
+}
+
+export function saveAdmissionPolicy(
+  repositoryId: string,
+  payload: AdmissionPolicyRequest,
+): Promise<AdmissionPolicyResponse> {
+  return request<AdmissionPolicyResponse>(`/repositories/${repositoryId}/admission`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function dryRunAdmission(
+  repositoryId: string,
+  payload: AdmissionPolicyRequest,
+): Promise<AdmissionPreviewResponse> {
+  return request<AdmissionPreviewResponse>(`/repositories/${repositoryId}/admission/dry-run`, {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }

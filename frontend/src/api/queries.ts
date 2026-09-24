@@ -11,6 +11,7 @@ import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
+import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
@@ -32,6 +33,7 @@ export const queryKeys = {
   settings: ["settings"] as const,
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
+  repositoryAdmission: (id: string) => ["repositories", id, "admission"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
   repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
@@ -528,6 +530,35 @@ export function useRerunAllAssays() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
       void queryClient.invalidateQueries({ queryKey: ["repositories"] });
     },
+  });
+}
+
+export function useAdmissionPolicy(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryAdmission(repositoryId),
+    queryFn: () => api.getAdmissionPolicy(repositoryId),
+    enabled,
+  });
+}
+
+export function useSaveAdmissionPolicy(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: AdmissionPolicyRequest) =>
+      api.saveAdmissionPolicy(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAdmission(repositoryId),
+      });
+    },
+  });
+}
+
+export function useDryRunAdmission(repositoryId: string) {
+  return useMutation({
+    mutationFn: (payload: AdmissionPolicyRequest) =>
+      api.dryRunAdmission(repositoryId, payload),
   });
 }
 
