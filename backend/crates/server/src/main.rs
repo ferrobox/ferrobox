@@ -351,7 +351,7 @@ async fn bootstrap_admin(config: &Config, user_store: Arc<PostgresUserStore>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn build_app_state(
     config: &Config,
     repository_store: Arc<PostgresRepositoryStore>,

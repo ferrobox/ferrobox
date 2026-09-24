@@ -152,9 +152,8 @@ impl AdmissionService {
         reference: &str,
         signed: bool,
     ) -> Result<(), PackagingError> {
-        let policy = match self.store.find_by_repository(repository_id).await {
-            Ok(policy) => policy,
-            Err(_) => return Ok(()),
+        let Ok(policy) = self.store.find_by_repository(repository_id).await else {
+            return Ok(());
         };
         if policy.deny_pull(signed) {
             return Err(PackagingError::PolicyDenied(format!(

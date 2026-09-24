@@ -440,9 +440,8 @@ impl OciPackagingStrategy {
         name: &str,
         reference: &str,
     ) -> Result<bool, PackagingError> {
-        let package_name = match PackageName::parse(name.to_string()) {
-            Ok(name) => name,
-            Err(_) => return Ok(false),
+        let Ok(package_name) = PackageName::parse(name.to_string()) else {
+            return Ok(false);
         };
         let Some(entry) = self
             .load_manifest_entry(repository, &package_name, reference)
@@ -459,9 +458,8 @@ impl OciPackagingStrategy {
         name: &str,
         digest: &str,
     ) -> Result<bool, PackagingError> {
-        let package_name = match PackageName::parse(name.to_string()) {
-            Ok(name) => name,
-            Err(_) => return Ok(false),
+        let Ok(package_name) = PackageName::parse(name.to_string()) else {
+            return Ok(false);
         };
         let entries = self
             .package_index_store

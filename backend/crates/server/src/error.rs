@@ -183,8 +183,8 @@ impl From<PackagingError> for ApiError {
             PackagingError::PolicyDenied(message) => Self::Forbidden(message),
             PackagingError::PackageNotFound(_)
             | PackagingError::VersionNotFound(_)
-            | PackagingError::FileNotFound(_) => Self::NotFound(err.to_string()),
-            PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
+            | PackagingError::FileNotFound(_)
+            | PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
                 status: 404,
                 ..
             }) => Self::NotFound(err.to_string()),
@@ -347,8 +347,8 @@ impl From<AdmissionError> for ApiError {
             AdmissionError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
             AdmissionError::AlloyRepository
             | AdmissionError::UnsupportedRepository
-            | AdmissionError::InvalidPolicy(_) => Self::BadRequest(err.to_string()),
-            AdmissionError::Store(
+            | AdmissionError::InvalidPolicy(_)
+            | AdmissionError::Store(
                 ferrobox_ports::admission_store::AdmissionStoreError::MissingSchema,
             ) => Self::BadRequest(err.to_string()),
             AdmissionError::Store(_)
@@ -434,8 +434,8 @@ impl From<ManageWebhookError> for ApiError {
             }
             ManageWebhookError::WebhookMismatch
             | ManageWebhookError::AlloyRepository
-            | ManageWebhookError::Invalid(_) => Self::BadRequest(err.to_string()),
-            ManageWebhookError::Store(
+            | ManageWebhookError::Invalid(_)
+            | ManageWebhookError::Store(
                 ferrobox_ports::webhook_store::WebhookStoreError::MissingSchema,
             ) => Self::BadRequest(err.to_string()),
             ManageWebhookError::Store(_) | ManageWebhookError::Repositories(_) => {
