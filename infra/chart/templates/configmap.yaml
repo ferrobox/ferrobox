@@ -1,0 +1,12 @@
+{{- if .Values.garage.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ferrobox.garageName" . }}-bootstrap
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+data:
+  bootstrap.sh: |
+    {{- .Files.Get "files/bootstrap.sh" | nindent 4 }}
+{{- end }}

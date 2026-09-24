@@ -1,0 +1,25 @@
+FerroBox {{ .Chart.AppVersion }}
+
+  helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Admin (solo si el arranque crea el primer usuario):
+
+  kubectl get secret {{ include "ferrobox.appSecretName" . }} -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.ADMIN_USERNAME}' | base64 -d; echo
+  kubectl get secret {{ include "ferrobox.appSecretName" . }} -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d; echo
+
+{{- if .Values.ingress.enabled }}
+
+UI: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+
+Port-forward:
+
+  kubectl port-forward svc/{{ include "ferrobox.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+
+UI: {{ .Values.publicBaseUrl }}
+{{- end }}
+
+La imagen por defecto es {{ .Values.image.repository }}:{{ .Values.image.tag }}.
+En kind/k3d: docker build -t {{ .Values.image.repository }}:{{ .Values.image.tag }} . && kind load docker-image {{ .Values.image.repository }}:{{ .Values.image.tag }}

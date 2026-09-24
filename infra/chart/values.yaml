@@ -1,0 +1,69 @@
+# Imagen construida con el Dockerfile de la raíz (`ferrobox:local` en compose).
+image:
+  repository: ferrobox
+  tag: local
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ferrobox.local
+  tls: []
+
+# URL pública (sin barra final). Úsala en el Ingress o en port-forward.
+publicBaseUrl: http://127.0.0.1:3000
+
+admin:
+  username: admin
+  # Vacío: se genera y se reutiliza en upgrades.
+  password: ""
+
+# Postgres del chart (como compose). Si lo apagas, pon externalUrl.
+postgresql:
+  enabled: true
+  image: postgres:18-alpine
+  username: ferrobox
+  password: ""
+  database: ferrobox
+  persistence:
+    size: 8Gi
+    storageClass: ""
+  # DATABASE_URL completa cuando enabled=false
+  externalUrl: ""
+
+# Garage de un nodo (como compose). Si lo apagas, rellena s3.external.
+garage:
+  enabled: true
+  image: dxflrs/garage:v2.2.0
+  # 64 hex chars (openssl rand -hex 32). Vacío: se genera.
+  rpcSecret: ""
+  adminToken: ""
+  metricsToken: ""
+  persistence:
+    metaSize: 1Gi
+    dataSize: 8Gi
+    storageClass: ""
+
+s3:
+  region: garage
+  bucket: ferrobox
+  accessKeyId: ""
+  secretAccessKey: ""
+  # Obligatorio si garage.enabled=false
+  externalEndpointUrl: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

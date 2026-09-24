@@ -1,0 +1,106 @@
+{{- if .Values.garage.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ferrobox.garageName" . }}
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
+  clusterIP: None
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+    - name: rpc
+      port: 3901
+      targetPort: rpc
+    - name: admin
+      port: 3903
+      targetPort: admin
+  selector:
+    {{- include "ferrobox.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ferrobox.garageName" . }}
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
+  serviceName: {{ include "ferrobox.garageName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ferrobox.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: garage
+  template:
+    metadata:
+      labels:
+        {{- include "ferrobox.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: garage
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: garage
+          image: {{ .Values.garage.image }}
+          imagePullPolicy: IfNotPresent
+          # dxflrs/garage is FROM scratch with no ENTRYPOINT.
+          command: ["/garage", "-c", "/config/garage.toml", "server"]
+          ports:
+            - name: s3
+              containerPort: 3900
+            - name: rpc
+              containerPort: 3901
+            - name: admin
+              containerPort: 3903
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: meta
+              mountPath: /var/lib/garage/meta
+            - name: data
+              mountPath: /var/lib/garage/data
+          readinessProbe:
+            exec:
+              command: ["/garage", "-c", "/config/garage.toml", "status"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/garage", "-c", "/config/garage.toml", "status"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "ferrobox.garageSecretName" . }}
+            items:
+              - key: garage.toml
+                path: garage.toml
+  volumeClaimTemplates:
+    - metadata:
+        name: meta
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.garage.persistence.storageClass }}
+        storageClassName: {{ .Values.garage.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.persistence.metaSize }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.garage.persistence.storageClass }}
+        storageClassName: {{ .Values.garage.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.garage.persistence.dataSize }}
+{{- end }}
