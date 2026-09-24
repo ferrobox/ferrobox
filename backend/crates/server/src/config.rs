@@ -35,6 +35,9 @@ pub struct Config {
     pub admin_username: String,
     /// Contraseña del administrador inicial (solo se usa si no hay usuarios).
     pub admin_password: String,
+    /// Directorio de la UI estática. Si está, el servidor anida la API
+    /// en `/api` y sirve el SPA en el resto de rutas.
+    pub frontend_dir: Option<String>,
 }
 
 impl Config {
@@ -56,6 +59,7 @@ impl Config {
             public_base_url: env_or("PUBLIC_BASE_URL", "http://127.0.0.1:3000"),
             admin_username: env_or("ADMIN_USERNAME", "admin"),
             admin_password: env_or("ADMIN_PASSWORD", "admin"),
+            frontend_dir: optional_env("FRONTEND_DIR"),
         })
     }
 }
@@ -66,4 +70,11 @@ fn require_env(key: &'static str) -> Result<String, ConfigError> {
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }

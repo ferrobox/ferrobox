@@ -86,6 +86,7 @@ use ferrobox_application::webhooks::WebhookService;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// Estado compartido por todos los manejadores de rutas.
 struct AppState {
@@ -134,6 +135,11 @@ async fn main() {
         .await
         .expect("failed to connect to PostgreSQL");
 
+    sqlx::migrate!("../../migrations")
+        .run(&pool)
+        .await
+        .expect("failed to run database migrations");
+
     let s3_client = build_s3_client(&config);
 
     let repository_store = Arc::new(PostgresRepositoryStore::new(pool.clone()));
@@ -171,7 +177,7 @@ async fn main() {
         http_client,
     ));
 
-    let app = build_router(state);
+    let app = build_router_with_frontend(state, config.frontend_dir.as_deref());
 
     let addr: SocketAddr = config.bind_address.parse().expect("invalid bind address");
     let listener = tokio::net::TcpListener::bind(addr)
@@ -183,18 +189,27 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-#[allow(clippy::too_many_lines)]
-fn build_router(state: Arc<AppState>) -> axum::Router {
-    let public = Router::new()
-        .route("/health", get(health))
-        .route("/auth/login", post(auth::login))
+fn protocol_public_router() -> Router<Arc<AppState>> {
+    Router::new()
         .merge(cargo_registry::public_router())
         .merge(npm_registry::public_router())
         .merge(pypi_registry::public_router())
         .merge(oci_registry::public_router())
-        .merge(conan_registry::public_router());
+        .merge(conan_registry::public_router())
+}
 
-    let protected = Router::new()
+fn protocol_write_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .merge(cargo_registry::write_router())
+        .merge(npm_registry::write_router())
+        .merge(pypi_registry::write_router())
+        .merge(oci_registry::write_router())
+        .merge(conan_registry::write_router())
+}
+
+#[allow(clippy::too_many_lines)]
+fn admin_protected_router() -> Router<Arc<AppState>> {
+    Router::new()
         .route("/auth/me", get(auth::me))
         .route("/auth/me/groups", get(groups::my_groups))
         .route("/auth/password", post(auth::change_password))
@@ -320,17 +335,53 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
         )
         .route("/gc/dry-run", post(retention::dry_run_garbage_collection))
         .route("/gc", post(retention::collect_garbage_all))
-        .merge(cargo_registry::write_router())
-        .merge(npm_registry::write_router())
-        .merge(pypi_registry::write_router())
-        .merge(oci_registry::write_router())
-        .merge(conan_registry::write_router())
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth_extract::require_auth,
-        ));
+}
 
-    public.merge(protected).with_state(state)
+fn with_auth(router: Router<Arc<AppState>>, state: &Arc<AppState>) -> Router<Arc<AppState>> {
+    router.route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        auth_extract::require_auth,
+    ))
+}
+
+fn build_api_router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
+    let public = Router::new()
+        .route("/health", get(health))
+        .route("/auth/login", post(auth::login))
+        .merge(protocol_public_router());
+    let protected = with_auth(
+        admin_protected_router().merge(protocol_write_router()),
+        state,
+    );
+    public.merge(protected)
+}
+
+fn spa_service(dir: &str) -> ServeDir<ServeFile> {
+    let index = std::path::Path::new(dir).join("index.html");
+    ServeDir::new(dir)
+        .append_index_html_on_directories(true)
+        .fallback(ServeFile::new(index))
+}
+
+fn build_router(state: Arc<AppState>) -> axum::Router {
+    build_router_with_frontend(state, None)
+}
+
+fn build_router_with_frontend(state: Arc<AppState>, frontend_dir: Option<&str>) -> axum::Router {
+    let api = build_api_router(&state);
+    let router = match frontend_dir {
+        Some(dir) => {
+            let protocols =
+                protocol_public_router().merge(with_auth(protocol_write_router(), &state));
+            Router::new()
+                .route("/health", get(health))
+                .merge(protocols)
+                .nest("/api", api)
+                .fallback_service(spa_service(dir))
+        }
+        None => api,
+    };
+    router.with_state(state)
 }
 
 async fn health() -> &'static str {
@@ -589,4 +640,39 @@ fn build_s3_client(config: &Config) -> S3Client {
         .build();
 
     S3Client::from_conf(s3_config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn spa_serves_index_for_unknown_paths() {
+        let dir = std::env::temp_dir().join(format!("ferrobox-spa-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            "<!doctype html><title>FerroBox</title>",
+        )
+        .unwrap();
+        let app = Router::new().fallback_service(spa_service(dir.to_str().unwrap()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/repositories")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(std::str::from_utf8(&body).unwrap().contains("FerroBox"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

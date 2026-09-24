@@ -17,23 +17,90 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  garage-config:
+    image: alpine:3.21
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN}
+      GARAGE_RPC_PUBLIC_ADDR: ${GARAGE_RPC_PUBLIC_ADDR:-garage:3901}
+    volumes:
+      - ./garage/garage.toml.template:/template:ro
+      - garage_etc:/config
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache gettext >/dev/null
+        envsubst < /template > /config/garage.toml
+
   garage:
     image: dxflrs/garage:v2.2.0
     container_name: ferrobox-garage
     restart: unless-stopped
+    depends_on:
+      garage-config:
+        condition: service_completed_successfully
     ports:
       - "3900:3900"
     volumes:
-      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage_etc:/config:ro
       - garage_meta:/var/lib/garage/meta
       - garage_data:/var/lib/garage/data
+    command: ["-c", "/config/garage.toml", "server"]
     healthcheck:
-      test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
+      test: ["CMD", "/garage", "-c", "/config/garage.toml", "status"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  garage-init:
+    image: dxflrs/garage:v2.2.0
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET:-ferrobox}
+      GARAGE_CONFIG: /config/garage.toml
+    volumes:
+      - garage_etc:/config:ro
+      - ./garage/bootstrap.sh:/bootstrap.sh:ro
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    restart: "no"
+
+  ferrobox:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ferrobox:local
+    container_name: ferrobox
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    ports:
+      - "${FERROBOX_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      S3_ENDPOINT_URL: http://garage:3900
+      S3_REGION: ${S3_REGION:-garage}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET:-ferrobox}
+      BIND_ADDRESS: 0.0.0.0:3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:3000}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      FRONTEND_DIR: /app/www
+
 volumes:
   postgres_data:
+  garage_etc:
   garage_meta:
   garage_data:

@@ -1,0 +1,13 @@
+.git
+**/.env
+**/.env.local
+**/target
+**/node_modules
+frontend/dist
+frontend/.vite
+**/*.pem
+.DS_Store
+.idea
+.vscode
+infra/.env
+infra/garage/garage.toml

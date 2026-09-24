@@ -4,8 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [ ! -f .env ]; then
+  echo "Copia infra/.env.example a infra/.env y rellena los secretos." >&2
+  exit 1
+fi
+
 echo "Levantando infraestructura de FerroBox (PostgreSQL + Garage)..."
-docker compose up -d
+echo "Para la imagen completa (API + UI): docker compose up --build"
+docker compose up -d postgres garage-config garage
 
 wait_for_healthy() {
   local service="$1"
@@ -20,6 +26,7 @@ wait_for_healthy() {
 
 wait_for_healthy postgres
 wait_for_healthy garage
+docker compose up --no-deps garage-init
 
 echo ""
 echo "Infraestructura lista:"
