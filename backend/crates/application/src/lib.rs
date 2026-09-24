@@ -80,6 +80,9 @@ pub mod assay;
 /// Retención de versiones y recolección de basura.
 pub mod retention;
 
+/// Política de admisión al bajar o publicar.
+pub mod admission;
+
 /// Cuota de almacenamiento por repositorio.
 pub mod quota;
 

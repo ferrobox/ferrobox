@@ -3,6 +3,7 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use ferrobox_application::admission::AdmissionError;
 use ferrobox_application::authenticate_token::AuthenticateTokenError;
 use ferrobox_application::change_password::ChangePasswordError;
 use ferrobox_application::create_repository::CreateRepositoryError;
@@ -15,6 +16,7 @@ use ferrobox_application::login::LoginError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
+use ferrobox_application::manage_groups::GroupError;
 use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
@@ -24,13 +26,12 @@ use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
 use ferrobox_application::retention::RetentionError;
 use ferrobox_application::search_packages::SearchPackagesError;
-use ferrobox_application::manage_groups::GroupError;
-use ferrobox_application::webhooks::ManageWebhookError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
+use ferrobox_application::webhooks::ManageWebhookError;
 use ferrobox_domain::quota::StorageQuotaError;
-use ferrobox_ports::group_store::GroupStoreError;
 use ferrobox_domain::retention::RetentionPolicyError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
+use ferrobox_ports::group_store::GroupStoreError;
 use ferrobox_ports::repository_store::RepositoryStoreError;
 
 use crate::dto::ErrorResponse;
@@ -124,9 +125,9 @@ impl From<PromoteError> for ApiError {
             | PromoteError::ArtifactRepositoryMismatch(_) => Self::BadRequest(err.to_string()),
             PromoteError::Quota(inner) => inner.into(),
             PromoteError::Packaging(inner) => inner.into(),
-            PromoteError::Repository(_)
-            | PromoteError::Artifact(_)
-            | PromoteError::Storage(_) => Self::Internal(err.to_string()),
+            PromoteError::Repository(_) | PromoteError::Artifact(_) | PromoteError::Storage(_) => {
+                Self::Internal(err.to_string())
+            }
         }
     }
 }
@@ -179,11 +180,10 @@ impl From<PackagingError> for ApiError {
             | PackagingError::InvalidUpstream(_) => Self::BadRequest(err.to_string()),
             PackagingError::AlreadyPublished(_) => Self::Conflict(err.to_string()),
             PackagingError::Quota(inner) => inner.into(),
+            PackagingError::PolicyDenied(message) => Self::Forbidden(message),
             PackagingError::PackageNotFound(_)
             | PackagingError::VersionNotFound(_)
-            | PackagingError::FileNotFound(_) => {
-                Self::NotFound(err.to_string())
-            }
+            | PackagingError::FileNotFound(_) => Self::NotFound(err.to_string()),
             PackagingError::Upstream(ferrobox_ports::http_client::HttpClientError::Status {
                 status: 404,
                 ..
@@ -335,6 +335,29 @@ impl From<ResetUserPasswordError> for ApiError {
     }
 }
 
+impl From<ferrobox_domain::admission::AdmissionPolicyError> for ApiError {
+    fn from(err: ferrobox_domain::admission::AdmissionPolicyError) -> Self {
+        Self::BadRequest(err.to_string())
+    }
+}
+
+impl From<AdmissionError> for ApiError {
+    fn from(err: AdmissionError) -> Self {
+        match err {
+            AdmissionError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            AdmissionError::AlloyRepository
+            | AdmissionError::UnsupportedRepository
+            | AdmissionError::InvalidPolicy(_) => Self::BadRequest(err.to_string()),
+            AdmissionError::Store(
+                ferrobox_ports::admission_store::AdmissionStoreError::MissingSchema,
+            ) => Self::BadRequest(err.to_string()),
+            AdmissionError::Store(_)
+            | AdmissionError::Artifacts(_)
+            | AdmissionError::Repositories(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
 impl From<RetentionPolicyError> for ApiError {
     fn from(err: RetentionPolicyError) -> Self {
         Self::BadRequest(err.to_string())
@@ -374,7 +397,7 @@ impl From<RetentionError> for ApiError {
             | RetentionError::Artifacts(_)
             | RetentionError::Index(_)
             | RetentionError::Assays(_)
-            |             RetentionError::Policy(_)
+            | RetentionError::Policy(_)
             | RetentionError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
@@ -393,7 +416,9 @@ impl From<GroupError> for ApiError {
             GroupError::UserNotFound
             | GroupError::RepositoryNotFound
             | GroupError::InvalidGroupRole => Self::BadRequest(err.to_string()),
-            GroupError::Groups(GroupStoreError::DuplicateName(_)) => Self::Conflict(err.to_string()),
+            GroupError::Groups(GroupStoreError::DuplicateName(_)) => {
+                Self::Conflict(err.to_string())
+            }
             GroupError::Groups(GroupStoreError::Backend(_))
             | GroupError::Users(_)
             | GroupError::Repositories(_) => Self::Internal(err.to_string()),
@@ -410,9 +435,9 @@ impl From<ManageWebhookError> for ApiError {
             ManageWebhookError::WebhookMismatch
             | ManageWebhookError::AlloyRepository
             | ManageWebhookError::Invalid(_) => Self::BadRequest(err.to_string()),
-            ManageWebhookError::Store(ferrobox_ports::webhook_store::WebhookStoreError::MissingSchema) => {
-                Self::BadRequest(err.to_string())
-            }
+            ManageWebhookError::Store(
+                ferrobox_ports::webhook_store::WebhookStoreError::MissingSchema,
+            ) => Self::BadRequest(err.to_string()),
             ManageWebhookError::Store(_) | ManageWebhookError::Repositories(_) => {
                 Self::Internal(err.to_string())
             }

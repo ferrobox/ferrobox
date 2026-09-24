@@ -338,6 +338,15 @@ mod tests {
                 storage.clone(),
                 http_client.clone(),
             ),
+            admission: ferrobox_application::admission::AdmissionService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryAdmissionStore::default()),
+                repository_store.clone(),
+                ListRepositoryArtifactsUseCase::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                ),
+            ),
             retention: RetentionService::new(
                 repository_store.clone(),
                 artifact_store,

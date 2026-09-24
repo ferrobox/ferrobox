@@ -14,6 +14,7 @@ import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembers
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
+import { AdmissionPanel } from "@/components/repository/AdmissionPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
 import { WebhooksPanel } from "@/components/repository/WebhooksPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
@@ -92,6 +93,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const path = `${repository.ecosystem}://${repository.name}/`;
   const isReadOnly =
     repository.kind.type === "mirror" || repository.kind.type === "alloy";
+  const showAdmission =
+    repository.kind.type === "forge" &&
+    (repository.ecosystem === "oci" || repository.ecosystem === "helm");
   const alloyMembers =
     repository.kind.type === "alloy"
       ? repository.kind.members.map((memberId) => {
@@ -199,6 +203,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
       <Tabs defaultValue="packages">
         <TabsList variant="line">
           <TabsTrigger value="packages">Paquetes</TabsTrigger>
+          {showAdmission ? <TabsTrigger value="admission">Políticas</TabsTrigger> : null}
           {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="retention">Retención</TabsTrigger>
           ) : null}
@@ -224,6 +229,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             )}
           />
         </TabsContent>
+        {showAdmission ? (
+          <TabsContent value="admission" className="mt-4">
+            <AdmissionPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="retention" className="mt-4">
             <RetentionPanel repositoryId={repositoryId} canWrite={canWrite} />

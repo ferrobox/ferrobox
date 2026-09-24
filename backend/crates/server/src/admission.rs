@@ -1,43 +1,68 @@
-//! Rutas HTTP de cuota de almacenamiento.
+//! Rutas HTTP de la política de admisión.
 
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
+use ferrobox_domain::admission::AdmissionPolicy;
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::quota::StorageQuota;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{QuotaRequest, QuotaResponse};
+use crate::dto::{AdmissionPolicyRequest, AdmissionPolicyResponse, AdmissionPreviewResponse};
 use crate::error::ApiError;
 
-pub(crate) async fn get_quota(
+pub(crate) async fn get_policy(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
-) -> Result<Json<QuotaResponse>, ApiError> {
+) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_read(&state.groups, &user, repository_id).await?;
-    let snapshot = state.quota.get_snapshot(repository_id).await?;
-    Ok(Json(QuotaResponse::from(snapshot)))
+    let policy = state.admission.get_policy(repository_id).await?;
+    Ok(Json(AdmissionPolicyResponse::from(policy)))
 }
 
-pub(crate) async fn save_quota(
+pub(crate) async fn save_policy(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
-    Json(payload): Json<QuotaRequest>,
-) -> Result<Json<QuotaResponse>, ApiError> {
+    Json(payload): Json<AdmissionPolicyRequest>,
+) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
-    let quota = StorageQuota::new(payload.limit_bytes)?;
-    let snapshot = state
-        .quota
-        .save(RepositoryId::from(repository_id), quota)
+    let policy = AdmissionPolicy::parse(
+        payload.enabled,
+        payload.when.as_str(),
+        payload.predicate.as_str(),
+        payload.effect.as_str(),
+    )?;
+    let saved = state
+        .admission
+        .save_policy(RepositoryId::from(repository_id), policy)
         .await?;
-    Ok(Json(QuotaResponse::from(snapshot)))
+    Ok(Json(AdmissionPolicyResponse::from(saved)))
+}
+
+pub(crate) async fn dry_run(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<AdmissionPolicyRequest>,
+) -> Result<Json<AdmissionPreviewResponse>, ApiError> {
+    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    let policy = AdmissionPolicy::parse(
+        payload.enabled,
+        payload.when.as_str(),
+        payload.predicate.as_str(),
+        payload.effect.as_str(),
+    )?;
+    let preview = state
+        .admission
+        .dry_run(RepositoryId::from(repository_id), policy)
+        .await?;
+    Ok(Json(AdmissionPreviewResponse::from(preview)))
 }
 
 #[cfg(test)]
@@ -66,12 +91,12 @@ mod tests {
     };
     use ferrobox_application::packaging::PackagingRegistry;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
-    use ferrobox_application::quota::QuotaService;
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryAdmissionStore, InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore,
+        InMemoryGroupStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore,
+        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -82,8 +107,17 @@ mod tests {
     use std::sync::Arc;
     use tower::ServiceExt;
 
+    struct Fixture {
+        app: Router,
+        token: String,
+        reader_token: String,
+        oci: String,
+        cargo: String,
+        alloy: String,
+    }
+
     #[allow(clippy::too_many_lines)]
-    async fn fixture() -> (Router, String, String, String) {
+    async fn fixture() -> Fixture {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
@@ -93,7 +127,8 @@ mod tests {
         let assay_store = Arc::new(InMemoryAssayStore::default());
         let retention_store = Arc::new(InMemoryRetentionStore::default());
         let http_client = Arc::new(InMemoryHttpClient::default());
-        let quota = QuotaService::new(
+
+        let quota = ferrobox_application::quota::QuotaService::new(
             repository_store.clone(),
             artifact_store.clone(),
             Arc::new(InMemoryQuotaStore::default()),
@@ -101,6 +136,12 @@ mod tests {
 
         let search_packages = ferrobox_application::search_packages::SearchPackagesUseCase::new(
             repository_store.clone(),
+            package_index_store.clone(),
+        );
+
+        let list_repository_artifacts = ListRepositoryArtifactsUseCase::new(
+            repository_store.clone(),
+            artifact_store.clone(),
             package_index_store.clone(),
         );
 
@@ -115,12 +156,11 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
-            list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
-                repository_store.clone(),
+            download_artifact: DownloadArtifactUseCase::new(
                 artifact_store.clone(),
-                package_index_store.clone(),
+                storage.clone(),
             ),
+            list_repository_artifacts: list_repository_artifacts.clone(),
             delete_repository: DeleteRepositoryUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -148,13 +188,9 @@ mod tests {
                 http_client.clone(),
             ),
             admission: ferrobox_application::admission::AdmissionService::new(
-                Arc::new(ferrobox_application::test_support::InMemoryAdmissionStore::default()),
+                Arc::new(InMemoryAdmissionStore::default()),
                 repository_store.clone(),
-                ListRepositoryArtifactsUseCase::new(
-                    repository_store.clone(),
-                    artifact_store.clone(),
-                    package_index_store.clone(),
-                ),
+                list_repository_artifacts,
             ),
             retention: RetentionService::new(
                 repository_store.clone(),
@@ -191,7 +227,6 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
         });
 
         let developer = state
@@ -216,32 +251,53 @@ mod tests {
             .await
             .unwrap()
             .plaintext_secret;
-        let repo = state
+        let oci = state
             .create_repository
             .execute(
-                RepositoryName::parse("binaries").unwrap(),
-                PackageEcosystem::Generic,
+                RepositoryName::parse("oci-local").unwrap(),
+                PackageEcosystem::Oci,
                 CreateRepositoryKind::Forge,
             )
             .await
             .unwrap();
+        let cargo = state
+            .create_repository
+            .execute(
+                RepositoryName::parse("crates-local").unwrap(),
+                PackageEcosystem::Cargo,
+                CreateRepositoryKind::Forge,
+            )
+            .await
+            .unwrap();
+        let alloy = state
+            .create_repository
+            .execute(
+                RepositoryName::parse("oci-all").unwrap(),
+                PackageEcosystem::Oci,
+                CreateRepositoryKind::Alloy { members: vec![oci] },
+            )
+            .await
+            .unwrap();
 
-        (
-            crate::build_router(state),
+        Fixture {
+            app: crate::build_router(state),
             token,
             reader_token,
-            repo.to_string(),
-        )
+            oci: oci.to_string(),
+            cargo: cargo.to_string(),
+            alloy: alloy.to_string(),
+        }
     }
 
     #[tokio::test]
-    async fn get_quota_defaults_to_unlimited() {
-        let (app, token, _, repo) = fixture().await;
-        let response = app
+    async fn get_policy_defaults_to_inactive() {
+        let fixture = fixture().await;
+        let response = fixture
+            .app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
+                    .uri(format!("/repositories/{}/admission", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -252,74 +308,122 @@ mod tests {
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], Value::Null);
-        assert_eq!(json["used_bytes"], 0);
+        assert_eq!(json["enabled"], false);
+        assert_eq!(json["when"], "pull");
+        assert_eq!(json["predicate"], "not_signed");
+        assert_eq!(json["effect"], "deny");
     }
 
     #[tokio::test]
-    async fn save_requires_write_role_and_publish_conflicts_when_exceeded() {
-        let (app, token, reader_token, repo) = fixture().await;
+    async fn save_and_dry_run_require_write_role() {
+        let fixture = fixture().await;
+        let body = r#"{"enabled":true,"when":"pull","predicate":"not_signed","effect":"warn"}"#;
 
-        let response = app
+        let response = fixture
+            .app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {reader_token}"))
+                    .uri(format!("/repositories/{}/admission", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.reader_token))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-        let response = app
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{}/admission/dry-run", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.reader_token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = fixture
+            .app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
+                    .uri(format!("/repositories/{}/admission", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let saved = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(json["enabled"], true);
+        assert_eq!(json["effect"], "warn");
 
-        let response = app
-            .clone()
+        let response = fixture
+            .app
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/repositories/{repo}/artifacts"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::from("too-big"))
+                    .uri(format!("/repositories/{}/admission/dry-run", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.status(), StatusCode::OK);
+        let preview = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&preview).unwrap();
+        assert_eq!(json["matches"], Value::Array(vec![]));
+        assert_eq!(json["allowed"], 0);
+    }
 
-        let response = app
+    #[tokio::test]
+    async fn rejects_alloy_and_non_oci_targets() {
+        let fixture = fixture().await;
+
+        let response = fixture
+            .app
+            .clone()
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
-                    .header("Authorization", format!("Bearer {token}"))
+                    .uri(format!("/repositories/{}/admission", fixture.alloy))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response = fixture
+            .app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repositories/{}/admission", fixture.cargo))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], 4);
-        assert_eq!(json["used_bytes"], 0);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

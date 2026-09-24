@@ -138,6 +138,10 @@ pub enum PackagingError {
     /// El binario no cabe en la cuota de almacenamiento del repositorio.
     #[error(transparent)]
     Quota(#[from] crate::quota::QuotaError),
+
+    /// Una política de admisión bloquea esta operación.
+    #[error("{0}")]
+    PolicyDenied(String),
 }
 
 /// El resultado de publicar un paquete: su coordenada recién asignada.

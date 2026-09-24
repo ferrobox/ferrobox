@@ -35,6 +35,9 @@ pub mod assay_store;
 /// El puerto de persistencia de la política de retención.
 pub mod retention_store;
 
+/// El puerto de persistencia de la política de admisión.
+pub mod admission_store;
+
 /// El puerto de persistencia de la cuota de almacenamiento.
 pub mod quota_store;
 

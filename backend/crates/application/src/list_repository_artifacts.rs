@@ -82,6 +82,7 @@ pub enum ListRepositoryArtifactsError {
 }
 
 /// Caso de uso: listar los artefactos de un repositorio.
+#[derive(Clone)]
 #[allow(clippy::struct_field_names)]
 pub struct ListRepositoryArtifactsUseCase {
     repository_store: Arc<dyn RepositoryStore>,

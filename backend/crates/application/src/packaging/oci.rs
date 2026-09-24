@@ -35,6 +35,7 @@ use super::{
     OciManifestDocument, PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome,
     PublishOutcome, copy_stored_artifact, cosign, ensure_quota, notify_assay,
 };
+use crate::admission::AdmissionService;
 use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
 use crate::quota::QuotaService;
@@ -61,6 +62,7 @@ pub struct OciPackagingStrategy {
     ecosystem: PackageEcosystem,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    admission: Option<AdmissionService>,
 }
 
 impl OciPackagingStrategy {
@@ -102,6 +104,7 @@ impl OciPackagingStrategy {
             ecosystem,
             assays: None,
             quota: None,
+            admission: None,
         }
     }
 
@@ -116,6 +119,13 @@ impl OciPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Aplica la política de admisión al leer un manifiesto.
+    #[must_use]
+    pub fn with_admission(mut self, admission: AdmissionService) -> Self {
+        self.admission = Some(admission);
         self
     }
 
@@ -394,6 +404,83 @@ impl OciPackagingStrategy {
         }
         tags.sort();
         Ok(tags)
+    }
+
+    async fn enforce_pull_policy(
+        &self,
+        repository: &Repository,
+        name: &str,
+        reference: &str,
+        document: &OciManifestDocument,
+    ) -> Result<(), PackagingError> {
+        let Some(admission) = &self.admission else {
+            return Ok(());
+        };
+        if !matches!(repository.kind(), RepositoryKind::Forge) {
+            return Ok(());
+        }
+        if cosign::is_accessory_tag(reference)
+            || self
+                .manifest_is_accessory(repository, name, reference)
+                .await?
+        {
+            return Ok(());
+        }
+        let signed = self
+            .image_is_signed(repository, name, &document.digest)
+            .await?;
+        admission
+            .enforce_pull(repository.id(), name, reference, signed)
+            .await
+    }
+
+    async fn manifest_is_accessory(
+        &self,
+        repository: &Repository,
+        name: &str,
+        reference: &str,
+    ) -> Result<bool, PackagingError> {
+        let package_name = match PackageName::parse(name.to_string()) {
+            Ok(name) => name,
+            Err(_) => return Ok(false),
+        };
+        let Some(entry) = self
+            .load_manifest_entry(repository, &package_name, reference)
+            .await?
+        else {
+            return Ok(false);
+        };
+        Ok(entry.accessory.is_some() || cosign::is_accessory_tag(&entry.reference))
+    }
+
+    async fn image_is_signed(
+        &self,
+        repository: &Repository,
+        name: &str,
+        digest: &str,
+    ) -> Result<bool, PackagingError> {
+        let package_name = match PackageName::parse(name.to_string()) {
+            Ok(name) => name,
+            Err(_) => return Ok(false),
+        };
+        let entries = self
+            .package_index_store
+            .entries_for_package(repository.id(), self.ecosystem, &package_name)
+            .await?;
+        for entry_bytes in entries {
+            let Ok(entry) = serde_json::from_slice::<ManifestEntry>(&entry_bytes) else {
+                continue;
+            };
+            if !cosign::is_signature_accessory(entry.accessory.as_deref(), &entry.reference) {
+                continue;
+            }
+            if cosign::signature_subject(entry.subject.as_deref(), &entry.reference).as_deref()
+                == Some(digest)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     async fn list_referrers_one(
@@ -1045,7 +1132,11 @@ impl PackagingStrategy for OciPackagingStrategy {
         let mut last_error = PackagingError::PackageNotFound(name.to_string());
         for target in &targets {
             match self.get_manifest_one(target, name, reference).await {
-                Ok(document) => return Ok(document),
+                Ok(document) => {
+                    self.enforce_pull_policy(target, name, reference, &document)
+                        .await?;
+                    return Ok(document);
+                }
                 Err(
                     PackagingError::PackageNotFound(_)
                     | PackagingError::VersionNotFound(_)
@@ -1056,7 +1147,11 @@ impl PackagingStrategy for OciPackagingStrategy {
                             .refresh_manifest_from_upstream(target, name, reference)
                             .await
                         {
-                            Ok(document) => return Ok(document),
+                            Ok(document) => {
+                                self.enforce_pull_policy(target, name, reference, &document)
+                                    .await?;
+                                return Ok(document);
+                            }
                             Err(
                                 PackagingError::PackageNotFound(_)
                                 | PackagingError::VersionNotFound(_)
@@ -1740,13 +1835,17 @@ mod tests {
 
     use ferrobox_domain::package_coordinate::{PackageName, PackageVersion};
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
+    use ferrobox_ports::admission_store::AdmissionStore;
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
+    use crate::admission::AdmissionService;
+    use crate::list_repository_artifacts::ListRepositoryArtifactsUseCase;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
-        InMemoryRepositoryStore, InMemoryStorage,
+        InMemoryAdmissionStore, InMemoryArtifactStore, InMemoryHttpClient,
+        InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage,
     };
+    use ferrobox_domain::admission::AdmissionPolicy;
 
     fn strategy() -> OciPackagingStrategy {
         strategy_with_http(Arc::new(InMemoryHttpClient::default()))
@@ -1994,6 +2093,92 @@ mod tests {
         let hits = strategy.search(&repository, "demo", 10).await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].max_version, "latest");
+    }
+
+    #[tokio::test]
+    async fn admission_denies_unsigned_pull_and_allows_signed() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let admission_store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = oci_forge("oci-local");
+        repositories.save(&repository).await.unwrap();
+        admission_store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = AdmissionService::new(
+            admission_store,
+            repositories.clone(),
+            ListRepositoryArtifactsUseCase::new(
+                repositories.clone(),
+                artifact_store.clone(),
+                index.clone(),
+            ),
+        );
+        let strategy = OciPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            repositories,
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_admission(admission);
+
+        let (config_digest, config) = blob(b"cfg");
+        let (layer_digest, layer) = blob(b"lyr");
+        strategy
+            .put_blob(&repository, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&repository, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        let image_digest = strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+            )
+            .await
+            .unwrap();
+        let error = strategy
+            .get_manifest(&repository, "demo", "latest")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+
+        let (payload_digest, payload) = blob(br#"{"critical":{}}"#);
+        strategy
+            .put_blob(&repository, &payload_digest, payload.clone())
+            .await
+            .unwrap();
+        let sig_tag = format!("{}.sig", image_digest.replace(':', "-"));
+        strategy
+            .put_manifest(
+                &repository,
+                "demo",
+                &sig_tag,
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                signature_manifest(&image_digest, &payload_digest, payload.len()),
+            )
+            .await
+            .unwrap();
+        strategy
+            .get_manifest(&repository, "demo", "latest")
+            .await
+            .unwrap();
+        strategy
+            .get_manifest(&repository, "demo", &sig_tag)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
