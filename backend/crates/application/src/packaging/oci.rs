@@ -416,7 +416,10 @@ impl OciPackagingStrategy {
         let Some(admission) = &self.admission else {
             return Ok(());
         };
-        if !matches!(repository.kind(), RepositoryKind::Forge) {
+        if !matches!(
+            repository.kind(),
+            RepositoryKind::Forge | RepositoryKind::Mirror { .. }
+        ) {
             return Ok(());
         }
         if cosign::is_accessory_tag(reference)
@@ -2177,6 +2180,117 @@ mod tests {
             .get_manifest(&repository, "demo", &sig_tag)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn admission_denies_unsigned_mirror_pull() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let admission_store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = oci_mirror("oci-proxy", "https://registry-1.docker.io");
+        repositories.save(&repository).await.unwrap();
+        admission_store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = AdmissionService::new(
+            admission_store,
+            repositories.clone(),
+            ListRepositoryArtifactsUseCase::new(
+                repositories.clone(),
+                artifact_store.clone(),
+                index.clone(),
+            ),
+        );
+        let strategy =
+            OciPackagingStrategy::new(artifact_store, index, storage, repositories, http.clone())
+                .with_admission(admission);
+        let manifest = Bytes::from_static(br#"{"schemaVersion":2,"layers":[]}"#);
+        http.stub(
+            "https://registry-1.docker.io/v2/library/alpine/manifests/latest",
+            200,
+            manifest,
+        );
+        let error = strategy
+            .get_manifest(&repository, "alpine", "latest")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+    }
+
+    #[tokio::test]
+    async fn admission_denies_unsigned_alloy_member_pull() {
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let admission_store = Arc::new(InMemoryAdmissionStore::default());
+        let forge = oci_forge("oci-member");
+        repositories.save(&forge).await.unwrap();
+        let alloy = Repository::new(
+            RepositoryName::parse("oci-all").unwrap(),
+            RepositoryKind::Alloy {
+                members: vec![forge.id()],
+            },
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repositories.save(&alloy).await.unwrap();
+        admission_store
+            .save(
+                forge.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = AdmissionService::new(
+            admission_store,
+            repositories.clone(),
+            ListRepositoryArtifactsUseCase::new(
+                repositories.clone(),
+                artifact_store.clone(),
+                index.clone(),
+            ),
+        );
+        let strategy = OciPackagingStrategy::new(
+            artifact_store,
+            index,
+            storage,
+            repositories,
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_admission(admission);
+        let (config_digest, config) = blob(b"cfg");
+        let (layer_digest, layer) = blob(b"lyr");
+        strategy
+            .put_blob(&forge, &config_digest, config.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_blob(&forge, &layer_digest, layer.clone())
+            .await
+            .unwrap();
+        strategy
+            .put_manifest(
+                &forge,
+                "demo",
+                "latest",
+                DEFAULT_MANIFEST_MEDIA_TYPE,
+                manifest_for(&config_digest, &layer_digest, config.len(), layer.len()),
+            )
+            .await
+            .unwrap();
+        let error = strategy
+            .get_manifest(&alloy, "demo", "latest")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
     }
 
     #[tokio::test]

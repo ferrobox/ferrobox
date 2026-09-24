@@ -94,7 +94,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const isReadOnly =
     repository.kind.type === "mirror" || repository.kind.type === "alloy";
   const showAdmission =
-    repository.kind.type === "forge" &&
+    (repository.kind.type === "forge" || repository.kind.type === "mirror") &&
     (repository.ecosystem === "oci" || repository.ecosystem === "helm");
   const alloyMembers =
     repository.kind.type === "alloy"
