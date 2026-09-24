@@ -7,6 +7,8 @@ metadata:
     {{- include "ferrobox.labels" . | nindent 4 }}
     app.kubernetes.io/component: garage
 spec:
+  # Headless: already installed this way; clusterIP is immutable.
+  clusterIP: None
   ports:
     - name: s3
       port: 3900
