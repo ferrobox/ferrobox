@@ -60,13 +60,10 @@ impl AuditService {
     ///
     /// # Errors
     ///
-    /// [`AuditError::Store`] si el backend falla (salvo esquema ausente).
+    /// [`AuditError::Store`] si el backend falla, incluida la tabla
+    /// ausente (`MissingSchema`): no se oculta como lista vacía.
     pub async fn list(&self) -> Result<Vec<AuditEvent>, AuditError> {
-        match self.store.list(AUDIT_HISTORY_LIMIT).await {
-            Ok(events) => Ok(events),
-            Err(AuditStoreError::MissingSchema) => Ok(Vec::new()),
-            Err(err) => Err(err.into()),
-        }
+        Ok(self.store.list(AUDIT_HISTORY_LIMIT).await?)
     }
 }
 
@@ -133,5 +130,34 @@ mod tests {
         let events = service.list().await.unwrap();
         assert_eq!(events.len(), AUDIT_HISTORY_LIMIT);
         assert_eq!(events[0].target(), "token-209");
+    }
+
+    struct MissingSchemaStore;
+
+    #[async_trait::async_trait]
+    impl ferrobox_ports::audit_store::AuditStore for MissingSchemaStore {
+        async fn record(
+            &self,
+            _event: &AuditEvent,
+        ) -> Result<(), ferrobox_ports::audit_store::AuditStoreError> {
+            Err(ferrobox_ports::audit_store::AuditStoreError::MissingSchema)
+        }
+
+        async fn list(
+            &self,
+            _limit: usize,
+        ) -> Result<Vec<AuditEvent>, ferrobox_ports::audit_store::AuditStoreError> {
+            Err(ferrobox_ports::audit_store::AuditStoreError::MissingSchema)
+        }
+    }
+
+    #[tokio::test]
+    async fn list_surfaces_a_missing_table() {
+        let service = AuditService::new(Arc::new(MissingSchemaStore));
+        let error = service.list().await.unwrap_err();
+        assert!(matches!(
+            error,
+            AuditError::Store(ferrobox_ports::audit_store::AuditStoreError::MissingSchema)
+        ));
     }
 }

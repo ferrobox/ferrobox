@@ -429,7 +429,12 @@ impl From<GroupError> for ApiError {
 
 impl From<AuditError> for ApiError {
     fn from(err: AuditError) -> Self {
-        Self::Internal(err.to_string())
+        match err {
+            AuditError::Store(ferrobox_ports::audit_store::AuditStoreError::MissingSchema) => {
+                Self::BadRequest(err.to_string())
+            }
+            AuditError::Store(_) => Self::Internal(err.to_string()),
+        }
     }
 }
 
