@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ferrobox.fullname" . }}
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ferrobox.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "ferrobox.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.postgresql.enabled .Values.garage.enabled }}
+      initContainers:
+        {{- if .Values.postgresql.enabled }}
+        - name: wait-postgres
+          image: busybox:1.37
+          command:
+            - /bin/sh
+            - -c
+            - until nc -z {{ include "ferrobox.postgresName" . }} 5432; do sleep 1; done
+        {{- end }}
+        {{- if .Values.garage.enabled }}
+        - name: bootstrap-garage
+          image: alpine:3.21
+          command: ["/bin/sh", "/bootstrap.sh"]
+          env:
+            - name: GARAGE_ADMIN_URL
+              value: http://{{ include "ferrobox.garageName" . }}:3903
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.garageSecretName" . }}
+                  key: GARAGE_ADMIN_TOKEN
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_SECRET_ACCESS_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_BUCKET
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap.sh
+              subPath: bootstrap.sh
+              readOnly: true
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: ferrobox
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: BIND_ADDRESS
+              value: 0.0.0.0:3000
+            - name: FRONTEND_DIR
+              value: /app/www
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: DATABASE_URL
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_ENDPOINT_URL
+            - name: S3_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_REGION
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_SECRET_ACCESS_KEY
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: S3_BUCKET
+            - name: PUBLIC_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: PUBLIC_BASE_URL
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: ADMIN_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.garage.enabled }}
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: {{ include "ferrobox.garageName" . }}-bootstrap
+            defaultMode: 0555
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
