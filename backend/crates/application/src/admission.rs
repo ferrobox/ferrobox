@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use ferrobox_domain::admission::{
     AdmissionEffect, AdmissionEvent, AdmissionPolicy, AdmissionPolicyError,
 };
@@ -183,16 +183,24 @@ impl AdmissionService {
             AdmissionEffect::Deny => "no está firmada: se denegó el pull".to_string(),
             AdmissionEffect::Warn => "no está firmada: solo aviso, el pull siguió".to_string(),
         };
-        let event = AdmissionEvent::from_parts(
-            AdmissionEventId::new(),
-            repository_id,
-            name,
-            reference,
-            effect,
-            reason,
-            Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-        );
-        let _ = self.store.record_event(&event).await;
+        let now = Utc::now();
+        let recent = self
+            .store
+            .list_events(repository_id, 10)
+            .await
+            .unwrap_or_default();
+        if !is_duplicate_pull_event(&recent, name, reference, effect, now) {
+            let event = AdmissionEvent::from_parts(
+                AdmissionEventId::new(),
+                repository_id,
+                name,
+                reference,
+                effect,
+                reason,
+                now.to_rfc3339_opts(SecondsFormat::Secs, true),
+            );
+            let _ = self.store.record_event(&event).await;
+        }
         if matches!(effect, AdmissionEffect::Deny) {
             return Err(PackagingError::PolicyDenied(format!(
                 "admission policy denies pull of {name}:{reference}: artifact is not signed"
@@ -218,6 +226,38 @@ impl AdmissionService {
         }
         Ok(())
     }
+}
+
+/// Docker pide el manifiesto por etiqueta y otra vez por digest (y a
+/// menudo HEAD + GET). Sin esto, un pull deja dos filas idénticas.
+const PULL_EVENT_DEDUPE_SECS: i64 = 15;
+
+fn is_digest_reference(reference: &str) -> bool {
+    reference.starts_with("sha256:")
+}
+
+fn is_duplicate_pull_event(
+    existing: &[AdmissionEvent],
+    name: &str,
+    reference: &str,
+    effect: AdmissionEffect,
+    now: DateTime<Utc>,
+) -> bool {
+    existing.iter().any(|event| {
+        if event.name() != name || event.effect() != effect {
+            return false;
+        }
+        let Ok(created) = DateTime::parse_from_rfc3339(event.created_at()) else {
+            return false;
+        };
+        let age = now.signed_duration_since(created.with_timezone(&Utc));
+        if age.num_seconds() < 0 || age.num_seconds() > PULL_EVENT_DEDUPE_SECS {
+            return false;
+        }
+        event.reference() == reference
+            || is_digest_reference(reference)
+            || is_digest_reference(event.reference())
+    })
 }
 
 fn preview_against(listed: &[ListedArtifact], policy: AdmissionPolicy) -> AdmissionPreview {
@@ -402,6 +442,69 @@ mod tests {
         let events = admission.list_events(repository.id()).await.unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].effect(), AdmissionEffect::Warn);
+    }
+
+    #[tokio::test]
+    async fn enforce_records_one_event_for_tag_and_digest_of_the_same_pull() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = forge_oci(&repositories).await;
+        store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = service(store, repositories, artifacts, index);
+        let digest = "sha256:cc58b463f0e3772e56c92408102e282ed4bbcb88eeb40bf7cc9a2ff1cc713562";
+        admission
+            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .await
+            .unwrap();
+        admission
+            .enforce_pull(repository.id(), "busybox", digest, false)
+            .await
+            .unwrap();
+        admission
+            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .await
+            .unwrap();
+        let events = admission.list_events(repository.id()).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].reference(), "unsigned");
+        assert_eq!(events[0].effect(), AdmissionEffect::Warn);
+    }
+
+    #[tokio::test]
+    async fn enforce_still_denies_on_a_duplicate_lookup() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = forge_oci(&repositories).await;
+        store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = service(store, repositories, artifacts, index);
+        let first = admission
+            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .await
+            .unwrap_err();
+        let second = admission
+            .enforce_pull(repository.id(), "busybox", "unsigned", false)
+            .await
+            .unwrap_err();
+        assert!(matches!(first, PackagingError::PolicyDenied(_)));
+        assert!(matches!(second, PackagingError::PolicyDenied(_)));
+        let events = admission.list_events(repository.id()).await.unwrap();
+        assert_eq!(events.len(), 1);
     }
 
     #[tokio::test]
