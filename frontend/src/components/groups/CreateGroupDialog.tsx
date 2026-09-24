@@ -43,7 +43,7 @@ export function CreateGroupDialog() {
       setName("");
       setOpen(false);
       toast.success("Grupo creado");
-      navigate(`/groups/${created.id}`);
+      navigate(`/groups/${created.id}?edit=1`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo crear el grupo");
     }

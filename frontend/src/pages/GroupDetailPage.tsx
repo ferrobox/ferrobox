@@ -1,16 +1,20 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { AlertCircle, ArrowLeft, Loader2, Pencil, RefreshCw } from "lucide-react";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
+import type { GroupDetailResponse } from "@/api/generated/GroupDetailResponse";
+import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { RoleDto } from "@/api/generated/RoleDto";
+import type { UserResponse } from "@/api/generated/UserResponse";
 import { useGroup, useRepositories, useSaveGroup, useUsers } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { KIND_META } from "@/components/repository/RepositoryKindBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -40,6 +44,8 @@ export function GroupDetailPage() {
 }
 
 function GroupDetailContent({ groupId }: { groupId: string }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editing = searchParams.get("edit") === "1";
   const groupQuery = useGroup(groupId);
   const usersQuery = useUsers();
   const repositoriesQuery = useRepositories();
@@ -103,6 +109,16 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
 
   const group = groupQuery.data;
 
+  function enterEdit() {
+    setSearchParams({ edit: "1" });
+  }
+
+  function cancelEdit() {
+    setDraftUserIds(null);
+    setDraftRepoRoles(null);
+    setSearchParams({});
+  }
+
   function toggleUser(userId: string) {
     setDraftUserIds((current) => {
       const selected = current ?? selectedUserIds;
@@ -126,6 +142,7 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
       });
       setDraftUserIds(null);
       setDraftRepoRoles(null);
+      setSearchParams({});
       toast.success("Grupo actualizado");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "No se pudo guardar el grupo");
@@ -143,100 +160,207 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
         </Button>
         <PageHeader
           title={group.name}
-          description="Elige los miembros y los repositorios. Quien esté en este grupo solo verá esos repositorios, con rol Lector o Desarrollador."
+          description={
+            editing
+              ? "Elige los miembros y los repositorios. Quien esté en este grupo solo verá esos repositorios, con rol Lector o Desarrollador."
+              : "Miembros y repositorios de este grupo. Quien pertenezca al grupo solo ve esos repositorios."
+          }
           actions={
-            <Button onClick={() => void onSave()} disabled={saveGroup.isPending}>
-              {saveGroup.isPending ? <Loader2 className="animate-spin" /> : null}
-              Guardar
-            </Button>
+            editing ? (
+              <>
+                <Button variant="outline" onClick={cancelEdit} disabled={saveGroup.isPending}>
+                  Cancelar
+                </Button>
+                <Button onClick={() => void onSave()} disabled={saveGroup.isPending}>
+                  {saveGroup.isPending ? <Loader2 className="animate-spin" /> : null}
+                  Guardar
+                </Button>
+              </>
+            ) : (
+              <Button onClick={enterEdit}>
+                <Pencil />
+                Editar
+              </Button>
+            )
           }
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Miembros</CardTitle>
-            <CardDescription>Los usuarios marcados pertenecen a este grupo.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {users.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay usuarios en la instancia.</p>
-            ) : (
-              <ul className="max-h-80 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                {users.map((entry) => (
-                  <li key={entry.id}>
-                    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
-                      <input
-                        type="checkbox"
-                        className="size-4 accent-primary"
-                        checked={selectedUserIds.includes(entry.id)}
-                        onChange={() => toggleUser(entry.id)}
-                      />
-                      <span className="min-w-0 flex-1 truncate font-medium">{entry.username}</span>
-                      <span className="text-xs text-muted-foreground">{roleLabel(entry.role)}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+      {editing ? (
+        <GroupEditor
+          groupName={group.name}
+          users={users}
+          repositories={repositories}
+          selectedUserIds={selectedUserIds}
+          repoRoles={repoRoles}
+          onToggleUser={toggleUser}
+          onChangeRepoRole={(repositoryId, role) => {
+            setDraftRepoRoles((current) => ({
+              ...(current ?? repoRoles),
+              [repositoryId]: role,
+            }));
+          }}
+        />
+      ) : (
+        <GroupOverview group={group} />
+      )}
+    </div>
+  );
+}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Repositorios</CardTitle>
-            <CardDescription>
-              Asigna un rol por repositorio. «Sin acceso» deja ese repositorio fuera del grupo.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {repositories.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hay repositorios.</p>
-            ) : (
-              <ul className="max-h-80 space-y-2 overflow-y-auto rounded-md border border-border p-2">
-                {repositories.map((repository) => {
-                  const role = repoRoles[repository.id] ?? "none";
-                  const kindLabel = KIND_META[repository.kind.type].label;
-                  return (
-                    <li
-                      key={repository.id}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
+function GroupOverview({ group }: { group: GroupDetailResponse }) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle>Miembros</CardTitle>
+          <CardDescription>Usuarios que pertenecen a este grupo.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {group.members.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Este grupo no tiene miembros.</p>
+          ) : (
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {group.members.map((member) => (
+                <li key={member.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <span className="min-w-0 truncate font-medium">{member.username}</span>
+                  <Badge variant="outline">{roleLabel(member.role)}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Repositorios</CardTitle>
+          <CardDescription>
+            Repositorios que este grupo puede ver, con el rol concedido.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {group.repositories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Este grupo no tiene repositorios asignados.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {group.repositories.map((grant) => (
+                <li
+                  key={grant.repository_id}
+                  className="flex items-center justify-between gap-2 px-3 py-2"
+                >
+                  <span className="min-w-0 truncate font-medium">{grant.repository_name}</span>
+                  <Badge variant="outline">{roleLabel(grant.role)}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function GroupEditor({
+  groupName,
+  users,
+  repositories,
+  selectedUserIds,
+  repoRoles,
+  onToggleUser,
+  onChangeRepoRole,
+}: {
+  groupName: string;
+  users: UserResponse[];
+  repositories: RepositoryResponse[];
+  selectedUserIds: string[];
+  repoRoles: Record<string, RoleDto | "none">;
+  onToggleUser: (userId: string) => void;
+  onChangeRepoRole: (repositoryId: string, role: RoleDto | "none") => void;
+}) {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle>Miembros</CardTitle>
+          <CardDescription>Los usuarios marcados pertenecen a este grupo.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {users.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay usuarios en la instancia.</p>
+          ) : (
+            <ul className="max-h-80 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+              {users.map((entry) => (
+                <li key={entry.id}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={selectedUserIds.includes(entry.id)}
+                      onChange={() => onToggleUser(entry.id)}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium">{entry.username}</span>
+                    <span className="text-xs text-muted-foreground">{roleLabel(entry.role)}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Repositorios</CardTitle>
+          <CardDescription>
+            Asigna un rol por repositorio. «Sin acceso» deja ese repositorio fuera del grupo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {repositories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay repositorios.</p>
+          ) : (
+            <ul className="max-h-80 space-y-2 overflow-y-auto rounded-md border border-border p-2">
+              {repositories.map((repository) => {
+                const role = repoRoles[repository.id] ?? "none";
+                const kindLabel = KIND_META[repository.kind.type].label;
+                return (
+                  <li
+                    key={repository.id}
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium">{repository.name}</span>
+                    <span className="text-xs text-muted-foreground">{kindLabel}</span>
+                    <Select
+                      value={role}
+                      onValueChange={(value) =>
+                        onChangeRepoRole(repository.id, value as RoleDto | "none")
+                      }
                     >
-                      <span className="min-w-0 flex-1 truncate font-medium">{repository.name}</span>
-                      <span className="text-xs text-muted-foreground">{kindLabel}</span>
-                      <Select
-                        value={role}
-                        onValueChange={(value) => {
-                          setDraftRepoRoles((current) => ({
-                            ...(current ?? repoRoles),
-                            [repository.id]: value as RoleDto | "none",
-                          }));
-                        }}
+                      <SelectTrigger
+                        aria-label={`Rol de ${groupName} en ${repository.name}`}
+                        className="h-8 w-[150px]"
                       >
-                        <SelectTrigger
-                          aria-label={`Rol de ${group.name} en ${repository.name}`}
-                          className="h-8 w-[150px]"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Sin acceso</SelectItem>
-                          {GROUP_ROLES.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {roleLabel(option)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sin acceso</SelectItem>
+                        {GROUP_ROLES.map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {roleLabel(option)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

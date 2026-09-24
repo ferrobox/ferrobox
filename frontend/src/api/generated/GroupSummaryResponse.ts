@@ -3,4 +3,12 @@
 /**
  * Resumen de un grupo en listados.
  */
-export type GroupSummaryResponse = { id: string, name: string, member_count: number, repository_count: number, };
+export type GroupSummaryResponse = { id: string, name: string, member_count: number, repository_count: number, 
+/**
+ * Nombres de usuario de los miembros, ordenados.
+ */
+member_names: Array<string>, 
+/**
+ * Nombres de los repositorios asignados, ordenados.
+ */
+repository_names: Array<string>, };

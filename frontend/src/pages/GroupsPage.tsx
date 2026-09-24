@@ -1,5 +1,5 @@
 import { AlertCircle, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -7,6 +7,7 @@ import { useDeleteGroup, useGroups } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers } from "@/auth/roles";
 import { CreateGroupDialog } from "@/components/groups/CreateGroupDialog";
+import { NameChips } from "@/components/groups/NameChips";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -45,7 +46,7 @@ export function GroupsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Grupos"
-        description="Asigna usuarios a grupos y elige a qué repositorios tienen acceso. Un miembro de grupo solo ve esos repositorios. Quien no esté en ningún grupo sigue el rol de la instancia en los repositorios sin restringir."
+        description="Pulsa un grupo para ver sus miembros y repositorios. Editar cambia quién pertenece y a qué tiene acceso. Un miembro de grupo solo ve esos repositorios. Quien no esté en ningún grupo sigue el rol de la instancia en los repositorios sin restringir."
         actions={<CreateGroupDialog />}
       />
 
@@ -90,18 +91,35 @@ export function GroupsPage() {
             </TableHeader>
             <TableBody>
               {data.map((group) => (
-                <TableRow key={group.id}>
-                  <TableCell className="font-medium">{group.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{group.member_count}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {group.repository_count}
+                <TableRow
+                  key={group.id}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/groups/${group.id}`)}
+                >
+                  <TableCell className="font-medium">
+                    <Link
+                      to={`/groups/${group.id}`}
+                      className="hover:underline"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {group.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="whitespace-normal">
+                    <NameChips names={group.member_names} empty="Ninguno" />
+                  </TableCell>
+                  <TableCell className="whitespace-normal">
+                    <NameChips names={group.repository_names} empty="Ninguno" />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => navigate(`/groups/${group.id}`)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(`/groups/${group.id}?edit=1`);
+                        }}
                       >
                         <Pencil />
                         Editar
@@ -112,7 +130,11 @@ export function GroupsPage() {
                         pending={deleteGroup.isPending}
                         onConfirm={() => onDelete(group.id, group.name)}
                         trigger={
-                          <Button size="sm" variant="ghost">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(event) => event.stopPropagation()}
+                          >
                             <Trash2 />
                             Eliminar
                           </Button>

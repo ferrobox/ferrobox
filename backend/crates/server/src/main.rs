@@ -184,6 +184,7 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
 
     let protected = Router::new()
         .route("/auth/me", get(auth::me))
+        .route("/auth/me/groups", get(groups::my_groups))
         .route("/auth/password", post(auth::change_password))
         .route("/settings", get(settings::get_settings))
         .route(

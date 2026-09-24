@@ -27,6 +27,7 @@ export const queryKeys = {
   users: ["users"] as const,
   groups: ["groups"] as const,
   group: (id: string) => ["groups", id] as const,
+  myGroups: ["auth", "me", "groups"] as const,
   repositoryAccess: (id: string) => ["repositories", id, "access"] as const,
   settings: ["settings"] as const,
   assays: ["assays"] as const,
@@ -282,6 +283,13 @@ export function useResetUserPassword() {
   });
 }
 
+export function useMyGroups() {
+  return useQuery({
+    queryKey: queryKeys.myGroups,
+    queryFn: api.listMyGroups,
+  });
+}
+
 export function useGroups() {
   return useQuery({
     queryKey: queryKeys.groups,
@@ -302,6 +310,7 @@ export function useCreateGroup() {
     mutationFn: (payload: CreateGroupRequest) => api.createGroup(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.myGroups });
     },
   });
 }
@@ -312,6 +321,7 @@ export function useDeleteGroup() {
     mutationFn: (groupId: string) => api.deleteGroup(groupId),
     onSuccess: (_data, groupId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.myGroups });
       void queryClient.removeQueries({ queryKey: queryKeys.group(groupId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
     },
@@ -334,6 +344,7 @@ export function useSaveGroup(groupId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.myGroups });
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
     },
   });
@@ -359,6 +370,7 @@ export function useSetRepositoryAccess(repositoryId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({ queryKey: queryKeys.groups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.myGroups });
     },
   });
 }
