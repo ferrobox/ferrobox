@@ -45,8 +45,12 @@ pub fn split_declared(raw: &str) -> Vec<String> {
 
 fn is_placeholder(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
-    matches!(lower.as_str(), "unknown" | "none" | "see license")
-        || lower.starts_with("see license in")
+    matches!(
+        lower.as_str(),
+        "unknown" | "none" | "see license" | "put the package license here"
+    ) || lower.starts_with("see license in")
+        || lower.starts_with('<')
+        || lower.contains("put the package license")
 }
 
 fn push_part(parts: &mut Vec<String>, part: &str) {
@@ -259,6 +263,7 @@ mod tests {
             vec!["MIT".to_string(), "Apache-2.0".to_string()]
         );
         assert!(split_declared("SEE LICENSE IN LICENSE").is_empty());
+        assert!(split_declared("<Put the package license here>").is_empty());
     }
 
     #[test]

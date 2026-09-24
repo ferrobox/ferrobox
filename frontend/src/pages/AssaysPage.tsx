@@ -22,19 +22,38 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+function isPlaceholderLicense(license: string): boolean {
+  const lower = license.toLowerCase();
+  return lower.startsWith("<") || lower.includes("put the package license");
+}
+
 function AssayLicenseSummary({ assay }: { assay: AssayResponse }) {
-  const licenses = assay.components.flatMap((component) => component.licenses ?? []);
-  const unique = [...new Set(licenses)];
-  if (unique.length === 0) {
+  const root = assay.components.find((component) => component.kind === "root");
+  const rootLicenses = [...new Set((root?.licenses ?? []).filter((license) => !isPlaceholderLicense(license)))];
+  const all = [
+    ...new Set(
+      assay.components
+        .flatMap((component) => component.licenses ?? [])
+        .filter((license) => !isPlaceholderLicense(license)),
+    ),
+  ];
+  const shown = rootLicenses.length > 0 ? rootLicenses : all.slice(0, 2);
+  const extra = rootLicenses.length > 0 ? 0 : Math.max(0, all.length - shown.length);
+
+  if (shown.length === 0) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
+
   return (
     <span className="flex flex-wrap gap-1">
-      {unique.map((license) => (
+      {shown.map((license) => (
         <Badge key={license} variant="secondary">
           {license}
         </Badge>
       ))}
+      {extra > 0 ? (
+        <span className="text-xs text-muted-foreground">+{extra} en la composición</span>
+      ) : null}
     </span>
   );
 }

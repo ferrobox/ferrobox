@@ -232,7 +232,10 @@ function AssayBody({
                   <span className="ml-2 font-mono text-muted-foreground">{component.version}</span>
                 </span>
                 <span className="flex flex-wrap items-center justify-end gap-2">
-                  <LicenseChips licenses={component.licenses ?? []} empty="—" />
+                  <LicenseChips
+                    licenses={(component.licenses ?? []).filter((license) => !isPlaceholderLicense(license))}
+                    empty="—"
+                  />
                   <span className="text-xs text-muted-foreground">
                     {component.kind === "root"
                       ? "ensayado"
@@ -250,11 +253,19 @@ function AssayBody({
   );
 }
 
+function isPlaceholderLicense(license: string): boolean {
+  const lower = license.toLowerCase();
+  return lower.startsWith("<") || lower.includes("put the package license");
+}
+
 function uniqueLicenses(assay: AssayResponse): string[] {
   const seen = new Set<string>();
   const licenses: string[] = [];
   for (const component of assay.components) {
     for (const license of component.licenses ?? []) {
+      if (isPlaceholderLicense(license)) {
+        continue;
+      }
       const key = license.toLowerCase();
       if (seen.has(key)) {
         continue;
