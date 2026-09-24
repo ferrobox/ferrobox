@@ -2,8 +2,11 @@
 
 use std::sync::Arc;
 
-use ferrobox_domain::admission::{AdmissionEffect, AdmissionPolicy, AdmissionPolicyError};
-use ferrobox_domain::ids::RepositoryId;
+use chrono::{SecondsFormat, Utc};
+use ferrobox_domain::admission::{
+    AdmissionEffect, AdmissionEvent, AdmissionPolicy, AdmissionPolicyError,
+};
+use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
@@ -140,7 +143,25 @@ impl AdmissionService {
         Ok(preview_against(&listed, policy))
     }
 
-    /// Deniega un pull si la política activa lo exige.
+    /// Últimos avisos y denegaciones del repositorio.
+    ///
+    /// # Errors
+    ///
+    /// [`AdmissionError::RepositoryNotFound`] o un fallo de puerto.
+    pub async fn list_events(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Vec<AdmissionEvent>, AdmissionError> {
+        self.require_target(repository_id).await?;
+        match self.store.list_events(repository_id, 50).await {
+            Ok(events) => Ok(events),
+            Err(AdmissionStoreError::MissingSchema) => Ok(Vec::new()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Deniega un pull si la política activa lo exige y deja constancia
+    /// de avisos o denegaciones.
     ///
     /// # Errors
     ///
@@ -155,7 +176,24 @@ impl AdmissionService {
         let Ok(policy) = self.store.find_by_repository(repository_id).await else {
             return Ok(());
         };
-        if policy.deny_pull(signed) {
+        let Some(effect) = policy.apply_pull(signed) else {
+            return Ok(());
+        };
+        let reason = match effect {
+            AdmissionEffect::Deny => "no está firmada: se denegó el pull".to_string(),
+            AdmissionEffect::Warn => "no está firmada: solo aviso, el pull siguió".to_string(),
+        };
+        let event = AdmissionEvent::from_parts(
+            AdmissionEventId::new(),
+            repository_id,
+            name,
+            reference,
+            effect,
+            reason,
+            Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        );
+        let _ = self.store.record_event(&event).await;
+        if matches!(effect, AdmissionEffect::Deny) {
             return Err(PackagingError::PolicyDenied(format!(
                 "admission policy denies pull of {name}:{reference}: artifact is not signed"
             )));
@@ -336,6 +374,34 @@ mod tests {
             .enforce_pull(repository.id(), "alpine", "latest", true)
             .await
             .unwrap();
+        let events = admission.list_events(repository.id()).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].effect(), AdmissionEffect::Deny);
+        assert_eq!(events[0].name(), "alpine");
+    }
+
+    #[tokio::test]
+    async fn warn_records_and_allows() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = forge_oci(&repositories).await;
+        store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap(),
+            )
+            .await
+            .unwrap();
+        let admission = service(store, repositories, artifacts, index);
+        admission
+            .enforce_pull(repository.id(), "alpine", "latest", false)
+            .await
+            .unwrap();
+        let events = admission.list_events(repository.id()).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].effect(), AdmissionEffect::Warn);
     }
 
     #[tokio::test]

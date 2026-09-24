@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use ferrobox_domain::admission::AdmissionPolicy;
+use ferrobox_domain::admission::{AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
@@ -706,6 +706,7 @@ impl AssayStore for InMemoryAssayStore {
 #[derive(Default)]
 pub struct InMemoryAdmissionStore {
     policies: Mutex<HashMap<RepositoryId, AdmissionPolicy>>,
+    events: Mutex<HashMap<RepositoryId, Vec<AdmissionEvent>>>,
 }
 
 #[async_trait]
@@ -730,6 +731,28 @@ impl AdmissionStore for InMemoryAdmissionStore {
     ) -> Result<(), AdmissionStoreError> {
         self.policies.lock().unwrap().insert(repository_id, policy);
         Ok(())
+    }
+
+    async fn record_event(&self, event: &AdmissionEvent) -> Result<(), AdmissionStoreError> {
+        let mut events = self.events.lock().unwrap();
+        let list = events.entry(event.repository_id()).or_default();
+        list.insert(0, event.clone());
+        list.truncate(50);
+        Ok(())
+    }
+
+    async fn list_events(
+        &self,
+        repository_id: RepositoryId,
+        limit: usize,
+    ) -> Result<Vec<AdmissionEvent>, AdmissionStoreError> {
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .map(|events| events.iter().take(limit).cloned().collect())
+            .unwrap_or_default())
     }
 }
 

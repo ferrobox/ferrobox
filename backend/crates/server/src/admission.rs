@@ -11,7 +11,10 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{AdmissionPolicyRequest, AdmissionPolicyResponse, AdmissionPreviewResponse};
+use crate::dto::{
+    AdmissionEventResponse, AdmissionPolicyRequest, AdmissionPolicyResponse,
+    AdmissionPreviewResponse,
+};
 use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
@@ -63,6 +66,22 @@ pub(crate) async fn dry_run(
         .dry_run(RepositoryId::from(repository_id), policy)
         .await?;
     Ok(Json(AdmissionPreviewResponse::from(preview)))
+}
+
+pub(crate) async fn list_events(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Json<Vec<AdmissionEventResponse>>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+    let events = state.admission.list_events(repository_id).await?;
+    Ok(Json(
+        events
+            .into_iter()
+            .map(AdmissionEventResponse::from)
+            .collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -393,6 +412,28 @@ mod tests {
         let json: Value = serde_json::from_slice(&preview).unwrap();
         assert_eq!(json["matches"], Value::Array(vec![]));
         assert_eq!(json["allowed"], 0);
+    }
+
+    #[tokio::test]
+    async fn list_events_starts_empty() {
+        let fixture = fixture().await;
+        let response = fixture
+            .app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repositories/{}/admission/events", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json, Value::Array(vec![]));
     }
 
     #[tokio::test]

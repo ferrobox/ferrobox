@@ -1179,6 +1179,31 @@ impl From<ferrobox_application::admission::AdmissionPreview> for AdmissionPrevie
     }
 }
 
+/// Un aviso o una denegación registrados en un pull.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AdmissionEventResponse {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) reference: String,
+    pub(crate) effect: AdmissionEffectDto,
+    pub(crate) reason: String,
+    pub(crate) created_at: String,
+}
+
+impl From<ferrobox_domain::admission::AdmissionEvent> for AdmissionEventResponse {
+    fn from(event: ferrobox_domain::admission::AdmissionEvent) -> Self {
+        Self {
+            id: event.id().to_string(),
+            name: event.name().to_string(),
+            reference: event.reference().to_string(),
+            effect: event.effect().into(),
+            reason: event.reason().to_string(),
+            created_at: event.created_at().to_string(),
+        }
+    }
+}
+
 /// Cuerpo para actualizar un aviso HTTP.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]

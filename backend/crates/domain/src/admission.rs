@@ -7,6 +7,8 @@
 
 use thiserror::Error;
 
+use crate::ids::{AdmissionEventId, RepositoryId};
+
 /// Momento en el que se evalúa la regla.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionWhen {
@@ -130,7 +132,94 @@ impl AdmissionPolicy {
     /// Efecto que **bloquea** un pull ahora mismo (regla activa + deny).
     #[must_use]
     pub fn deny_pull(self, signed: bool) -> bool {
-        self.enabled && matches!(self.preview_pull(signed), Some(AdmissionEffect::Deny))
+        matches!(self.apply_pull(signed), Some(AdmissionEffect::Deny))
+    }
+
+    /// Efecto que se aplica ahora mismo (regla activa).
+    #[must_use]
+    pub fn apply_pull(self, signed: bool) -> Option<AdmissionEffect> {
+        if !self.enabled {
+            return None;
+        }
+        self.preview_pull(signed)
+    }
+}
+
+/// Un aviso o una denegación registrados en un pull.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionEvent {
+    id: AdmissionEventId,
+    repository_id: RepositoryId,
+    name: String,
+    reference: String,
+    effect: AdmissionEffect,
+    reason: String,
+    created_at: String,
+}
+
+impl AdmissionEvent {
+    /// Construye un evento ya persistido o recién emitido.
+    #[must_use]
+    pub fn from_parts(
+        id: AdmissionEventId,
+        repository_id: RepositoryId,
+        name: impl Into<String>,
+        reference: impl Into<String>,
+        effect: AdmissionEffect,
+        reason: impl Into<String>,
+        created_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            id,
+            repository_id,
+            name: name.into(),
+            reference: reference.into(),
+            effect,
+            reason: reason.into(),
+            created_at: created_at.into(),
+        }
+    }
+
+    /// Identificador.
+    #[must_use]
+    pub fn id(&self) -> AdmissionEventId {
+        self.id
+    }
+
+    /// Repositorio.
+    #[must_use]
+    pub fn repository_id(&self) -> RepositoryId {
+        self.repository_id
+    }
+
+    /// Nombre de la imagen o del paquete.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Etiqueta, digest o versión.
+    #[must_use]
+    pub fn reference(&self) -> &str {
+        &self.reference
+    }
+
+    /// `deny` o `warn`.
+    #[must_use]
+    pub fn effect(&self) -> AdmissionEffect {
+        self.effect
+    }
+
+    /// Motivo legible.
+    #[must_use]
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    /// Instante RFC 3339.
+    #[must_use]
+    pub fn created_at(&self) -> &str {
+        &self.created_at
     }
 }
 
@@ -211,6 +300,8 @@ mod tests {
         let policy = AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap();
         assert!(!policy.deny_pull(false));
         assert_eq!(policy.preview_pull(false), Some(AdmissionEffect::Warn));
+        assert_eq!(policy.apply_pull(false), Some(AdmissionEffect::Warn));
+        assert_eq!(policy.apply_pull(true), None);
     }
 
     #[test]

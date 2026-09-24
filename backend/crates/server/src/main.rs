@@ -272,6 +272,10 @@ fn build_router(state: Arc<AppState>) -> axum::Router {
             post(admission::dry_run),
         )
         .route(
+            "/repositories/{repository_id}/admission/events",
+            get(admission::list_events),
+        )
+        .route(
             "/repositories/{repository_id}/quota",
             get(quota::get_quota).put(quota::save_quota),
         )
