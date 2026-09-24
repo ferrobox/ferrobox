@@ -133,6 +133,7 @@ mod tests {
         oci: String,
         cargo: String,
         alloy: String,
+        mirror: String,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -297,6 +298,17 @@ mod tests {
             )
             .await
             .unwrap();
+        let mirror = state
+            .create_repository
+            .execute(
+                RepositoryName::parse("oci-proxy").unwrap(),
+                PackageEcosystem::Oci,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://registry-1.docker.io".to_string(),
+                },
+            )
+            .await
+            .unwrap();
 
         Fixture {
             app: crate::build_router(state),
@@ -305,6 +317,7 @@ mod tests {
             oci: oci.to_string(),
             cargo: cargo.to_string(),
             alloy: alloy.to_string(),
+            mirror: mirror.to_string(),
         }
     }
 
@@ -466,5 +479,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn mirror_oci_accepts_admission_policy() {
+        let fixture = fixture().await;
+        let body = r#"{"enabled":true,"when":"pull","predicate":"not_signed","effect":"deny"}"#;
+        let response = fixture
+            .app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{}/admission", fixture.mirror))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(json["enabled"], true);
+        assert_eq!(json["effect"], "deny");
     }
 }

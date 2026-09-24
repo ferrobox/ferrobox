@@ -30,8 +30,8 @@ pub enum AdmissionError {
     #[error("alloy repositories do not have their own admission policy")]
     AlloyRepository,
 
-    /// Solo un Forge OCI o Helm admite política de firma en este corte.
-    #[error("admission policies apply to Forge OCI and Helm repositories")]
+    /// Solo Forge o Mirror OCI/Helm admiten política de firma.
+    #[error("admission policies apply to Forge and Mirror OCI and Helm repositories")]
     UnsupportedRepository,
 
     /// La política enviada no es válida.
@@ -216,7 +216,11 @@ impl AdmissionService {
         if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
             return Err(AdmissionError::AlloyRepository);
         }
-        if !matches!(repository.kind(), RepositoryKind::Forge)
+        let supported_kind = matches!(
+            repository.kind(),
+            RepositoryKind::Forge | RepositoryKind::Mirror { .. }
+        );
+        if !supported_kind
             || !matches!(
                 repository.ecosystem(),
                 PackageEcosystem::Oci | PackageEcosystem::Helm
@@ -552,5 +556,32 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(error, AdmissionError::UnsupportedRepository));
+    }
+
+    #[tokio::test]
+    async fn accepts_oci_mirrors() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let mirror = Repository::new(
+            RepositoryName::parse("oci-proxy").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://registry-1.docker.io").unwrap(),
+            },
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repositories.save(&mirror).await.unwrap();
+        let policy = service(
+            Arc::new(InMemoryAdmissionStore::default()),
+            repositories,
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+        )
+        .save_policy(
+            mirror.id(),
+            AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(policy.enabled());
     }
 }

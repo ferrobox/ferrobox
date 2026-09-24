@@ -74,8 +74,9 @@ export function AdmissionPanel({
         <CardTitle>Políticas</CardTitle>
         <CardDescription>
           Si una imagen no está firmada (Cosign / Notation), deniega el pull o solo avisa. No
-          exige verificación criptográfica. No se aplica a Mirror ni a Alloy. Simular ignora si
-          la regla está activada. Los avisos y denegaciones del pull quedan abajo.
+          exige verificación criptográfica. En un Mirror rige esta regla; un Alloy usa la de
+          cada miembro Forge o Mirror. Simular ignora si la regla está activada. Los avisos y
+          denegaciones del pull quedan abajo.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
