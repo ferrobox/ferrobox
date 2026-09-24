@@ -23,6 +23,7 @@ use ferrobox_application::packaging::PackagingStrategy;
 use ferrobox_application::packaging::pypi::{
     normalize_pypi_name, project_page_json, simple_root_json, simple_root_page,
 };
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -43,10 +44,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/pypi/{repository_id}/simple/", get(simple_root))
         .route("/pypi/{repository_id}/simple", get(simple_root))
-        .route(
-            "/pypi/{repository_id}/simple/{name}/",
-            get(simple_project),
-        )
+        .route("/pypi/{repository_id}/simple/{name}/", get(simple_project))
         .route("/pypi/{repository_id}/simple/{name}", get(simple_project))
         .route(
             "/pypi/{repository_id}/packages/{filename}",
@@ -61,14 +59,8 @@ pub(crate) fn write_router() -> Router<Arc<AppState>> {
         .route("/pypi/{repository_id}", post(upload))
         .route("/pypi/{repository_id}/legacy/", post(upload))
         .route("/pypi/{repository_id}/legacy", post(upload))
-        .route(
-            "/pypi/{repository_id}/{name}/{version}/yank",
-            delete(yank),
-        )
-        .route(
-            "/pypi/{repository_id}/{name}/{version}/unyank",
-            put(unyank),
-        )
+        .route("/pypi/{repository_id}/{name}/{version}/yank", delete(yank))
+        .route("/pypi/{repository_id}/{name}/{version}/unyank", put(unyank))
         .layer(DefaultBodyLimit::max(PYPI_UPLOAD_LIMIT))
 }
 
@@ -176,6 +168,15 @@ async fn upload(
     let payload = multipart_to_publish_payload(multipart).await?;
     let strategy = pypi_strategy(&state)?;
     strategy.publish(&repository, payload).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackagePublished,
+        AuditTargetKind::Package,
+        repository.name().to_string(),
+        "pypi",
+    )
+    .await;
     Ok((StatusCode::OK, "OK"))
 }
 
@@ -186,6 +187,15 @@ async fn yank(
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageYanked,
+        AuditTargetKind::Package,
+        name,
+        version,
+    )
+    .await;
     Ok((StatusCode::OK, Json(PypiOk { ok: true })))
 }
 
@@ -196,6 +206,15 @@ async fn unyank(
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageUnyanked,
+        AuditTargetKind::Package,
+        name,
+        version,
+    )
+    .await;
     Ok((StatusCode::OK, Json(PypiOk { ok: true })))
 }
 
@@ -298,9 +317,10 @@ async fn multipart_to_publish_payload(mut multipart: Multipart) -> Result<Bytes,
         .version
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::BadRequest("upload is missing package version".to_string()))?;
-    let filename = form.filename.filter(|value| !value.is_empty()).ok_or_else(|| {
-        ApiError::BadRequest("upload is missing filename".to_string())
-    })?;
+    let filename = form
+        .filename
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::BadRequest("upload is missing filename".to_string()))?;
     let content = form
         .content
         .ok_or_else(|| ApiError::BadRequest("upload is missing file content".to_string()))?;
@@ -345,7 +365,10 @@ fn simple_index_response(
 /// Elige JSON PEP 691 si el cliente lo prefiere sobre HTML (como `pip` y `uv`).
 /// Sin `Accept`, o con solo `*/*`, se sirve HTML PEP 503.
 fn prefers_simple_json(headers: &HeaderMap) -> bool {
-    let Some(accept) = headers.get(header::ACCEPT).and_then(|value| value.to_str().ok()) else {
+    let Some(accept) = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+    else {
         return false;
     };
 
@@ -356,7 +379,9 @@ fn prefers_simple_json(headers: &HeaderMap) -> bool {
         if part.is_empty() {
             continue;
         }
-        let (media, params) = part.split_once(';').map_or((part, ""), |(media, rest)| (media, rest));
+        let (media, params) = part
+            .split_once(';')
+            .map_or((part, ""), |(media, rest)| (media, rest));
         let media = media.trim().to_ascii_lowercase();
         let mut quality = 1.0_f32;
         for param in params.split(';') {
@@ -371,9 +396,7 @@ fn prefers_simple_json(headers: &HeaderMap) -> bool {
         if media == "application/vnd.pypi.simple.v1+json" || media == "application/json" {
             json_q = Some(json_q.map_or(quality, |old| old.max(quality)));
         }
-        if media == "text/html"
-            || media == "application/vnd.pypi.simple.v1+html"
-            || media == "*/*"
+        if media == "text/html" || media == "application/vnd.pypi.simple.v1+html" || media == "*/*"
         {
             html_q = Some(html_q.map_or(quality, |old| old.max(quality)));
         }
@@ -420,9 +443,9 @@ mod tests {
     use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -576,7 +599,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state
@@ -608,7 +633,12 @@ mod tests {
         }
     }
 
-    fn multipart_body(name: &str, version: &str, filename: &str, content: &[u8]) -> (String, Bytes) {
+    fn multipart_body(
+        name: &str,
+        version: &str,
+        filename: &str,
+        content: &[u8],
+    ) -> (String, Bytes) {
         let boundary = "----FerroBoxBoundary";
         let mut body = Vec::new();
         for (field, value) in [
@@ -860,7 +890,10 @@ mod tests {
         assert_eq!(project["name"], "demo-pypi");
         assert_eq!(project["files"][0]["filename"], filename);
         assert_eq!(
-            project["files"][0]["hashes"]["sha256"].as_str().unwrap().len(),
+            project["files"][0]["hashes"]["sha256"]
+                .as_str()
+                .unwrap()
+                .len(),
             64
         );
         assert!(
@@ -896,7 +929,10 @@ mod tests {
         let (status, _) = send(
             fx.app,
             Request::builder()
-                .uri(format!("/pypi/{}/packages/missing-1.0.0.tar.gz", fx.repo_id))
+                .uri(format!(
+                    "/pypi/{}/packages/missing-1.0.0.tar.gz",
+                    fx.repo_id
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

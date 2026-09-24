@@ -21,6 +21,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { GroupsPage } from "@/pages/GroupsPage";
 import { GroupDetailPage } from "@/pages/GroupDetailPage";
+import { AuditPage } from "@/pages/AuditPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +55,7 @@ export default function App() {
                       <Route path="users" element={<UsersPage />} />
                       <Route path="groups" element={<GroupsPage />} />
                       <Route path="groups/:groupId" element={<GroupDetailPage />} />
+                      <Route path="audit" element={<AuditPage />} />
                       <Route path="settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Route>

@@ -17,6 +17,7 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use ferrobox_application::packaging::PackagingStrategy;
 use ferrobox_application::packaging::npm::tarball_filename;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -132,10 +133,29 @@ async fn npm_put(
 
     if let Some((name, version)) = strip_suffix_action(&path, "/unyank") {
         set_yanked(&state, repository_id, &name, &version, false).await?;
+        crate::audit::record(
+            &state,
+            &user,
+            AuditAction::PackageUnyanked,
+            AuditTargetKind::Package,
+            name,
+            version,
+        )
+        .await;
         return Ok((StatusCode::OK, Json(NpmOk { ok: true })));
     }
 
-    publish_package(&state, repository_id, body).await
+    let published = publish_package(&state, repository_id, body).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackagePublished,
+        AuditTargetKind::Package,
+        path,
+        "npm",
+    )
+    .await;
+    Ok(published)
 }
 
 async fn npm_delete(
@@ -153,6 +173,15 @@ async fn npm_delete(
     };
 
     set_yanked(&state, repository_id, &name, &version, true).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageYanked,
+        AuditTargetKind::Package,
+        name,
+        version,
+    )
+    .await;
     Ok((StatusCode::OK, Json(NpmOk { ok: true })))
 }
 
@@ -242,10 +271,7 @@ async fn search_packages(
         })
         .collect();
     let total = objects.len();
-    json_bytes(
-        StatusCode::OK,
-        &NpmSearchResponse { objects, total },
-    )
+    json_bytes(StatusCode::OK, &NpmSearchResponse { objects, total })
 }
 
 async fn publish_package(
@@ -278,7 +304,9 @@ async fn set_yanked(
     let version =
         PackageVersion::parse(version).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let coordinate = PackageCoordinate::new(PackageEcosystem::Npm, name, version);
-    strategy.set_yanked(&repository, &coordinate, yanked).await?;
+    strategy
+        .set_yanked(&repository, &coordinate, yanked)
+        .await?;
     Ok(())
 }
 
@@ -338,9 +366,9 @@ mod tests {
     use ferrobox_application::packaging::npm::NpmPackagingStrategy;
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -487,7 +515,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state
@@ -612,10 +642,7 @@ mod tests {
         let (status, body) = send(
             fx.app.clone(),
             Request::builder()
-                .uri(format!(
-                    "/npm/{}/demo-pkg/-/demo-pkg-1.0.0.tgz",
-                    fx.repo_id
-                ))
+                .uri(format!("/npm/{}/demo-pkg/-/demo-pkg-1.0.0.tgz", fx.repo_id))
                 .body(Body::empty())
                 .unwrap(),
         )

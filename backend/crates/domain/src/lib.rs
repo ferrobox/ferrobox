@@ -47,5 +47,8 @@ pub mod retention;
 /// Política de admisión (firma, y más adelante otras condiciones).
 pub mod admission;
 
+/// Registro de auditoría de escrituras de negocio.
+pub mod audit;
+
 /// Cuota de almacenamiento de un repositorio.
 pub mod quota;

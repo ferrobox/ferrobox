@@ -6,6 +6,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use ferrobox_application::manage_groups::{GroupDetail, GroupMembership, GroupSummary};
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::group::GroupName;
 use ferrobox_domain::ids::{GroupId, RepositoryId, UserId};
 use uuid::Uuid;
@@ -76,7 +77,9 @@ pub(crate) async fn list_groups(
 ) -> Result<Json<Vec<GroupSummaryResponse>>, ApiError> {
     require_manage_groups(&user)?;
     let groups = state.groups.list().await?;
-    Ok(Json(groups.iter().map(GroupSummaryResponse::from).collect()))
+    Ok(Json(
+        groups.iter().map(GroupSummaryResponse::from).collect(),
+    ))
 }
 
 pub(crate) async fn create_group(
@@ -88,6 +91,15 @@ pub(crate) async fn create_group(
     let name =
         GroupName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let group = state.groups.create(name).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::GroupCreated,
+        AuditTargetKind::Group,
+        group.name().to_string(),
+        "",
+    )
+    .await;
     Ok((
         StatusCode::CREATED,
         Json(GroupSummaryResponse {
@@ -131,6 +143,15 @@ pub(crate) async fn delete_group(
 ) -> Result<StatusCode, ApiError> {
     require_manage_groups(&user)?;
     state.groups.delete(GroupId::from(group_id)).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::GroupDeleted,
+        AuditTargetKind::Group,
+        group_id.to_string(),
+        "",
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -142,10 +163,20 @@ pub(crate) async fn set_members(
 ) -> Result<StatusCode, ApiError> {
     require_manage_groups(&user)?;
     let user_ids = parse_ids(&payload.user_ids, UserId::from, "invalid user id")?;
+    let member_count = user_ids.len();
     state
         .groups
         .set_members(GroupId::from(group_id), user_ids)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::GroupMembersChanged,
+        AuditTargetKind::Group,
+        group_id.to_string(),
+        format!("{member_count} members"),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -161,10 +192,20 @@ pub(crate) async fn set_repositories(
         let repository_id = parse_uuid(&grant.repository_id, "invalid repository id")?;
         grants.push((RepositoryId::from(repository_id), grant.role.into()));
     }
+    let grant_count = grants.len();
     state
         .groups
         .set_group_repositories(GroupId::from(group_id), grants)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::GroupRepositoriesChanged,
+        AuditTargetKind::Group,
+        group_id.to_string(),
+        format!("{grant_count} repositories"),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -202,18 +243,24 @@ pub(crate) async fn set_repository_access(
         let group_id = parse_uuid(&grant.group_id, "invalid group id")?;
         grants.push((GroupId::from(group_id), grant.role.into()));
     }
+    let grant_count = grants.len();
     state
         .groups
         .set_repository_groups(RepositoryId::from(repository_id), grants)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::GroupRepositoriesChanged,
+        AuditTargetKind::Repository,
+        repository_id.to_string(),
+        format!("{grant_count} groups"),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn parse_ids<T>(
-    values: &[String],
-    from: fn(Uuid) -> T,
-    message: &str,
-) -> Result<Vec<T>, ApiError> {
+fn parse_ids<T>(values: &[String], from: fn(Uuid) -> T, message: &str) -> Result<Vec<T>, ApiError> {
     values
         .iter()
         .map(|value| parse_uuid(value, message).map(from))
@@ -255,9 +302,8 @@ mod tests {
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient,
-        InMemoryWebhookStore, InMemoryPackageIndexStore, InMemoryQuotaStore,
-        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -306,7 +352,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -382,7 +431,9 @@ mod tests {
                 http_client.clone(),
                 repository_store,
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
@@ -454,12 +505,7 @@ mod tests {
         (status, json)
     }
 
-    async fn send(
-        app: Router,
-        token: &str,
-        method: &str,
-        uri: &str,
-    ) -> (StatusCode, Value) {
+    async fn send(app: Router, token: &str, method: &str, uri: &str) -> (StatusCode, Value) {
         let response = app
             .oneshot(
                 Request::builder()
@@ -692,7 +738,10 @@ mod tests {
         let items = memberships.as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["name"], "team-a");
-        assert_eq!(items[0]["repositories"][0]["repository_name"], "secret-crates");
+        assert_eq!(
+            items[0]["repositories"][0]["repository_name"],
+            "secret-crates"
+        );
         assert_eq!(items[0]["repositories"][0]["role"], "developer");
         assert!(items[0].get("members").is_none());
     }

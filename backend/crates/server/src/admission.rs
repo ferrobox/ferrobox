@@ -5,6 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use ferrobox_domain::admission::AdmissionPolicy;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use uuid::Uuid;
 
@@ -45,6 +46,20 @@ pub(crate) async fn save_policy(
         .admission
         .save_policy(RepositoryId::from(repository_id), policy)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::AdmissionPolicyChanged,
+        AuditTargetKind::Admission,
+        repository_id.to_string(),
+        format!(
+            "{} {} {}",
+            saved.when().as_str(),
+            saved.predicate().as_str(),
+            saved.effect().as_str()
+        ),
+    )
+    .await;
     Ok(Json(AdmissionPolicyResponse::from(saved)))
 }
 
@@ -247,6 +262,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state

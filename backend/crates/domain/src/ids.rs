@@ -334,6 +334,42 @@ impl From<AdmissionEventId> for Uuid {
     }
 }
 
+/// Identificador único de un evento de auditoría.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AuditEventId(Uuid);
+
+impl AuditEventId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for AuditEventId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for AuditEventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for AuditEventId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AuditEventId> for Uuid {
+    fn from(value: AuditEventId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +411,7 @@ mod tests {
         );
         let event_id = AdmissionEventId::new();
         assert_eq!(AdmissionEventId::from(Uuid::from(event_id)), event_id);
+        let audit_id = AuditEventId::new();
+        assert_eq!(AuditEventId::from(Uuid::from(audit_id)), audit_id);
     }
 }

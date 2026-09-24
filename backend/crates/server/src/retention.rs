@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::retention::RetentionPolicy;
 use uuid::Uuid;
@@ -39,6 +40,19 @@ pub(crate) async fn save_policy(
         .retention
         .save_policy(RepositoryId::from(repository_id), policy)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RetentionPolicyChanged,
+        AuditTargetKind::Retention,
+        repository_id.to_string(),
+        format!(
+            "keep_last={:?} keep_days={:?}",
+            saved.keep_last(),
+            saved.keep_days()
+        ),
+    )
+    .await;
     Ok(Json(RetentionPolicyResponse::from(saved)))
 }
 
@@ -69,6 +83,15 @@ pub(crate) async fn apply(
         .retention
         .apply_policy(RepositoryId::from(repository_id), policy)
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RetentionApplied,
+        AuditTargetKind::Retention,
+        repository_id.to_string(),
+        "",
+    )
+    .await;
     Ok(Json(CleanupPreviewResponse::from(preview)))
 }
 
@@ -82,6 +105,15 @@ pub(crate) async fn collect_garbage(
         .retention
         .collect_garbage_only(RepositoryId::from(repository_id))
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RetentionGarbageCollected,
+        AuditTargetKind::Retention,
+        repository_id.to_string(),
+        "",
+    )
+    .await;
     Ok(Json(CleanupReportResponse::from(report)))
 }
 
@@ -100,6 +132,15 @@ pub(crate) async fn collect_garbage_all(
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
     require_write_artifacts(&user)?;
     let preview = state.retention.collect_garbage_all().await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RetentionGarbageCollected,
+        AuditTargetKind::Retention,
+        "*",
+        "all repositories",
+    )
+    .await;
     Ok(Json(CleanupPreviewResponse::from(preview)))
 }
 
@@ -131,9 +172,9 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -178,7 +219,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -254,7 +298,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state

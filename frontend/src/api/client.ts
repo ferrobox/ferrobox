@@ -21,6 +21,7 @@ import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
 import type { SearchResponse } from "@/api/generated/SearchResponse";
 import type { AdmissionEventResponse } from "@/api/generated/AdmissionEventResponse";
+import type { AuditEventResponse } from "@/api/generated/AuditEventResponse";
 import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyResponse";
 import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
@@ -500,6 +501,10 @@ export function listAdmissionEvents(
   repositoryId: string,
 ): Promise<AdmissionEventResponse[]> {
   return request<AdmissionEventResponse[]>(`/repositories/${repositoryId}/admission/events`);
+}
+
+export function listAuditEvents(): Promise<AuditEventResponse[]> {
+  return request<AuditEventResponse[]>("/audit");
 }
 
 export function getRetentionPolicy(repositoryId: string): Promise<RetentionPolicyResponse> {

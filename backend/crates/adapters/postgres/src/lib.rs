@@ -28,6 +28,9 @@ pub mod retention_store;
 /// Adaptador de `AdmissionStore`.
 pub mod admission_store;
 
+/// Adaptador de `AuditStore`.
+pub mod audit_store;
+
 /// Adaptador de `QuotaStore`.
 pub mod quota_store;
 

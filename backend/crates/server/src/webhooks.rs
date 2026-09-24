@@ -5,6 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::{RepositoryId, WebhookId};
 use ferrobox_domain::webhook::WebhookEvent;
 use uuid::Uuid;
@@ -48,6 +49,15 @@ pub(crate) async fn create_webhook(
             payload.enabled,
         )
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::WebhookCreated,
+        AuditTargetKind::Webhook,
+        webhook.name().to_string(),
+        repository_id.to_string(),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(WebhookResponse::from(&webhook))))
 }
 
@@ -72,6 +82,15 @@ pub(crate) async fn update_webhook(
             payload.enabled,
         )
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::WebhookUpdated,
+        AuditTargetKind::Webhook,
+        webhook.name().to_string(),
+        repository_id.to_string(),
+    )
+    .await;
     Ok(Json(WebhookResponse::from(&webhook)))
 }
 
@@ -86,6 +105,15 @@ pub(crate) async fn delete_webhook(
         .webhooks
         .delete(repository_id, WebhookId::from(webhook_id))
         .await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::WebhookDeleted,
+        AuditTargetKind::Webhook,
+        webhook_id.to_string(),
+        repository_id.to_string(),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -153,9 +181,8 @@ mod tests {
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore,
-        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
-        InMemoryWebhookStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_application::webhooks::WebhookService;
@@ -216,7 +243,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -285,6 +315,9 @@ mod tests {
                 repository_store,
             ),
             webhooks,
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let writer = state
@@ -298,7 +331,11 @@ mod tests {
             .await
             .unwrap()
             .plaintext_secret;
-        let reader = state.create_user.seed("reader", Role::Reader).await.unwrap();
+        let reader = state
+            .create_user
+            .seed("reader", Role::Reader)
+            .await
+            .unwrap();
         let reader_token = state
             .create_api_token
             .execute(reader.id(), ApiTokenName::parse("read").unwrap())
@@ -424,7 +461,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/repositories/{}/webhooks/{webhook_id}", fx.repo_id))
+                    .uri(format!(
+                        "/repositories/{}/webhooks/{webhook_id}",
+                        fx.repo_id
+                    ))
                     .header("Authorization", format!("Bearer {}", fx.writer_token))
                     .body(Body::empty())
                     .unwrap(),

@@ -71,9 +71,9 @@ mod tests {
     use ferrobox_application::retention::RetentionService;
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
-        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryWebhookStore,
-        InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
+        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -103,10 +103,8 @@ mod tests {
             artifact_store.clone(),
             Arc::new(InMemoryQuotaStore::default()),
         );
-        let search_packages = SearchPackagesUseCase::new(
-            repository_store.clone(),
-            package_index_store.clone(),
-        );
+        let search_packages =
+            SearchPackagesUseCase::new(repository_store.clone(), package_index_store.clone());
 
         let state = Arc::new(AppState {
             create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
@@ -119,7 +117,10 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
-            download_artifact: DownloadArtifactUseCase::new(artifact_store.clone(), storage.clone()),
+            download_artifact: DownloadArtifactUseCase::new(
+                artifact_store.clone(),
+                storage.clone(),
+            ),
             list_repository_artifacts: ListRepositoryArtifactsUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -195,7 +196,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
-
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state

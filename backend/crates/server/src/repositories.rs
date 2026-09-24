@@ -6,6 +6,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::group::RepositoryAccess;
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::repository::{Repository, RepositoryName};
@@ -16,8 +17,8 @@ use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
 use crate::dto::{
-    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse,
-    RepositoryResponse, UpdateAlloyMembersRequest,
+    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse,
+    UpdateAlloyMembersRequest,
 };
 use crate::error::ApiError;
 use ferrobox_application::create_repository::CreateRepositoryKind;
@@ -31,6 +32,7 @@ pub(crate) async fn create_repository(
 
     let name =
         RepositoryName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let ecosystem = payload.ecosystem;
 
     let kind = match payload.kind.unwrap_or_default() {
         CreateRepositoryKindDto::Forge => CreateRepositoryKind::Forge,
@@ -42,8 +44,18 @@ pub(crate) async fn create_repository(
 
     let id = state
         .create_repository
-        .execute(name, payload.ecosystem.into(), kind)
+        .execute(name.clone(), ecosystem.into(), kind)
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RepositoryCreated,
+        AuditTargetKind::Repository,
+        name.to_string(),
+        ferrobox_domain::package_coordinate::PackageEcosystem::from(ecosystem).label(),
+    )
+    .await;
 
     Ok((
         StatusCode::CREATED,
@@ -92,10 +104,21 @@ pub(crate) async fn update_alloy_members(
     require_repo_write(&state.groups, &user, repository_id).await?;
 
     let members = parse_alloy_member_ids(payload.members)?;
+    let member_count = members.len();
     let repository = state
         .update_alloy_members
         .execute(repository_id, members)
         .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RepositoryMembersChanged,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        format!("{member_count} members"),
+    )
+    .await;
 
     Ok(Json(
         to_repository_response(&state, &user, &repository).await?,
@@ -109,8 +132,19 @@ pub(crate) async fn delete_repository(
 ) -> Result<StatusCode, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_write(&state.groups, &user, repository_id).await?;
+    let repository = state.get_repository.execute(repository_id).await?;
 
     state.delete_repository.execute(repository_id).await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RepositoryDeleted,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        "",
+    )
+    .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -127,18 +161,15 @@ async fn to_repository_response(
         .unwrap_or(RepositoryAccess::Read);
     let restricted = state.groups.is_restricted(repository.id()).await?;
     Ok(RepositoryResponse::from_repository(
-        repository,
-        access,
-        restricted,
+        repository, access, restricted,
     ))
 }
 
 fn parse_alloy_member_ids(members: Vec<String>) -> Result<Vec<RepositoryId>, ApiError> {
     let mut parsed = Vec::with_capacity(members.len());
     for member in members {
-        let uuid = Uuid::parse_str(&member).map_err(|_| {
-            ApiError::BadRequest("invalid alloy member repository id".to_string())
-        })?;
+        let uuid = Uuid::parse_str(&member)
+            .map_err(|_| ApiError::BadRequest("invalid alloy member repository id".to_string()))?;
         parsed.push(RepositoryId::from(uuid));
     }
     Ok(parsed)

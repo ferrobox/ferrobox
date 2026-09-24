@@ -4,6 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use ferrobox_application::admission::AdmissionError;
+use ferrobox_application::audit::AuditError;
 use ferrobox_application::authenticate_token::AuthenticateTokenError;
 use ferrobox_application::change_password::ChangePasswordError;
 use ferrobox_application::create_repository::CreateRepositoryError;
@@ -423,6 +424,12 @@ impl From<GroupError> for ApiError {
             | GroupError::Users(_)
             | GroupError::Repositories(_) => Self::Internal(err.to_string()),
         }
+    }
+}
+
+impl From<AuditError> for ApiError {
+    fn from(err: AuditError) -> Self {
+        Self::Internal(err.to_string())
     }
 }
 

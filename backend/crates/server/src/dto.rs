@@ -1207,6 +1207,33 @@ impl From<ferrobox_domain::admission::AdmissionEvent> for AdmissionEventResponse
     }
 }
 
+/// Una fila del registro de auditoría.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct AuditEventResponse {
+    pub(crate) id: String,
+    pub(crate) actor: String,
+    pub(crate) action: String,
+    pub(crate) target_kind: String,
+    pub(crate) target: String,
+    pub(crate) detail: String,
+    pub(crate) created_at: String,
+}
+
+impl From<ferrobox_domain::audit::AuditEvent> for AuditEventResponse {
+    fn from(event: ferrobox_domain::audit::AuditEvent) -> Self {
+        Self {
+            id: event.id().to_string(),
+            actor: event.actor_username().to_string(),
+            action: event.action().as_str().to_string(),
+            target_kind: event.target_kind().as_str().to_string(),
+            target: event.target().to_string(),
+            detail: event.detail().to_string(),
+            created_at: event.created_at().to_string(),
+        }
+    }
+}
+
 /// Cuerpo para actualizar un aviso HTTP.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]

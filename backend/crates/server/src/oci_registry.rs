@@ -31,6 +31,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use ferrobox_application::packaging::PackagingStrategy;
 use ferrobox_application::packaging::oci::{DEFAULT_MANIFEST_MEDIA_TYPE, INDEX_MEDIA_TYPE};
+use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -449,7 +450,7 @@ async fn get_manifest(
 
 async fn put_manifest(
     state: &AppState,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     repository_id: Uuid,
     name: &str,
     reference: &str,
@@ -465,6 +466,15 @@ async fn put_manifest(
     let digest = strategy
         .put_manifest(&repository, name, reference, media_type, body)
         .await?;
+    crate::audit::record(
+        state,
+        &user.user,
+        AuditAction::PackagePublished,
+        AuditTargetKind::Package,
+        name,
+        reference,
+    )
+    .await;
     let location = format!("/v2/{repository_id}/{name}/manifests/{digest}");
     let mut response_headers = oci_headers();
     response_headers.insert(
@@ -654,6 +664,15 @@ async fn yank(
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &reference, true).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageYanked,
+        AuditTargetKind::Package,
+        name,
+        reference,
+    )
+    .await;
     Ok((StatusCode::OK, Json(OciOk { ok: true })))
 }
 
@@ -664,6 +683,15 @@ async fn unyank(
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &reference, false).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackageUnyanked,
+        AuditTargetKind::Package,
+        name,
+        reference,
+    )
+    .await;
     Ok((StatusCode::OK, Json(OciOk { ok: true })))
 }
 
@@ -1152,6 +1180,9 @@ mod tests {
                 http_client.clone(),
                 repository_store.clone(),
             ),
+            audit: ferrobox_application::audit::AuditService::new(Arc::new(
+                ferrobox_application::test_support::InMemoryAuditStore::default(),
+            )),
         });
 
         let developer = state

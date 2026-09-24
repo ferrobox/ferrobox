@@ -10,25 +10,29 @@ use ferrobox_domain::admission::{AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
+use ferrobox_domain::audit::AuditEvent;
 use ferrobox_domain::group::Group;
-use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
-use ferrobox_domain::ids::{ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId, WebhookId};
+use ferrobox_domain::ids::{
+    ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId, WebhookId,
+};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
-use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::quota::StorageQuota;
+use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::retention::RetentionPolicy;
 use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
 use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
+use ferrobox_ports::audit_store::{AuditStore, AuditStoreError};
 use ferrobox_ports::group_store::{GroupStore, GroupStoreError, RepositoryGroupGrant};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
 };
-use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::quota_store::{QuotaStore, QuotaStoreError};
+use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::retention_store::{RetentionStore, RetentionStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
@@ -191,9 +195,10 @@ impl InMemoryPackageIndexStore {
         created_at_rfc3339: &str,
     ) {
         let mut entries = self.entries.lock().unwrap();
-        if let Some(existing) = entries.iter_mut().find(|row| {
-            row.repository_id == repository_id && row.coordinate == *coordinate
-        }) {
+        if let Some(existing) = entries
+            .iter_mut()
+            .find(|row| row.repository_id == repository_id && row.coordinate == *coordinate)
+        {
             if artifact_id.is_some() {
                 existing.artifact_id = artifact_id;
             }
@@ -387,9 +392,9 @@ impl UserStore for InMemoryUserStore {
         }
 
         if let Some(email) = user.email() {
-            let email_taken_by_another = users.values().any(|(existing, _)| {
-                existing.id() != user.id() && existing.email() == Some(email)
-            });
+            let email_taken_by_another = users
+                .values()
+                .any(|(existing, _)| existing.id() != user.id() && existing.email() == Some(email));
             if email_taken_by_another {
                 return Err(UserStoreError::DuplicateEmail(email.clone()));
             }
@@ -757,6 +762,32 @@ impl AdmissionStore for InMemoryAdmissionStore {
 }
 
 #[derive(Default)]
+pub struct InMemoryAuditStore {
+    events: Mutex<Vec<AuditEvent>>,
+}
+
+#[async_trait]
+impl AuditStore for InMemoryAuditStore {
+    async fn record(&self, event: &AuditEvent) -> Result<(), AuditStoreError> {
+        let mut events = self.events.lock().unwrap();
+        events.insert(0, event.clone());
+        events.truncate(200);
+        Ok(())
+    }
+
+    async fn list(&self, limit: usize) -> Result<Vec<AuditEvent>, AuditStoreError> {
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+}
+
+#[derive(Default)]
 pub struct InMemoryRetentionStore {
     policies: Mutex<HashMap<RepositoryId, RetentionPolicy>>,
 }
@@ -827,9 +858,9 @@ pub struct InMemoryGroupStore {
 impl GroupStore for InMemoryGroupStore {
     async fn save(&self, group: &Group) -> Result<(), GroupStoreError> {
         let mut groups = self.groups.lock().unwrap();
-        let name_taken = groups.values().any(|existing| {
-            existing.id() != group.id() && existing.name() == group.name()
-        });
+        let name_taken = groups
+            .values()
+            .any(|existing| existing.id() != group.id() && existing.name() == group.name());
         if name_taken {
             return Err(GroupStoreError::DuplicateName(group.name().clone()));
         }
@@ -850,7 +881,10 @@ impl GroupStore for InMemoryGroupStore {
     async fn delete(&self, id: GroupId) -> Result<bool, GroupStoreError> {
         let removed = self.groups.lock().unwrap().remove(&id).is_some();
         self.members.lock().unwrap().remove(&id);
-        self.grants.lock().unwrap().retain(|grant| grant.group_id != id);
+        self.grants
+            .lock()
+            .unwrap()
+            .retain(|grant| grant.group_id != id);
         Ok(removed)
     }
 
@@ -894,13 +928,15 @@ impl GroupStore for InMemoryGroupStore {
     ) -> Result<(), GroupStoreError> {
         let mut all = self.grants.lock().unwrap();
         all.retain(|grant| grant.group_id != group_id);
-        all.extend(grants.iter().map(|(repository_id, role)| {
-            RepositoryGroupGrant {
-                repository_id: *repository_id,
-                group_id,
-                role: *role,
-            }
-        }));
+        all.extend(
+            grants
+                .iter()
+                .map(|(repository_id, role)| RepositoryGroupGrant {
+                    repository_id: *repository_id,
+                    group_id,
+                    role: *role,
+                }),
+        );
         Ok(())
     }
 
