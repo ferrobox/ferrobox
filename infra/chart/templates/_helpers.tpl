@@ -42,3 +42,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "ferrobox.garageName" -}}
 {{ include "ferrobox.fullname" . }}-garage
 {{- end }}
+
+{{- define "ferrobox.garageHeadlessName" -}}
+{{ include "ferrobox.garageName" . }}-headless
+{{- end }}
+
+{{- define "ferrobox.garagePodHost" -}}
+{{ include "ferrobox.garageName" . }}-0.{{ include "ferrobox.garageHeadlessName" . }}
+{{- end }}
