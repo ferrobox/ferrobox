@@ -44,7 +44,11 @@ pub(crate) async fn save_policy(
     )?;
     let saved = state
         .admission
-        .save_policy(RepositoryId::from(repository_id), policy)
+        .save_policy(
+            RepositoryId::from(repository_id),
+            policy,
+            payload.public_keys_pem,
+        )
         .await?;
     crate::audit::record(
         &state,
@@ -54,9 +58,9 @@ pub(crate) async fn save_policy(
         repository_id.to_string(),
         format!(
             "{} {} {}",
-            saved.when().as_str(),
-            saved.predicate().as_str(),
-            saved.effect().as_str()
+            saved.policy.when().as_str(),
+            saved.policy.predicate().as_str(),
+            saved.policy.effect().as_str()
         ),
     )
     .await;
@@ -78,7 +82,11 @@ pub(crate) async fn dry_run(
     )?;
     let preview = state
         .admission
-        .dry_run(RepositoryId::from(repository_id), policy)
+        .dry_run(
+            RepositoryId::from(repository_id),
+            policy,
+            payload.public_keys_pem,
+        )
         .await?;
     Ok(Json(AdmissionPreviewResponse::from(preview)))
 }
@@ -362,6 +370,7 @@ mod tests {
         assert_eq!(json["when"], "pull");
         assert_eq!(json["predicate"], "not_signed");
         assert_eq!(json["effect"], "deny");
+        assert_eq!(json["public_keys_pem"], "");
     }
 
     #[tokio::test]
@@ -523,5 +532,37 @@ mod tests {
         let json: Value = serde_json::from_slice(&saved).unwrap();
         assert_eq!(json["enabled"], true);
         assert_eq!(json["effect"], "deny");
+        assert_eq!(json["public_keys_pem"], "");
+    }
+
+    #[tokio::test]
+    async fn save_not_verified_keeps_public_keys() {
+        let fixture = fixture().await;
+        let body = r#"{"enabled":true,"when":"pull","predicate":"not_verified","effect":"deny","public_keys_pem":"-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE\n-----END PUBLIC KEY-----\n"}"#;
+        let response = fixture
+            .app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{}/admission", fixture.oci))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(json["predicate"], "not_verified");
+        assert!(
+            json["public_keys_pem"]
+                .as_str()
+                .unwrap()
+                .contains("BEGIN PUBLIC KEY")
+        );
     }
 }

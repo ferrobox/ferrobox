@@ -1704,6 +1704,7 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert_eq!(images[0]["version"], "latest");
         assert!(images[0]["signed"].as_bool().unwrap());
+        assert!(!images[0]["verified"].as_bool().unwrap());
     }
 
     #[tokio::test]

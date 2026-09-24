@@ -399,7 +399,8 @@ fn build_app_state(
         repository_store.clone(),
         artifact_store.clone(),
         package_index_store.clone(),
-    );
+    )
+    .with_cosign_verify(storage.clone(), admission_store.clone());
     let admission = AdmissionService::new(
         admission_store,
         repository_store.clone(),

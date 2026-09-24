@@ -7,11 +7,30 @@
 //! * manifiesto con `subject` y el [Referrers API](https://github.com/opencontainers/distribution-spec)
 //!   (`GET /v2/<name>/referrers/<digest>`).
 //!
-//! Esta capa no verifica criptográficamente: solo identifica y enlaza
-//! el accesorio con el digest firmado para mostrarlo y servirlo.
+//! Además de detectar, puede verificar una firma Cosign *simple
+//! signing* contra claves públicas PEM (las que genera
+//! `cosign generate-key-pair`). No cubre keyless / Fulcio.
+
+use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::{Signature, VerifyingKey};
+use p256::pkcs8::DecodePublicKey;
 
 /// Media type del payload de firma simple de Cosign.
 pub const COSIGN_SIMPLE_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
+
+/// Anotación Cosign que guarda la firma en Base64.
+pub const COSIGN_SIGNATURE_ANNOTATION: &str = "dev.cosignproject.cosign/signature";
+
+/// Firma simple extraída de un manifiesto Cosign.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleSignature {
+    /// Digest del blob de payload (`sha256:…`).
+    pub payload_digest: String,
+    /// Firma en Base64 (anotación Cosign).
+    pub signature_b64: String,
+}
 
 /// Media type de un sobre DSSE (atestaciones Cosign).
 pub const DSSE_ENVELOPE_MEDIA_TYPE: &str = "application/vnd.dsse.envelope.v1+json";
@@ -261,6 +280,119 @@ fn has_extension(value: &str, extension: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
 }
 
+/// Extrae payload digest y firma de un manifiesto Cosign simple.
+#[must_use]
+pub fn extract_simple_signature(manifest: &[u8]) -> Option<SimpleSignature> {
+    let value = serde_json::from_slice::<serde_json::Value>(manifest).ok()?;
+    let layers = value.get("layers")?.as_array()?;
+    layers.iter().find_map(|layer| {
+        let digest = layer
+            .get("digest")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|digest| is_digest_reference(digest))?;
+        let signature = layer
+            .get("annotations")
+            .and_then(|annotations| annotations.get(COSIGN_SIGNATURE_ANNOTATION))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        Some(SimpleSignature {
+            payload_digest: digest.to_ascii_lowercase(),
+            signature_b64: signature.to_string(),
+        })
+    })
+}
+
+/// Digest sujeto declarado en el payload simple-signing, si existe.
+#[must_use]
+pub fn payload_subject_digest(payload: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()?
+        .pointer("/critical/image/docker-manifest-digest")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|digest| is_digest_reference(digest))
+        .map(str::to_ascii_lowercase)
+}
+
+/// `true` si alguna clave PEM verifica la firma sobre `payload`.
+///
+/// Si el payload declara un digest y se pasa `subject`, deben coincidir.
+#[must_use]
+pub fn verify_simple(
+    payload: &[u8],
+    signature_b64: &str,
+    keys_pem: &str,
+    subject: Option<&str>,
+) -> bool {
+    if keys_pem.trim().is_empty() || payload.is_empty() {
+        return false;
+    }
+    if let (Some(declared), Some(subject)) = (payload_subject_digest(payload), subject)
+        && declared != subject.trim().to_ascii_lowercase()
+    {
+        return false;
+    }
+    let Some(signature) = decode_signature(signature_b64) else {
+        return false;
+    };
+    parse_ecdsa_keys(keys_pem)
+        .into_iter()
+        .any(|key| verify_ecdsa(&key, payload, &signature))
+}
+
+fn decode_signature(value: &str) -> Option<Vec<u8>> {
+    let compact: String = value.chars().filter(|ch| !ch.is_whitespace()).collect();
+    STANDARD
+        .decode(&compact)
+        .or_else(|_| URL_SAFE.decode(&compact))
+        .or_else(|_| URL_SAFE_NO_PAD.decode(&compact))
+        .ok()
+}
+
+fn parse_ecdsa_keys(pem: &str) -> Vec<VerifyingKey> {
+    split_pem_blocks(pem)
+        .into_iter()
+        .filter_map(|block| VerifyingKey::from_public_key_pem(&block).ok())
+        .collect()
+}
+
+fn split_pem_blocks(pem: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    let mut inside = false;
+    for line in pem.lines() {
+        if line.contains("BEGIN") && line.contains("PUBLIC KEY") {
+            inside = true;
+            current.clear();
+            current.push_str(line);
+            current.push('\n');
+            continue;
+        }
+        if inside {
+            current.push_str(line);
+            current.push('\n');
+            if line.contains("END") && line.contains("PUBLIC KEY") {
+                blocks.push(std::mem::take(&mut current));
+                inside = false;
+            }
+        }
+    }
+    blocks
+}
+
+fn verify_ecdsa(key: &VerifyingKey, payload: &[u8], signature: &[u8]) -> bool {
+    if let Ok(parsed) = Signature::from_der(signature)
+        && key.verify(payload, &parsed).is_ok()
+    {
+        return true;
+    }
+    Signature::from_slice(signature)
+        .ok()
+        .is_some_and(|parsed| key.verify(payload, &parsed).is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +468,42 @@ mod tests {
             &checksum
         ));
         assert!(!digest_matches_checksum("sha256:deadbeef", &checksum));
+    }
+
+    #[test]
+    fn verifies_a_p256_simple_signature() {
+        use p256::ecdsa::SigningKey;
+        use p256::ecdsa::signature::Signer;
+        use p256::pkcs8::EncodePublicKey;
+
+        let signing = SigningKey::random(&mut rand::rngs::OsRng);
+        let pem = signing
+            .verifying_key()
+            .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+            .unwrap();
+        let payload = br#"{"critical":{"image":{"docker-manifest-digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},"type":"cosign container image signature"}}"#;
+        let signature: Signature = signing.sign(payload);
+        let encoded = STANDARD.encode(signature.to_der());
+        let manifest = serde_json::json!({
+            "layers": [{
+                "mediaType": COSIGN_SIMPLE_MEDIA_TYPE,
+                "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "annotations": { COSIGN_SIGNATURE_ANNOTATION: encoded }
+            }]
+        });
+        let extracted = extract_simple_signature(&serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(verify_simple(
+            payload,
+            &extracted.signature_b64,
+            &pem,
+            Some("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+        ));
+        assert!(!verify_simple(
+            payload,
+            &extracted.signature_b64,
+            &pem,
+            Some("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        ));
+        assert!(!verify_simple(payload, &extracted.signature_b64, "", None));
     }
 }

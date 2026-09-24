@@ -21,7 +21,7 @@ use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::retention::RetentionPolicy;
 use ferrobox_domain::user::{Role, User, Username};
 use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
-use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
+use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
@@ -711,6 +711,7 @@ impl AssayStore for InMemoryAssayStore {
 #[derive(Default)]
 pub struct InMemoryAdmissionStore {
     policies: Mutex<HashMap<RepositoryId, AdmissionPolicy>>,
+    keys: Mutex<HashMap<RepositoryId, String>>,
     events: Mutex<HashMap<RepositoryId, Vec<AdmissionEvent>>>,
 }
 
@@ -719,22 +720,38 @@ impl AdmissionStore for InMemoryAdmissionStore {
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
-    ) -> Result<AdmissionPolicy, AdmissionStoreError> {
-        Ok(self
+    ) -> Result<AdmissionRecord, AdmissionStoreError> {
+        let policy = self
             .policies
             .lock()
             .unwrap()
             .get(&repository_id)
             .copied()
-            .unwrap_or_else(AdmissionPolicy::inactive))
+            .unwrap_or_else(AdmissionPolicy::inactive);
+        let public_keys_pem = self
+            .keys
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(AdmissionRecord {
+            policy,
+            public_keys_pem,
+        })
     }
 
     async fn save(
         &self,
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
+        public_keys_pem: &str,
     ) -> Result<(), AdmissionStoreError> {
         self.policies.lock().unwrap().insert(repository_id, policy);
+        self.keys
+            .lock()
+            .unwrap()
+            .insert(repository_id, public_keys_pem.to_string());
         Ok(())
     }
 

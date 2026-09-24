@@ -223,6 +223,9 @@ pub(crate) struct ArtifactResponse {
     pub(crate) yanked: bool,
     /// `true` si hay una firma Cosign / Notation enlazada a este artefacto.
     pub(crate) signed: bool,
+    /// `true` si alguna firma Cosign verifica contra las claves del
+    /// repositorio.
+    pub(crate) verified: bool,
     /// Repositorio que almacena el binario. En un `Alloy` es el
     /// miembro del que proviene el paquete.
     pub(crate) repository_id: String,
@@ -239,6 +242,7 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
             size_bytes: listed.artifact().size_bytes(),
             yanked: listed.yanked(),
             signed: listed.signed(),
+            verified: listed.verified(),
             repository_id: listed.artifact().repository_id().to_string(),
         }
     }
@@ -1053,12 +1057,15 @@ impl From<ferrobox_domain::admission::AdmissionWhen> for AdmissionWhenDto {
 pub(crate) enum AdmissionPredicateDto {
     /// El artefacto no tiene una firma Cosign / Notation enlazada.
     NotSigned,
+    /// El artefacto no tiene una firma Cosign válida contra las claves.
+    NotVerified,
 }
 
 impl AdmissionPredicateDto {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::NotSigned => "not_signed",
+            Self::NotVerified => "not_verified",
         }
     }
 }
@@ -1067,6 +1074,7 @@ impl From<ferrobox_domain::admission::AdmissionPredicate> for AdmissionPredicate
     fn from(value: ferrobox_domain::admission::AdmissionPredicate) -> Self {
         match value {
             ferrobox_domain::admission::AdmissionPredicate::NotSigned => Self::NotSigned,
+            ferrobox_domain::admission::AdmissionPredicate::NotVerified => Self::NotVerified,
         }
     }
 }
@@ -1112,6 +1120,9 @@ pub(crate) struct AdmissionPolicyRequest {
     pub(crate) predicate: AdmissionPredicateDto,
     /// Efecto si la condición se cumple.
     pub(crate) effect: AdmissionEffectDto,
+    /// PEM de claves públicas Cosign (`cosign generate-key-pair`).
+    #[serde(default)]
+    pub(crate) public_keys_pem: String,
 }
 
 /// Política de admisión de un repositorio.
@@ -1126,15 +1137,18 @@ pub(crate) struct AdmissionPolicyResponse {
     pub(crate) predicate: AdmissionPredicateDto,
     /// Efecto si la condición se cumple.
     pub(crate) effect: AdmissionEffectDto,
+    /// PEM de claves públicas Cosign del repositorio.
+    pub(crate) public_keys_pem: String,
 }
 
-impl From<ferrobox_domain::admission::AdmissionPolicy> for AdmissionPolicyResponse {
-    fn from(policy: ferrobox_domain::admission::AdmissionPolicy) -> Self {
+impl From<ferrobox_ports::admission_store::AdmissionRecord> for AdmissionPolicyResponse {
+    fn from(record: ferrobox_ports::admission_store::AdmissionRecord) -> Self {
         Self {
-            enabled: policy.enabled(),
-            when: policy.when().into(),
-            predicate: policy.predicate().into(),
-            effect: policy.effect().into(),
+            enabled: record.policy.enabled(),
+            when: record.policy.when().into(),
+            predicate: record.policy.predicate().into(),
+            effect: record.policy.effect().into(),
+            public_keys_pem: record.public_keys_pem,
         }
     }
 }

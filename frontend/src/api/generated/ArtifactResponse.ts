@@ -26,6 +26,11 @@ yanked: boolean,
  */
 signed: boolean, 
 /**
+ * `true` si alguna firma Cosign verifica contra las claves del
+ * repositorio.
+ */
+verified: boolean, 
+/**
  * Repositorio que almacena el binario. En un `Alloy` es el
  * miembro del que proviene el paquete.
  */

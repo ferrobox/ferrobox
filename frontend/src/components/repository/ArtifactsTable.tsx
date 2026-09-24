@@ -346,6 +346,9 @@ export function ArtifactsTable({
         const signedCount = group.versions.filter((bucket) =>
           bucket.artifacts.some((artifact) => artifact.signed),
         ).length;
+        const verifiedCount = group.versions.filter((bucket) =>
+          bucket.artifacts.some((artifact) => artifact.verified),
+        ).length;
 
         return (
           <section key={group.name} className="border-b border-border last:border-b-0">
@@ -375,6 +378,9 @@ export function ArtifactsTable({
                     : null}
                   {signedCount > 0
                     ? ` · ${signedCount === 1 ? "1 firmada" : `${signedCount} firmadas`}`
+                    : null}
+                  {verifiedCount > 0
+                    ? ` · ${verifiedCount === 1 ? "1 verificada" : `${verifiedCount} verificadas`}`
                     : null}
                 </span>
               </span>
@@ -470,6 +476,7 @@ function VersionRows({
   }
   const yanked = bucket.artifacts.some((artifact) => artifact.yanked);
   const signed = bucket.artifacts.some((artifact) => artifact.signed);
+  const verified = bucket.artifacts.some((artifact) => artifact.verified);
   const totalBytes = bucket.artifacts.reduce((sum, artifact) => sum + artifact.size_bytes, 0);
   const nested = bucket.artifacts.length > 1;
   const memberName =
@@ -505,7 +512,16 @@ function VersionRows({
                 Yanked
               </Badge>
             ) : null}
-            {signed ? (
+            {verified ? (
+              <Badge
+                variant="outline"
+                className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                title="La firma Cosign verifica contra las claves públicas del repositorio"
+              >
+                <ShieldCheck />
+                Verificada
+              </Badge>
+            ) : signed ? (
               <Badge
                 variant="outline"
                 className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"

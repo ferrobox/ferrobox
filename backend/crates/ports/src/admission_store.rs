@@ -3,6 +3,15 @@ use ferrobox_domain::admission::{AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::ids::RepositoryId;
 use thiserror::Error;
 
+/// Política persistida junto con las claves Cosign del repositorio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionRecord {
+    /// Regla de admisión.
+    pub policy: AdmissionPolicy,
+    /// PEM de claves públicas Cosign. Vacío: solo se detecta la firma.
+    pub public_keys_pem: String,
+}
+
 /// Motivos por los que una operación sobre la política de admisión puede
 /// fallar.
 #[derive(Debug, Error)]
@@ -30,7 +39,7 @@ pub trait AdmissionStore: Send + Sync {
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
-    ) -> Result<AdmissionPolicy, AdmissionStoreError>;
+    ) -> Result<AdmissionRecord, AdmissionStoreError>;
 
     /// Inserta o reemplaza la política del repositorio.
     ///
@@ -41,6 +50,7 @@ pub trait AdmissionStore: Send + Sync {
         &self,
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
+        public_keys_pem: &str,
     ) -> Result<(), AdmissionStoreError>;
 
     /// Registra un aviso o una denegación y recorta el historial a 50

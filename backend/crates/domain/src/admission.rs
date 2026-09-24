@@ -21,6 +21,9 @@ pub enum AdmissionWhen {
 pub enum AdmissionPredicate {
     /// El artefacto no tiene una firma Cosign / Notation enlazada.
     NotSigned,
+    /// El artefacto no tiene una firma Cosign válida contra las claves
+    /// públicas configuradas.
+    NotVerified,
 }
 
 /// Qué hacer si la condición se cumple.
@@ -115,33 +118,38 @@ impl AdmissionPolicy {
         self.effect
     }
 
-    /// Efecto que se aplicaría en un pull de un artefacto con `signed`.
+    /// Efecto que se aplicaría en un pull de un artefacto con `signed`
+    /// y `verified`.
     ///
     /// Ignora `enabled`: sirve para el dry-run («si activo esto…»).
     #[must_use]
-    pub fn preview_pull(self, signed: bool) -> Option<AdmissionEffect> {
+    pub fn preview_pull(self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
         if !matches!(self.when, AdmissionWhen::Pull) {
             return None;
         }
         match self.predicate {
             AdmissionPredicate::NotSigned if !signed => Some(self.effect),
-            AdmissionPredicate::NotSigned => None,
+            AdmissionPredicate::NotVerified if !verified => Some(self.effect),
+            AdmissionPredicate::NotSigned | AdmissionPredicate::NotVerified => None,
         }
     }
 
     /// Efecto que **bloquea** un pull ahora mismo (regla activa + deny).
     #[must_use]
-    pub fn deny_pull(self, signed: bool) -> bool {
-        matches!(self.apply_pull(signed), Some(AdmissionEffect::Deny))
+    pub fn deny_pull(self, signed: bool, verified: bool) -> bool {
+        matches!(
+            self.apply_pull(signed, verified),
+            Some(AdmissionEffect::Deny)
+        )
     }
 
     /// Efecto que se aplica ahora mismo (regla activa).
     #[must_use]
-    pub fn apply_pull(self, signed: bool) -> Option<AdmissionEffect> {
+    pub fn apply_pull(self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
         if !self.enabled {
             return None;
         }
-        self.preview_pull(signed)
+        self.preview_pull(signed, verified)
     }
 }
 
@@ -246,12 +254,14 @@ impl AdmissionPredicate {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::NotSigned => "not_signed",
+            Self::NotVerified => "not_verified",
         }
     }
 
     fn parse(value: &str) -> Result<Self, AdmissionPolicyError> {
         match value {
             "not_signed" => Ok(Self::NotSigned),
+            "not_verified" => Ok(Self::NotVerified),
             other => Err(AdmissionPolicyError::UnknownPredicate(other.to_string())),
         }
     }
@@ -283,25 +293,39 @@ mod tests {
     #[test]
     fn inactive_never_denies() {
         let policy = AdmissionPolicy::inactive();
-        assert!(!policy.deny_pull(false));
-        assert_eq!(policy.preview_pull(false), Some(AdmissionEffect::Deny));
-        assert_eq!(policy.preview_pull(true), None);
+        assert!(!policy.deny_pull(false, false));
+        assert_eq!(
+            policy.preview_pull(false, false),
+            Some(AdmissionEffect::Deny)
+        );
+        assert_eq!(policy.preview_pull(true, false), None);
     }
 
     #[test]
     fn enabled_deny_blocks_unsigned_pulls() {
         let policy = AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap();
-        assert!(policy.deny_pull(false));
-        assert!(!policy.deny_pull(true));
+        assert!(policy.deny_pull(false, false));
+        assert!(!policy.deny_pull(true, false));
     }
 
     #[test]
     fn warn_does_not_block() {
         let policy = AdmissionPolicy::parse(true, "pull", "not_signed", "warn").unwrap();
-        assert!(!policy.deny_pull(false));
-        assert_eq!(policy.preview_pull(false), Some(AdmissionEffect::Warn));
-        assert_eq!(policy.apply_pull(false), Some(AdmissionEffect::Warn));
-        assert_eq!(policy.apply_pull(true), None);
+        assert!(!policy.deny_pull(false, false));
+        assert_eq!(
+            policy.preview_pull(false, false),
+            Some(AdmissionEffect::Warn)
+        );
+        assert_eq!(policy.apply_pull(false, false), Some(AdmissionEffect::Warn));
+        assert_eq!(policy.apply_pull(true, false), None);
+    }
+
+    #[test]
+    fn not_verified_ignores_detect_only_signatures() {
+        let policy = AdmissionPolicy::parse(true, "pull", "not_verified", "deny").unwrap();
+        assert!(policy.deny_pull(true, false));
+        assert!(!policy.deny_pull(true, true));
+        assert!(policy.deny_pull(false, false));
     }
 
     #[test]

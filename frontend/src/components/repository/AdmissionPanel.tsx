@@ -7,6 +7,7 @@ import type { AdmissionEffectDto } from "@/api/generated/AdmissionEffectDto";
 import type { AdmissionEventResponse } from "@/api/generated/AdmissionEventResponse";
 import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyResponse";
+import type { AdmissionPredicateDto } from "@/api/generated/AdmissionPredicateDto";
 import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
 import {
   useAdmissionEvents,
@@ -41,6 +42,7 @@ const EMPTY_POLICY: AdmissionPolicyResponse = {
   when: "pull",
   predicate: "not_signed",
   effect: "deny",
+  public_keys_pem: "",
 };
 
 function isMissingMigration(message: string): boolean {
@@ -50,12 +52,15 @@ function isMissingMigration(message: string): boolean {
 function payloadFromFields(
   enabled: boolean,
   effect: AdmissionEffectDto,
+  predicate: AdmissionPredicateDto,
+  publicKeysPem: string,
 ): AdmissionPolicyRequest {
   return {
     enabled,
     when: "pull",
-    predicate: "not_signed",
+    predicate,
     effect,
+    public_keys_pem: publicKeysPem,
   };
 }
 
@@ -73,9 +78,10 @@ export function AdmissionPanel({
       <CardHeader>
         <CardTitle>Políticas</CardTitle>
         <CardDescription>
-          Si una imagen no está firmada (Cosign / Notation), deniega el pull o solo avisa. No
-          exige verificación criptográfica. En un Mirror rige esta regla; un Alloy usa la de
-          cada miembro Forge o Mirror. Simular ignora si la regla está activada. Los avisos y
+          Si una imagen no está firmada (Cosign / Notation) o su firma no verifica contra las
+          claves PEM de <code>cosign generate-key-pair</code>, deniega el pull o solo avisa. No
+          cubre Cosign keyless / Fulcio. En un Mirror rige esta regla; un Alloy usa la de cada
+          miembro Forge o Mirror. Simular ignora si la regla está activada. Los avisos y
           denegaciones del pull quedan abajo.
         </CardDescription>
       </CardHeader>
@@ -139,8 +145,11 @@ function AdmissionForm({
   const dryRun = useDryRunAdmission(repositoryId);
   const [enabled, setEnabled] = useState(policy.enabled);
   const [effect, setEffect] = useState<AdmissionEffectDto>(policy.effect);
+  const [predicate, setPredicate] = useState<AdmissionPredicateDto>(policy.predicate);
+  const [publicKeysPem, setPublicKeysPem] = useState(policy.public_keys_pem);
   const [preview, setPreview] = useState<AdmissionPreviewResponse | null>(null);
   const [schemaError, setSchemaError] = useState(false);
+  const missingKeys = predicate === "not_verified" && publicKeysPem.trim() === "";
 
   function rememberSchemaError(err: unknown) {
     const message = err instanceof ApiError ? err.message : "";
@@ -149,20 +158,31 @@ function AdmissionForm({
     }
   }
 
-  function onFieldsChange(nextEnabled: boolean, nextEffect: AdmissionEffectDto) {
+  function onFieldsChange(
+    nextEnabled: boolean,
+    nextEffect: AdmissionEffectDto,
+    nextPredicate: AdmissionPredicateDto,
+    nextKeys: string,
+  ) {
     setEnabled(nextEnabled);
     setEffect(nextEffect);
+    setPredicate(nextPredicate);
+    setPublicKeysPem(nextKeys);
     setPreview(null);
   }
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      await savePolicy.mutateAsync(payloadFromFields(enabled, effect));
+      await savePolicy.mutateAsync(
+        payloadFromFields(enabled, effect, predicate, publicKeysPem),
+      );
       setSchemaError(false);
       toast.success(
         enabled
-          ? "Política guardada. Los pulls de imágenes sin firma se evaluarán a partir de ahora."
+          ? predicate === "not_verified"
+            ? "Política guardada. Los pulls de imágenes no verificadas se evaluarán a partir de ahora."
+            : "Política guardada. Los pulls de imágenes sin firma se evaluarán a partir de ahora."
           : "Política guardada. Está desactivada: el pull no se bloquea.",
       );
     } catch (err) {
@@ -173,7 +193,9 @@ function AdmissionForm({
 
   async function onSimulate() {
     try {
-      const result = await dryRun.mutateAsync(payloadFromFields(enabled, effect));
+      const result = await dryRun.mutateAsync(
+        payloadFromFields(enabled, effect, predicate, publicKeysPem),
+      );
       setPreview(result);
       setSchemaError(false);
       toast.success(previewMessage(result));
@@ -195,7 +217,9 @@ function AdmissionForm({
               type="checkbox"
               className="mt-1 size-4 accent-primary"
               checked={enabled}
-              onChange={(event) => onFieldsChange(event.target.checked, effect)}
+              onChange={(event) =>
+                onFieldsChange(event.target.checked, effect, predicate, publicKeysPem)
+              }
               disabled={!canWrite}
             />
             <span>
@@ -213,18 +237,63 @@ function AdmissionForm({
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Si</Label>
-              <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                No está firmada
-              </p>
+              <Label htmlFor="admission-predicate">Si</Label>
+              <Select
+                value={predicate}
+                onValueChange={(value) =>
+                  onFieldsChange(
+                    enabled,
+                    effect,
+                    value as AdmissionPredicateDto,
+                    publicKeysPem,
+                  )
+                }
+                disabled={!canWrite}
+              >
+                <SelectTrigger id="admission-predicate">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="not_signed">No está firmada</SelectItem>
+                  <SelectItem value="not_verified">No está verificada</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="admission-keys">Claves públicas Cosign (PEM)</Label>
+            <textarea
+              id="admission-keys"
+              className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              value={publicKeysPem}
+              onChange={(event) =>
+                onFieldsChange(enabled, effect, predicate, event.target.value)
+              }
+              disabled={!canWrite}
+              placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted-foreground">
+              Las que genera <code>cosign generate-key-pair</code>. Varias, una detrás de otra.
+              Vacío: «no está verificada» no deja pasar ninguna imagen.
+            </p>
+            {missingKeys ? (
+              <Alert>
+                <AlertCircle />
+                <AlertTitle>Sin claves</AlertTitle>
+                <AlertDescription>
+                  Con «no está verificada» y el PEM vacío, ninguna imagen cuenta como
+                  verificada. Pega al menos una clave pública antes de activar la regla.
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="admission-effect">Entonces</Label>
             <Select
               value={effect}
               onValueChange={(value) =>
-                onFieldsChange(enabled, value as AdmissionEffectDto)
+                onFieldsChange(enabled, value as AdmissionEffectDto, predicate, publicKeysPem)
               }
               disabled={!canWrite}
             >

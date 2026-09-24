@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use ferrobox_domain::admission::{AdmissionEffect, AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
-use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
+use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 use thiserror::Error;
@@ -30,11 +30,11 @@ fn backend_error(message: impl Into<String>) -> AdmissionStoreError {
 }
 
 fn map_sqlx(err: &sqlx::Error) -> AdmissionStoreError {
-    let undefined_table = err
+    let missing = err
         .as_database_error()
         .and_then(sqlx::error::DatabaseError::code)
-        .is_some_and(|code| code == "42P01");
-    if undefined_table {
+        .is_some_and(|code| code == "42P01" || code == "42703");
+    if missing {
         return AdmissionStoreError::MissingSchema;
     }
     backend_error(err.to_string())
@@ -45,11 +45,11 @@ impl AdmissionStore for PostgresAdmissionStore {
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
-    ) -> Result<AdmissionPolicy, AdmissionStoreError> {
+    ) -> Result<AdmissionRecord, AdmissionStoreError> {
         let repository_id: Uuid = repository_id.into();
         let row = sqlx::query(
             r"
-            SELECT enabled, moment, predicate, effect
+            SELECT enabled, moment, predicate, effect, public_keys_pem
             FROM repository_admission
             WHERE repository_id = $1
             ",
@@ -60,7 +60,10 @@ impl AdmissionStore for PostgresAdmissionStore {
         .map_err(|err| map_sqlx(&err));
 
         match row {
-            Err(AdmissionStoreError::MissingSchema) | Ok(None) => Ok(AdmissionPolicy::inactive()),
+            Err(AdmissionStoreError::MissingSchema) | Ok(None) => Ok(AdmissionRecord {
+                policy: AdmissionPolicy::inactive(),
+                public_keys_pem: String::new(),
+            }),
             Err(err) => Err(err),
             Ok(Some(row)) => {
                 let enabled: bool = sqlx::Row::try_get(&row, "enabled")
@@ -71,8 +74,13 @@ impl AdmissionStore for PostgresAdmissionStore {
                     .map_err(|err| backend_error(err.to_string()))?;
                 let effect: String = sqlx::Row::try_get(&row, "effect")
                     .map_err(|err| backend_error(err.to_string()))?;
-                AdmissionPolicy::parse(enabled, &moment, &predicate, &effect)
-                    .map_err(|err| backend_error(err.to_string()))
+                let public_keys_pem: String = sqlx::Row::try_get(&row, "public_keys_pem")
+                    .map_err(|err| backend_error(err.to_string()))?;
+                Ok(AdmissionRecord {
+                    policy: AdmissionPolicy::parse(enabled, &moment, &predicate, &effect)
+                        .map_err(|err| backend_error(err.to_string()))?,
+                    public_keys_pem,
+                })
             }
         }
     }
@@ -81,17 +89,20 @@ impl AdmissionStore for PostgresAdmissionStore {
         &self,
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
+        public_keys_pem: &str,
     ) -> Result<(), AdmissionStoreError> {
         let repository_id: Uuid = repository_id.into();
         sqlx::query(
             r"
-            INSERT INTO repository_admission (repository_id, enabled, moment, predicate, effect)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO repository_admission
+                (repository_id, enabled, moment, predicate, effect, public_keys_pem)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (repository_id) DO UPDATE
             SET enabled = EXCLUDED.enabled,
                 moment = EXCLUDED.moment,
                 predicate = EXCLUDED.predicate,
                 effect = EXCLUDED.effect,
+                public_keys_pem = EXCLUDED.public_keys_pem,
                 updated_at = now()
             ",
         )
@@ -100,6 +111,7 @@ impl AdmissionStore for PostgresAdmissionStore {
         .bind(policy.when().as_str())
         .bind(policy.predicate().as_str())
         .bind(policy.effect().as_str())
+        .bind(public_keys_pem)
         .execute(&self.pool)
         .await
         .map_err(|err| map_sqlx(&err))?;
