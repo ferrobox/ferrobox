@@ -469,10 +469,17 @@ export function useChangePassword() {
   });
 }
 
+function refetchWhileAssaysRun<T extends { status: string }>(
+  query: { state: { data?: T[] } },
+): number | false {
+  return query.state.data?.some((assay) => assay.status === "running") ? 2000 : false;
+}
+
 export function useAssays() {
   return useQuery({
     queryKey: queryKeys.assays,
     queryFn: api.listAssays,
+    refetchInterval: refetchWhileAssaysRun,
   });
 }
 
@@ -480,6 +487,7 @@ export function useRepositoryAssays(repositoryId: string) {
   return useQuery({
     queryKey: queryKeys.repositoryAssays(repositoryId),
     queryFn: () => api.listRepositoryAssays(repositoryId),
+    refetchInterval: refetchWhileAssaysRun,
   });
 }
 

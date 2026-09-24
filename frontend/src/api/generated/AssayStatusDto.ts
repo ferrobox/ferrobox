@@ -3,4 +3,4 @@
 /**
  * Estado de un ensaye.
  */
-export type AssayStatusDto = "ready" | "failed" | "unsupported";
+export type AssayStatusDto = "ready" | "failed" | "unsupported" | "running";
