@@ -1,8 +1,10 @@
 use async_trait::async_trait;
-use ferrobox_domain::admission::AdmissionPolicy;
-use ferrobox_domain::ids::RepositoryId;
+use chrono::{DateTime, SecondsFormat, Utc};
+use ferrobox_domain::admission::{AdmissionEffect, AdmissionEvent, AdmissionPolicy};
+use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
 use ferrobox_ports::admission_store::{AdmissionStore, AdmissionStoreError};
-use sqlx::PgPool;
+use sqlx::postgres::PgRow;
+use sqlx::{PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -103,4 +105,105 @@ impl AdmissionStore for PostgresAdmissionStore {
         .map_err(|err| map_sqlx(&err))?;
         Ok(())
     }
+
+    async fn record_event(&self, event: &AdmissionEvent) -> Result<(), AdmissionStoreError> {
+        let id: Uuid = event.id().into();
+        let repository_id: Uuid = event.repository_id().into();
+        sqlx::query(
+            r"
+            INSERT INTO repository_admission_events
+                (id, repository_id, name, reference, effect, reason)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ",
+        )
+        .bind(id)
+        .bind(repository_id)
+        .bind(event.name())
+        .bind(event.reference())
+        .bind(event.effect().as_str())
+        .bind(event.reason())
+        .execute(&self.pool)
+        .await
+        .map_err(|err| map_sqlx(&err))?;
+
+        sqlx::query(
+            r"
+            DELETE FROM repository_admission_events
+            WHERE repository_id = $1
+              AND id NOT IN (
+                  SELECT id FROM repository_admission_events
+                  WHERE repository_id = $1
+                  ORDER BY created_at DESC
+                  LIMIT 50
+              )
+            ",
+        )
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| map_sqlx(&err))?;
+        Ok(())
+    }
+
+    async fn list_events(
+        &self,
+        repository_id: RepositoryId,
+        limit: usize,
+    ) -> Result<Vec<AdmissionEvent>, AdmissionStoreError> {
+        let repository_id: Uuid = repository_id.into();
+        let limit = i64::try_from(limit).unwrap_or(50);
+        let rows = sqlx::query(
+            r"
+            SELECT id, repository_id, name, reference, effect, reason, created_at
+            FROM repository_admission_events
+            WHERE repository_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            ",
+        )
+        .bind(repository_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| map_sqlx(&err))?;
+        rows.iter().map(row_to_event).collect()
+    }
+}
+
+fn row_to_event(row: &PgRow) -> Result<AdmissionEvent, AdmissionStoreError> {
+    let id: Uuid = row
+        .try_get("id")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let repository_id: Uuid = row
+        .try_get("repository_id")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let name: String = row
+        .try_get("name")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let reference: String = row
+        .try_get("reference")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let effect: String = row
+        .try_get("effect")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let reason: String = row
+        .try_get("reason")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let created_at: DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|err| backend_error(err.to_string()))?;
+    let effect = match effect.as_str() {
+        "deny" => AdmissionEffect::Deny,
+        "warn" => AdmissionEffect::Warn,
+        other => return Err(backend_error(format!("unknown admission effect '{other}'"))),
+    };
+    Ok(AdmissionEvent::from_parts(
+        AdmissionEventId::from(id),
+        RepositoryId::from(repository_id),
+        name,
+        reference,
+        effect,
+        reason,
+        created_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+    ))
 }

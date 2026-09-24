@@ -4,10 +4,12 @@ import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import type { AdmissionEffectDto } from "@/api/generated/AdmissionEffectDto";
+import type { AdmissionEventResponse } from "@/api/generated/AdmissionEventResponse";
 import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyResponse";
 import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
 import {
+  useAdmissionEvents,
   useAdmissionPolicy,
   useDryRunAdmission,
   useSaveAdmissionPolicy,
@@ -73,7 +75,7 @@ export function AdmissionPanel({
         <CardDescription>
           Si una imagen no está firmada (Cosign / Notation), deniega el pull o solo avisa. No
           exige verificación criptográfica. No se aplica a Mirror ni a Alloy. Simular ignora si
-          la regla está activada.
+          la regla está activada. Los avisos y denegaciones del pull quedan abajo.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -99,6 +101,7 @@ export function AdmissionPanel({
             policy={data ?? EMPTY_POLICY}
           />
         )}
+        <AdmissionEventLog repositoryId={repositoryId} />
       </CardContent>
     </Card>
   );
@@ -276,11 +279,80 @@ function AdmissionForm({
   );
 }
 
+function countPhrase(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function previewMessage(preview: AdmissionPreviewResponse): string {
+  const allowed = countPhrase(preview.allowed, "pasaría", "pasarían");
   if (preview.matches.length === 0) {
-    return `Ninguna imagen dispararía la regla. ${preview.allowed} pasarían.`;
+    return `Ninguna imagen dispararía la regla. ${allowed}.`;
   }
-  return `${preview.matches.length} imagen${preview.matches.length === 1 ? "" : "es"} dispararían la regla. ${preview.allowed} pasarían.`;
+  return `${countPhrase(preview.matches.length, "imagen dispararía", "imágenes dispararían")} la regla. ${allowed}.`;
+}
+
+function formatEventTime(value: string): string {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+  return new Date(parsed).toLocaleString();
+}
+
+function AdmissionEventLog({ repositoryId }: { repositoryId: string }) {
+  const { data, isPending, isError, error } = useAdmissionEvents(repositoryId, true);
+
+  return (
+    <div className="space-y-3 border-t border-border pt-5">
+      <div>
+        <p className="text-sm font-medium text-foreground">Avisos y denegaciones</p>
+        <p className="text-sm text-muted-foreground">
+          Últimos pulls que dispararon la regla activa. Avisar deja pasar y apunta aquí.
+        </p>
+      </div>
+      {isPending ? <Skeleton className="h-16 w-full rounded-md" /> : null}
+      {isError && error.message ? (
+        <p className="text-sm text-muted-foreground">{error.message}</p>
+      ) : null}
+      {data && data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Todavía no hay rastro de pulls.</p>
+      ) : null}
+      {data && data.length > 0 ? <AdmissionEventTable events={data} /> : null}
+    </div>
+  );
+}
+
+function AdmissionEventTable({ events }: { events: AdmissionEventResponse[] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Cuándo</TableHead>
+          <TableHead>Imagen</TableHead>
+          <TableHead>Etiqueta</TableHead>
+          <TableHead>Efecto</TableHead>
+          <TableHead>Motivo</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((event) => (
+          <TableRow key={event.id}>
+            <TableCell className="text-xs text-muted-foreground">
+              {formatEventTime(event.created_at)}
+            </TableCell>
+            <TableCell className="font-mono text-xs">{event.name}</TableCell>
+            <TableCell className="font-mono text-xs">{event.reference}</TableCell>
+            <TableCell>
+              <Badge variant={event.effect === "deny" ? "destructive" : "outline"}>
+                {event.effect === "deny" ? "Denegado" : "Aviso"}
+              </Badge>
+            </TableCell>
+            <TableCell>{event.reason}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 }
 
 function AdmissionPreviewTable({ preview }: { preview: AdmissionPreviewResponse }) {

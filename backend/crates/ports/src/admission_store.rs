@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use ferrobox_domain::admission::AdmissionPolicy;
+use ferrobox_domain::admission::{AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::ids::RepositoryId;
 use thiserror::Error;
 
@@ -42,4 +42,23 @@ pub trait AdmissionStore: Send + Sync {
         repository_id: RepositoryId,
         policy: AdmissionPolicy,
     ) -> Result<(), AdmissionStoreError>;
+
+    /// Registra un aviso o una denegación y recorta el historial a 50
+    /// filas por repositorio.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    async fn record_event(&self, event: &AdmissionEvent) -> Result<(), AdmissionStoreError>;
+
+    /// Últimos eventos del repositorio, más recientes primero.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    async fn list_events(
+        &self,
+        repository_id: RepositoryId,
+        limit: usize,
+    ) -> Result<Vec<AdmissionEvent>, AdmissionStoreError>;
 }

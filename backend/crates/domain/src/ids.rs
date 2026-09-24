@@ -298,6 +298,42 @@ impl From<WebhookDeliveryId> for Uuid {
     }
 }
 
+/// Identificador único de un evento de admisión (aviso o denegación).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AdmissionEventId(Uuid);
+
+impl AdmissionEventId {
+    /// Genera un nuevo identificador, usando UUID versión 7.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+impl Default for AdmissionEventId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for AdmissionEventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for AdmissionEventId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AdmissionEventId> for Uuid {
+    fn from(value: AdmissionEventId) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,5 +373,7 @@ mod tests {
             WebhookDeliveryId::from(Uuid::from(delivery_id)),
             delivery_id
         );
+        let event_id = AdmissionEventId::new();
+        assert_eq!(AdmissionEventId::from(Uuid::from(event_id)), event_id);
     }
 }

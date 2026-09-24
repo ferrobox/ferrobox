@@ -34,6 +34,8 @@ export const queryKeys = {
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryAdmission: (id: string) => ["repositories", id, "admission"] as const,
+  repositoryAdmissionEvents: (id: string) =>
+    ["repositories", id, "admission", "events"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
   repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
@@ -559,6 +561,14 @@ export function useDryRunAdmission(repositoryId: string) {
   return useMutation({
     mutationFn: (payload: AdmissionPolicyRequest) =>
       api.dryRunAdmission(repositoryId, payload),
+  });
+}
+
+export function useAdmissionEvents(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryAdmissionEvents(repositoryId),
+    queryFn: () => api.listAdmissionEvents(repositoryId),
+    enabled,
   });
 }
 
