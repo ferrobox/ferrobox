@@ -99,6 +99,14 @@ export function SettingsPage() {
                   {user ? <Badge variant="outline">{roleLabel(user.role)}</Badge> : "—"}
                 </dd>
               </div>
+              {user?.sso ? (
+                <div>
+                  <dt className="text-muted-foreground">{t("settings.sso")}</dt>
+                  <dd className="mt-1">
+                    <Badge variant="secondary">{t("settings.ssoLinked")}</Badge>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
 
             <form onSubmit={(event) => void onChangePassword(event)} className="space-y-4">
@@ -183,6 +191,16 @@ export function SettingsPage() {
                   <p className="mt-1 font-mono text-sm text-foreground">
                     {settings?.version ?? "—"}
                   </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{t("settings.sso")}</p>
+                  {settings?.oidc_enabled ? (
+                    <p className="mt-1 font-mono text-sm break-all text-foreground">
+                      {settings.oidc_issuer}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">{t("settings.ssoOff")}</p>
+                  )}
                 </div>
               </>
             )}

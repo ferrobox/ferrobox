@@ -31,6 +31,7 @@ export const queryKeys = {
   myGroups: ["auth", "me", "groups"] as const,
   repositoryAccess: (id: string) => ["repositories", id, "access"] as const,
   settings: ["settings"] as const,
+  oidc: ["auth", "oidc"] as const,
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryAdmission: (id: string) => ["repositories", id, "admission"] as const,
@@ -477,6 +478,14 @@ export function useSettings() {
   return useQuery({
     queryKey: queryKeys.settings,
     queryFn: api.getSettings,
+  });
+}
+
+export function useOidcStatus() {
+  return useQuery({
+    queryKey: queryKeys.oidc,
+    queryFn: api.getOidcStatus,
+    staleTime: 60_000,
   });
 }
 

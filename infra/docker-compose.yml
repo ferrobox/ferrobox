@@ -100,6 +100,37 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       FRONTEND_DIR: /app/www
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SUCCESS_REDIRECT: ${OIDC_SUCCESS_REDIRECT:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_ADMIN_ROLES: ${OIDC_ADMIN_ROLES:-}
+      OIDC_DEVELOPER_ROLES: ${OIDC_DEVELOPER_ROLES:-}
+      OIDC_READER_ROLES: ${OIDC_READER_ROLES:-}
+      OIDC_ROLE_CLAIM: ${OIDC_ROLE_CLAIM:-}
+      OIDC_GROUP_CLAIM: ${OIDC_GROUP_CLAIM:-}
+      OIDC_AUTO_CREATE_GROUPS: ${OIDC_AUTO_CREATE_GROUPS:-true}
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    container_name: ferrobox-keycloak
+    profiles: ["sso"]
+    command:
+      - start-dev
+      - --import-realm
+    ports:
+      - "8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: 127.0.0.1
+      KC_HOSTNAME_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ./keycloak/ferrobox-realm.json:/opt/keycloak/data/import/ferrobox-realm.json:ro
 
 volumes:
   postgres_data:

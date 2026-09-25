@@ -285,6 +285,8 @@ pub(crate) struct UserResponse {
     /// no tiene uno.
     pub(crate) email: Option<String>,
     pub(crate) role: RoleDto,
+    /// `true` si la cuenta está vinculada a un emisor `OIDC`.
+    pub(crate) sso: bool,
 }
 
 impl From<&User> for UserResponse {
@@ -294,6 +296,7 @@ impl From<&User> for UserResponse {
             username: user.username().to_string(),
             email: user.email().map(ToString::to_string),
             role: user.role().into(),
+            sso: user.is_sso_linked(),
         }
     }
 }
@@ -378,6 +381,20 @@ pub(crate) struct SettingsResponse {
     pub(crate) public_base_url: String,
     /// Versión del servidor (`CARGO_PKG_VERSION`).
     pub(crate) version: String,
+    /// `true` si hay un `IdP` `OIDC` configurado.
+    pub(crate) oidc_enabled: bool,
+    /// Emisor `OIDC`, si el SSO está activo.
+    pub(crate) oidc_issuer: Option<String>,
+}
+
+/// Estado público del inicio de sesión federado (no exige sesión).
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct OidcStatusResponse {
+    /// `true` si el botón SSO debe mostrarse.
+    pub(crate) enabled: bool,
+    /// Emisor, si está habilitado.
+    pub(crate) issuer: Option<String>,
 }
 
 /// Respuesta al iniciar sesión correctamente.

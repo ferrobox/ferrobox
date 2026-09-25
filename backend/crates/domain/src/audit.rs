@@ -22,6 +22,8 @@ pub enum AuditAction {
     UserPasswordReset,
     /// El usuario cambió su propia contraseña.
     UserPasswordChanged,
+    /// Un usuario inició sesión (o se aprovisionó) vía `OIDC`.
+    UserSsoSignedIn,
     /// Se emitió un token de API.
     TokenCreated,
     /// Se revocó un token de API.
@@ -205,6 +207,7 @@ impl AuditAction {
             Self::UserRoleChanged => "user.role_changed",
             Self::UserPasswordReset => "user.password_reset",
             Self::UserPasswordChanged => "user.password_changed",
+            Self::UserSsoSignedIn => "user.sso_signed_in",
             Self::TokenCreated => "token.created",
             Self::TokenRevoked => "token.revoked",
             Self::GroupCreated => "group.created",
@@ -243,6 +246,7 @@ impl AuditAction {
             "user.role_changed" => Ok(Self::UserRoleChanged),
             "user.password_reset" => Ok(Self::UserPasswordReset),
             "user.password_changed" => Ok(Self::UserPasswordChanged),
+            "user.sso_signed_in" => Ok(Self::UserSsoSignedIn),
             "token.created" => Ok(Self::TokenCreated),
             "token.revoked" => Ok(Self::TokenRevoked),
             "group.created" => Ok(Self::GroupCreated),
@@ -323,6 +327,7 @@ mod tests {
             AuditAction::UserRoleChanged,
             AuditAction::UserPasswordReset,
             AuditAction::UserPasswordChanged,
+            AuditAction::UserSsoSignedIn,
             AuditAction::TokenCreated,
             AuditAction::TokenRevoked,
             AuditAction::GroupCreated,

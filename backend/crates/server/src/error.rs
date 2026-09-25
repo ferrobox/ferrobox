@@ -14,6 +14,7 @@ use ferrobox_application::download_artifact::DownloadArtifactError;
 use ferrobox_application::get_repository::GetRepositoryError;
 use ferrobox_application::list_repository_artifacts::ListRepositoryArtifactsError;
 use ferrobox_application::login::LoginError;
+use ferrobox_application::oidc::OidcError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
@@ -423,6 +424,24 @@ impl From<GroupError> for ApiError {
             GroupError::Groups(GroupStoreError::Backend(_))
             | GroupError::Users(_)
             | GroupError::Repositories(_) => Self::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<OidcError> for ApiError {
+    fn from(err: OidcError) -> Self {
+        match err {
+            OidcError::Disabled => Self::NotFound(err.to_string()),
+            OidcError::InvalidState
+            | OidcError::Provider(_)
+            | OidcError::InvalidToken(_)
+            | OidcError::MissingClaims
+            | OidcError::InvalidUsername => Self::BadRequest(err.to_string()),
+            OidcError::Http(_)
+            | OidcError::Users(_)
+            | OidcError::Groups(_)
+            | OidcError::Tokens(_)
+            | OidcError::PasswordHash => Self::Internal(err.to_string()),
         }
     }
 }

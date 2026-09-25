@@ -40,6 +40,30 @@ pub struct Config {
     /// Directorio de la UI estática. Si está, el servidor anida la API
     /// en `/api` y sirve el SPA en el resto de rutas.
     pub frontend_dir: Option<String>,
+    /// Emisor `OIDC` (URL del realm). Vacío = SSO desactivado.
+    pub oidc_issuer: Option<String>,
+    /// `client_id` del cliente en el `IdP`.
+    pub oidc_client_id: Option<String>,
+    /// Secreto del cliente. Opcional si el cliente es público + PKCE.
+    pub oidc_client_secret: Option<String>,
+    /// URL de retorno. Si falta, se deriva de `PUBLIC_BASE_URL`.
+    pub oidc_redirect_uri: Option<String>,
+    /// Destino de la UI tras el login. Si falta, `{PUBLIC_BASE_URL}/login`.
+    pub oidc_success_redirect: Option<String>,
+    /// Ámbitos (`openid profile email` por defecto).
+    pub oidc_scopes: Option<String>,
+    /// Roles del `IdP` que conceden Admin, separados por coma.
+    pub oidc_admin_roles: Option<String>,
+    /// Roles del `IdP` que conceden Developer, separados por coma.
+    pub oidc_developer_roles: Option<String>,
+    /// Roles del `IdP` que conceden Reader, separados por coma.
+    pub oidc_reader_roles: Option<String>,
+    /// *Claim* extra de roles (además de `realm_access` / `roles`).
+    pub oidc_role_claim: Option<String>,
+    /// *Claim* de grupos (`groups` por defecto).
+    pub oidc_group_claim: Option<String>,
+    /// Si `false`, no se crean grupos que aún no existan.
+    pub oidc_auto_create_groups: bool,
 }
 
 impl Config {
@@ -62,6 +86,18 @@ impl Config {
             admin_username: env_or("ADMIN_USERNAME", "admin"),
             admin_password: env_or("ADMIN_PASSWORD", "admin"),
             frontend_dir: optional_env("FRONTEND_DIR"),
+            oidc_issuer: optional_env("OIDC_ISSUER"),
+            oidc_client_id: optional_env("OIDC_CLIENT_ID"),
+            oidc_client_secret: optional_env("OIDC_CLIENT_SECRET"),
+            oidc_redirect_uri: optional_env("OIDC_REDIRECT_URI"),
+            oidc_success_redirect: optional_env("OIDC_SUCCESS_REDIRECT"),
+            oidc_scopes: optional_env("OIDC_SCOPES"),
+            oidc_admin_roles: optional_env("OIDC_ADMIN_ROLES"),
+            oidc_developer_roles: optional_env("OIDC_DEVELOPER_ROLES"),
+            oidc_reader_roles: optional_env("OIDC_READER_ROLES"),
+            oidc_role_claim: optional_env("OIDC_ROLE_CLAIM"),
+            oidc_group_claim: optional_env("OIDC_GROUP_CLAIM"),
+            oidc_auto_create_groups: env_flag("OIDC_AUTO_CREATE_GROUPS", true),
         })
     }
 }
@@ -114,6 +150,16 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn optional_env(key: &str) -> Option<String> {
     std::env::var(key).ok().and_then(normalize_env)
+}
+
+fn env_flag(key: &str, default: bool) -> bool {
+    match optional_env(key) {
+        Some(value) => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        None => default,
+    }
 }
 
 fn normalize_env(value: impl AsRef<str>) -> Option<String> {

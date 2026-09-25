@@ -19,7 +19,9 @@ use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, P
 use ferrobox_domain::quota::StorageQuota;
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::retention::RetentionPolicy;
-use ferrobox_domain::user::{Role, User, Username};
+use ferrobox_domain::oidc::OidcIdentity;
+use ferrobox_domain::group::GroupName;
+use ferrobox_domain::user::{Email, Role, User, Username};
 use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
 use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
@@ -424,6 +426,33 @@ impl UserStore for InMemoryUserStore {
             .values()
             .find(|(user, _)| user.username() == username)
             .map(|(user, hash)| (user.clone(), hash.clone())))
+    }
+
+    async fn find_by_email(&self, email: &Email) -> Result<Option<User>, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(user, _)| user.email() == Some(email))
+            .map(|(user, _)| user.clone()))
+    }
+
+    async fn find_by_oidc(&self, identity: &OidcIdentity) -> Result<Option<User>, UserStoreError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(user, _)| user.oidc() == Some(identity))
+            .map(|(user, _)| user.clone()))
+    }
+
+    async fn find_by_id_with_password_hash(
+        &self,
+        id: UserId,
+    ) -> Result<Option<(User, String)>, UserStoreError> {
+        Ok(self.users.lock().unwrap().get(&id).cloned())
     }
 
     async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
@@ -869,6 +898,7 @@ pub struct InMemoryGroupStore {
     groups: Mutex<HashMap<GroupId, Group>>,
     members: Mutex<HashMap<GroupId, HashSet<UserId>>>,
     grants: Mutex<Vec<RepositoryGroupGrant>>,
+    sso_memberships: Mutex<HashMap<UserId, HashSet<GroupId>>>,
 }
 
 #[async_trait]
@@ -889,6 +919,16 @@ impl GroupStore for InMemoryGroupStore {
         Ok(self.groups.lock().unwrap().get(&id).cloned())
     }
 
+    async fn find_by_name(&self, name: &GroupName) -> Result<Option<Group>, GroupStoreError> {
+        Ok(self
+            .groups
+            .lock()
+            .unwrap()
+            .values()
+            .find(|group| group.name() == name)
+            .cloned())
+    }
+
     async fn find_all(&self) -> Result<Vec<Group>, GroupStoreError> {
         let mut groups: Vec<_> = self.groups.lock().unwrap().values().cloned().collect();
         groups.sort_by(|a, b| a.name().as_str().cmp(b.name().as_str()));
@@ -902,6 +942,9 @@ impl GroupStore for InMemoryGroupStore {
             .lock()
             .unwrap()
             .retain(|grant| grant.group_id != id);
+        for links in self.sso_memberships.lock().unwrap().values_mut() {
+            links.remove(&id);
+        }
         Ok(removed)
     }
 
@@ -936,6 +979,53 @@ impl GroupStore for InMemoryGroupStore {
             .filter(|(_, members)| members.contains(&user_id))
             .map(|(group_id, _)| *group_id)
             .collect())
+    }
+
+    async fn add_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError> {
+        self.members
+            .lock()
+            .unwrap()
+            .entry(group_id)
+            .or_default()
+            .insert(user_id);
+        Ok(())
+    }
+
+    async fn remove_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError> {
+        if let Some(members) = self.members.lock().unwrap().get_mut(&group_id) {
+            members.remove(&user_id);
+        }
+        Ok(())
+    }
+
+    async fn sso_memberships(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError> {
+        Ok(self
+            .sso_memberships
+            .lock()
+            .unwrap()
+            .get(&user_id)
+            .map(|set| set.iter().copied().collect())
+            .unwrap_or_default())
+    }
+
+    async fn set_sso_memberships(
+        &self,
+        user_id: UserId,
+        group_ids: &[GroupId],
+    ) -> Result<(), GroupStoreError> {
+        self.sso_memberships
+            .lock()
+            .unwrap()
+            .insert(user_id, group_ids.iter().copied().collect());
+        Ok(())
     }
 
     async fn set_group_repositories(

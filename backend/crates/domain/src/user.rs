@@ -3,6 +3,7 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::ids::UserId;
+use crate::oidc::OidcIdentity;
 
 const MAX_USERNAME_LENGTH: usize = 64;
 const MAX_EMAIL_LENGTH: usize = 254;
@@ -295,6 +296,7 @@ pub struct User {
     username: Username,
     email: Option<Email>,
     role: Role,
+    oidc: Option<OidcIdentity>,
 }
 
 impl User {
@@ -308,6 +310,7 @@ impl User {
             username,
             email: None,
             role,
+            oidc: None,
         }
     }
 
@@ -326,6 +329,7 @@ impl User {
             username,
             email,
             role,
+            oidc: None,
         }
     }
 
@@ -364,6 +368,27 @@ impl User {
     #[must_use]
     pub fn with_role(self, role: Role) -> Self {
         Self { role, ..self }
+    }
+
+    /// Identidad federada, si la cuenta se ha vinculado a un `IdP`.
+    #[must_use]
+    pub fn oidc(&self) -> Option<&OidcIdentity> {
+        self.oidc.as_ref()
+    }
+
+    /// `true` si la cuenta está vinculada a un emisor `OIDC`.
+    #[must_use]
+    pub fn is_sso_linked(&self) -> bool {
+        self.oidc.is_some()
+    }
+
+    /// Devuelve este usuario vinculado a una identidad `OIDC`.
+    #[must_use]
+    pub fn with_oidc(self, identity: Option<OidcIdentity>) -> Self {
+        Self {
+            oidc: identity,
+            ..self
+        }
     }
 }
 

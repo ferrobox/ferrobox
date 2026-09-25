@@ -1,10 +1,11 @@
-import { type FormEvent, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { type FormEvent, useEffect, useState } from "react";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
+import { useOidcStatus } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
@@ -12,19 +13,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function LoginPage() {
-  const { token, login, isLoading } = useAuth();
+  const { token, login, completeSso, isLoading } = useAuth();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { data: oidc } = useOidcStatus();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [ssoPending, setSsoPending] = useState(() => window.location.hash.includes("sso_token="));
 
   const from =
     (location.state as { from?: string } | null)?.from &&
     (location.state as { from?: string }).from !== "/login"
       ? (location.state as { from: string }).from
       : "/repositories";
+
+  useEffect(() => {
+    const error = searchParams.get("sso_error");
+    if (error) {
+      toast.error(error);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const hash = window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const tokenFromHash = new URLSearchParams(hash).get("sso_token");
+    if (!tokenFromHash) {
+      setSsoPending(false);
+      return;
+    }
+    let cancelled = false;
+    setSsoPending(true);
+    void completeSso(tokenFromHash)
+      .then(() => {
+        if (!cancelled) {
+          window.history.replaceState(null, "", window.location.pathname);
+          navigate(from, { replace: true });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          window.history.replaceState(null, "", window.location.pathname);
+          toast.error(error instanceof ApiError ? error.message : t("login.ssoFailed"));
+          setSsoPending(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [completeSso, from, navigate, t]);
 
   if (!isLoading && token) {
     return <Navigate to={from} replace />;
@@ -99,9 +140,17 @@ export function LoginPage() {
               required
             />
           </div>
-          <Button type="submit" className="w-full" disabled={submitting}>
+          <Button type="submit" className="w-full" disabled={submitting || ssoPending}>
             {submitting ? t("login.submitting") : t("login.submit")}
           </Button>
+          {oidc?.enabled ? (
+            <a
+              href="/api/auth/oidc/start"
+              className="inline-flex h-9 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium hover:bg-accent"
+            >
+              {ssoPending ? t("login.ssoSubmitting") : t("login.sso")}
+            </a>
+          ) : null}
           <p className="text-center text-xs text-muted-foreground">{t("login.forgot")}</p>
         </form>
       </div>

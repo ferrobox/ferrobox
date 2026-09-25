@@ -21,6 +21,7 @@ interface AuthContextValue {
   readonly token: string | null;
   readonly isLoading: boolean;
   readonly login: (username: string, password: string) => Promise<void>;
+  readonly completeSso: (token: string) => Promise<void>;
   readonly logout: () => void;
   readonly updateCurrentUser: (user: UserResponse) => void;
 }
@@ -74,6 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  const completeSso = useCallback(async (token: string) => {
+    const user = await api.completeSsoSession(token);
+    setSession({ token, user });
+    setToken(token);
+    setIsLoading(false);
+  }, []);
+
   const logout = useCallback(() => {
     api.setStoredToken(null);
     setSession(null);
@@ -91,10 +99,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       isLoading,
       login,
+      completeSso,
       logout,
       updateCurrentUser,
     }),
-    [session, token, isLoading, login, logout, updateCurrentUser],
+    [session, token, isLoading, login, completeSso, logout, updateCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

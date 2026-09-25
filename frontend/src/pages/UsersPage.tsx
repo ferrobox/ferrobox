@@ -14,6 +14,7 @@ import { CreateUserDialog } from "@/components/users/CreateUserDialog";
 import { ResetPasswordDialog } from "@/components/users/ResetPasswordDialog";
 import { RolePermissionsCard } from "@/components/users/RolePermissionsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -113,7 +114,14 @@ export function UsersPage() {
                 const isSelf = entry.id === user?.id;
                 return (
                   <TableRow key={entry.id}>
-                    <TableCell className="font-medium">{entry.username}</TableCell>
+                    <TableCell className="font-medium">
+                      <span className="flex items-center gap-2">
+                        {entry.username}
+                        {entry.sso ? (
+                          <Badge variant="secondary">{t("users.sso")}</Badge>
+                        ) : null}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {entry.email ?? "—"}
                     </TableCell>

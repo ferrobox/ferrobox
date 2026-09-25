@@ -17,6 +17,7 @@ mod groups;
 mod maven_registry;
 mod nuget_registry;
 mod go_registry;
+mod oidc;
 mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
@@ -129,6 +130,7 @@ struct AppState {
     groups: GroupService,
     webhooks: WebhookService,
     audit: AuditService,
+    oidc: Option<ferrobox_application::oidc::OidcLoginService>,
 }
 
 #[tokio::main]
@@ -383,6 +385,9 @@ fn build_api_router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
     let public = Router::new()
         .route("/health", get(health))
         .route("/auth/login", post(auth::login))
+        .route("/auth/oidc", get(oidc::status))
+        .route("/auth/oidc/start", get(oidc::start))
+        .route("/auth/oidc/callback", get(oidc::callback))
         .merge(protocol_public_router());
     let protected = with_auth(
         admin_protected_router().merge(protocol_write_router()),
@@ -499,7 +504,7 @@ fn build_app_state(
         &artifact_store,
         &package_index_store,
         &storage,
-        http_client,
+        http_client.clone(),
         &assays,
         quota.clone(),
         admission.clone(),
@@ -561,15 +566,22 @@ fn build_app_state(
         ),
         create_api_token: CreateApiTokenUseCase::new(api_token_store.clone()),
         list_api_tokens: ListApiTokensUseCase::new(api_token_store.clone()),
-        revoke_api_token: RevokeApiTokenUseCase::new(api_token_store),
+        revoke_api_token: RevokeApiTokenUseCase::new(api_token_store.clone()),
         create_user: CreateUserUseCase::new(user_store.clone()),
         list_users: ListUsersUseCase::new(user_store.clone()),
         delete_user: DeleteUserUseCase::new(user_store.clone()),
         change_user_role: ChangeUserRoleUseCase::new(user_store.clone()),
         reset_user_password: ResetUserPasswordUseCase::new(user_store.clone()),
-        groups: GroupService::new(group_store, user_store, repository_store),
+        groups: GroupService::new(group_store.clone(), user_store.clone(), repository_store),
         webhooks,
         audit: AuditService::new(audit_store),
+        oidc: crate::oidc::service_from_config(
+            config,
+            http_client,
+            user_store,
+            group_store,
+            api_token_store,
+        ),
     }
 }
 

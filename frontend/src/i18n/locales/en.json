@@ -23,7 +23,10 @@
     "submit": "Sign in",
     "submitting": "Signing in…",
     "forgot": "If you forgot your password, ask an administrator to reset it.",
-    "failed": "Could not sign in"
+    "failed": "Could not sign in",
+    "sso": "Sign in with SSO",
+    "ssoSubmitting": "Redirecting to the identity provider…",
+    "ssoFailed": "Could not complete single sign-on"
   },
   "topbar": {
     "searchPlaceholder": "Search packages…",
@@ -183,6 +186,9 @@
     "copyPublicUrl": "Copy public URL",
     "urlCopied": "URL copied",
     "serverVersion": "Server version",
+    "sso": "Single sign-on",
+    "ssoOff": "Not configured. Set OIDC_ISSUER and OIDC_CLIENT_ID to enable it.",
+    "ssoLinked": "Linked to the identity provider",
     "groups": "Groups",
     "groupsHint": "The groups you belong to decide which repositories you see.",
     "groupsFailed": "Could not load your groups",
@@ -265,6 +271,7 @@
     "new": "New user",
     "newHint": "Username and email must be unique. The password must meet the instance policy.",
     "username": "Username",
+    "sso": "SSO",
     "password": "Password",
     "confirmPassword": "Confirm password",
     "email": "Email",
@@ -461,6 +468,7 @@
     "user.role_changed": "Changed the role",
     "user.password_reset": "Reset a password",
     "user.password_changed": "Changed their password",
+    "user.sso_signed_in": "Signed in with SSO",
     "token.created": "Created a token",
     "token.revoked": "Revoked a token",
     "group.created": "Created a group",

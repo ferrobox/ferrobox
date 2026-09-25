@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::UserId;
+use ferrobox_domain::oidc::OidcIdentity;
 use ferrobox_domain::user::{Email, Role, User, Username};
 use thiserror::Error;
 
@@ -59,6 +60,38 @@ pub trait UserStore: Send + Sync {
     async fn find_by_username_with_password_hash(
         &self,
         username: &Username,
+    ) -> Result<Option<(User, String)>, UserStoreError>;
+
+    /// Busca un usuario por correo. Devuelve `None` si no existe o el
+    /// correo está vacío.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn find_by_email(&self, email: &Email) -> Result<Option<User>, UserStoreError>;
+
+    /// Busca el usuario vinculado a una identidad `OIDC`.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn find_by_oidc(
+        &self,
+        identity: &OidcIdentity,
+    ) -> Result<Option<User>, UserStoreError>;
+
+    /// Busca un usuario por identificador, junto con el hash de su
+    /// contraseña. Devuelve `None` si no existe.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
+    /// falla.
+    async fn find_by_id_with_password_hash(
+        &self,
+        id: UserId,
     ) -> Result<Option<(User, String)>, UserStoreError>;
 
     /// Lista todos los usuarios, ordenados por nombre.
@@ -169,6 +202,36 @@ mod tests {
                 .values()
                 .find(|(user, _)| user.username() == username)
                 .map(|(user, hash)| (user.clone(), hash.clone())))
+        }
+
+        async fn find_by_email(&self, email: &Email) -> Result<Option<User>, UserStoreError> {
+            Ok(self
+                .users
+                .lock()
+                .unwrap()
+                .values()
+                .find(|(user, _)| user.email() == Some(email))
+                .map(|(user, _)| user.clone()))
+        }
+
+        async fn find_by_oidc(
+            &self,
+            identity: &OidcIdentity,
+        ) -> Result<Option<User>, UserStoreError> {
+            Ok(self
+                .users
+                .lock()
+                .unwrap()
+                .values()
+                .find(|(user, _)| user.oidc() == Some(identity))
+                .map(|(user, _)| user.clone()))
+        }
+
+        async fn find_by_id_with_password_hash(
+            &self,
+            id: UserId,
+        ) -> Result<Option<(User, String)>, UserStoreError> {
+            Ok(self.users.lock().unwrap().get(&id).cloned())
         }
 
         async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {

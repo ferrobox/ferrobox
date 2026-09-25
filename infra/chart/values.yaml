@@ -29,6 +29,21 @@ admin:
   # Vacío: se genera y se reutiliza en upgrades.
   password: ""
 
+# Inicio de sesión federado. issuer y clientId vacíos = desactivado.
+oidc:
+  issuer: ""
+  clientId: ""
+  clientSecret: ""
+  redirectUri: ""
+  successRedirect: ""
+  scopes: ""
+  adminRoles: ""
+  developerRoles: ""
+  readerRoles: ""
+  roleClaim: ""
+  groupClaim: ""
+  autoCreateGroups: true
+
 # Postgres del chart (como compose). Si lo apagas, pon externalUrl.
 postgresql:
   enabled: true

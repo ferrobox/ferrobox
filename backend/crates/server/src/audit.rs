@@ -194,6 +194,7 @@ mod tests {
             audit: ferrobox_application::audit::AuditService::new(Arc::new(
                 InMemoryAuditStore::default(),
             )),
+            oidc: None,
         });
 
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
