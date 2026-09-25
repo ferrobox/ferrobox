@@ -323,6 +323,7 @@ impl OidcLoginService {
             query.append_pair("nonce", &nonce);
             query.append_pair("code_challenge", &challenge);
             query.append_pair("code_challenge_method", "S256");
+            query.append_pair("prompt", "login");
         }
         Ok(url.to_string())
     }
@@ -938,6 +939,7 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains("client_id=ferrobox"));
         assert!(url.contains("response_type=code"));
+        assert!(url.contains("prompt=login"));
     }
 
     #[tokio::test]
