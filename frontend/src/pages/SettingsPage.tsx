@@ -1,12 +1,13 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, Check, Copy, KeyRound, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import { useChangePassword, useMyGroups, useSettings } from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
-import { PASSWORD_POLICY_HINT, passwordMeetsPolicy } from "@/auth/passwordPolicy";
+import { passwordMeetsPolicy } from "@/auth/passwordPolicy";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { GarbageCollectionCard } from "@/components/cleanup/GarbageCollectionCard";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -20,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const { data: settings, isPending } = useSettings();
   const changePassword = useChangePassword();
 
@@ -32,12 +34,12 @@ export function SettingsPage() {
     event.preventDefault();
 
     if (newPassword !== confirmPassword) {
-      toast.error("La nueva contraseña y su confirmación no coinciden");
+      toast.error(t("password.mismatch"));
       return;
     }
 
     if (!passwordMeetsPolicy(newPassword)) {
-      toast.error(PASSWORD_POLICY_HINT);
+      toast.error(t("password.policy"));
       return;
     }
 
@@ -49,9 +51,9 @@ export function SettingsPage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Contraseña actualizada");
+      toast.success(t("settings.passwordUpdated"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo cambiar la contraseña");
+      toast.error(err instanceof ApiError ? err.message : t("settings.passwordFailed"));
     }
   }
 
@@ -62,7 +64,7 @@ export function SettingsPage() {
     await navigator.clipboard.writeText(settings.public_base_url);
     setCopiedUrl(true);
     window.setTimeout(() => setCopiedUrl(false), 1500);
-    toast.success("URL copiada");
+    toast.success(t("settings.urlCopied"));
   }
 
   const canSubmit =
@@ -73,29 +75,26 @@ export function SettingsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Configuración"
-        description="Cuenta, instancia y recolección de basura de FerroBox."
-      />
+      <PageHeader title={t("settings.title")} description={t("settings.description")} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Cuenta</CardTitle>
-            <CardDescription>Identidad de la sesión actual y cambio de contraseña.</CardDescription>
+            <CardTitle>{t("settings.account")}</CardTitle>
+            <CardDescription>{t("settings.accountHint")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
               <div>
-                <dt className="text-muted-foreground">Usuario</dt>
+                <dt className="text-muted-foreground">{t("settings.username")}</dt>
                 <dd className="mt-1 font-medium text-foreground">{user?.username ?? "—"}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Correo</dt>
+                <dt className="text-muted-foreground">{t("settings.email")}</dt>
                 <dd className="mt-1 font-medium text-foreground">{user?.email ?? "—"}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Rol</dt>
+                <dt className="text-muted-foreground">{t("settings.role")}</dt>
                 <dd className="mt-1">
                   {user ? <Badge variant="outline">{roleLabel(user.role)}</Badge> : "—"}
                 </dd>
@@ -104,7 +103,7 @@ export function SettingsPage() {
 
             <form onSubmit={(event) => void onChangePassword(event)} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="current-password">Contraseña actual</Label>
+                <Label htmlFor="current-password">{t("settings.currentPassword")}</Label>
                 <Input
                   id="current-password"
                   type="password"
@@ -115,7 +114,7 @@ export function SettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-password">Nueva contraseña</Label>
+                <Label htmlFor="new-password">{t("settings.newPassword")}</Label>
                 <Input
                   id="new-password"
                   type="password"
@@ -124,10 +123,10 @@ export function SettingsPage() {
                   onChange={(event) => setNewPassword(event.target.value)}
                   required
                 />
-                <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_HINT}</p>
+                <p className="text-xs text-muted-foreground">{t("password.policy")}</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirmar nueva contraseña</Label>
+                <Label htmlFor="confirm-password">{t("settings.confirmPassword")}</Label>
                 <Input
                   id="confirm-password"
                   type="password"
@@ -139,23 +138,17 @@ export function SettingsPage() {
               </div>
               <Button type="submit" disabled={!canSubmit}>
                 <KeyRound />
-                {changePassword.isPending ? "Guardando…" : "Cambiar contraseña"}
+                {changePassword.isPending ? t("common.saving") : t("settings.changePassword")}
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Si olvidaste la contraseña, pide a un administrador que la restablezca. No se
-                envían correos de recuperación.
-              </p>
+              <p className="text-xs text-muted-foreground">{t("settings.forgotAdmin")}</p>
             </form>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Instancia</CardTitle>
-            <CardDescription>
-              URL pública que deben usar Cargo y otros clientes. Se toma de{" "}
-              <code className="font-mono">PUBLIC_BASE_URL</code>.
-            </CardDescription>
+            <CardTitle>{t("settings.instance")}</CardTitle>
+            <CardDescription>{t("settings.instanceHint")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {isPending ? (
@@ -166,7 +159,7 @@ export function SettingsPage() {
             ) : (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="public-base-url">URL pública</Label>
+                  <Label htmlFor="public-base-url">{t("settings.publicUrl")}</Label>
                   <div className="flex items-center gap-2">
                     <Input
                       id="public-base-url"
@@ -178,7 +171,7 @@ export function SettingsPage() {
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label="Copiar URL pública"
+                      aria-label={t("settings.copyPublicUrl")}
                       onClick={() => void copyPublicUrl()}
                     >
                       {copiedUrl ? <Check /> : <Copy />}
@@ -186,7 +179,7 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Versión del servidor</p>
+                  <p className="text-sm text-muted-foreground">{t("settings.serverVersion")}</p>
                   <p className="mt-1 font-mono text-sm text-foreground">
                     {settings?.version ?? "—"}
                   </p>
@@ -206,16 +199,15 @@ export function SettingsPage() {
 
 function MembershipsCard() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const { data, isPending, isError, error, refetch, isFetching } = useMyGroups();
   const admin = canManageUsers(user?.role);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Grupos</CardTitle>
-        <CardDescription>
-          Los grupos a los que perteneces determinan qué repositorios ves.
-        </CardDescription>
+        <CardTitle>{t("settings.groups")}</CardTitle>
+        <CardDescription>{t("settings.groupsHint")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isPending ? (
@@ -228,12 +220,12 @@ function MembershipsCard() {
         {isError ? (
           <Alert variant="destructive">
             <AlertCircle />
-            <AlertTitle>No se pudieron cargar tus grupos</AlertTitle>
+            <AlertTitle>{t("settings.groupsFailed")}</AlertTitle>
             <AlertDescription className="flex items-center justify-between gap-4">
               <span>{error.message}</span>
               <Button size="sm" variant="outline" onClick={() => void refetch()}>
                 <RefreshCw className={isFetching ? "animate-spin" : ""} />
-                Reintentar
+                {t("common.retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -241,9 +233,7 @@ function MembershipsCard() {
 
         {data && data.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {admin
-              ? "No perteneces a ningún grupo. Como Admin ves todos los repositorios."
-              : "No perteneces a ningún grupo. Ves los repositorios que no están restringidos, según tu rol de instancia."}
+            {admin ? t("settings.noGroupsAdmin") : t("settings.noGroupsUser")}
           </p>
         ) : null}
 
@@ -254,7 +244,7 @@ function MembershipsCard() {
                 <p className="font-medium text-foreground">{group.name}</p>
                 {group.repositories.length === 0 ? (
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Este grupo aún no tiene repositorios asignados.
+                    {t("settings.groupNoRepos")}
                   </p>
                 ) : (
                   <ul className="mt-2 space-y-1">
@@ -276,7 +266,7 @@ function MembershipsCard() {
 
         {admin ? (
           <Button variant="outline" size="sm" asChild>
-            <Link to="/groups">Gestionar grupos</Link>
+            <Link to="/groups">{t("settings.manageGroups")}</Link>
           </Button>
         ) : null}
       </CardContent>

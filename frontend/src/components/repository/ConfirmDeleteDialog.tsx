@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,7 @@ export function ConfirmDeleteDialog({
   trigger,
   title,
   description,
-  confirmLabel = "Eliminar",
+  confirmLabel,
   pending = false,
   onConfirm,
 }: {
@@ -27,7 +28,9 @@ export function ConfirmDeleteDialog({
   pending?: boolean;
   onConfirm: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const resolvedConfirm = confirmLabel ?? t("common.delete");
 
   async function handleConfirm() {
     try {
@@ -48,7 +51,7 @@ export function ConfirmDeleteDialog({
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-            Cancelar
+            {t("common.cancel")}
           </Button>
           <Button
             type="button"
@@ -57,7 +60,7 @@ export function ConfirmDeleteDialog({
             onClick={() => void handleConfirm()}
           >
             {pending ? <Loader2 className="animate-spin" /> : null}
-            {confirmLabel}
+            {resolvedConfirm}
           </Button>
         </DialogFooter>
       </DialogContent>

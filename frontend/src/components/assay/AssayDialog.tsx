@@ -1,4 +1,5 @@
 import { Download, FlaskConical, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError, downloadAssaySbom } from "@/api/client";
@@ -20,16 +21,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-function statusLabel(status: AssayResponse["status"]): string {
+function statusLabel(status: AssayResponse["status"], t: (key: string) => string): string {
   switch (status) {
     case "ready":
-      return "Listo";
+      return t("assays.ready");
     case "failed":
-      return "Fallido";
+      return t("assays.failed");
     case "unsupported":
-      return "Aún no aplica";
+      return t("assays.unsupported");
     case "running":
-      return "En curso";
+      return t("assays.running");
     default:
       return status;
   }
@@ -52,6 +53,7 @@ export function AssayDialog({
   version: string;
   canRerun?: boolean;
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canRerunAssay = canRerun ?? canWriteArtifacts(user?.role);
   const lookup = { ecosystem, name, version };
@@ -68,19 +70,19 @@ export function AssayDialog({
     }
     try {
       await downloadAssaySbom(data.id, `${name.replaceAll("/", "_")}-${version}.cdx.json`);
-      toast.success("Inventario CycloneDX descargado");
+      toast.success(t("assays.dialogDownloaded"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo descargar el inventario");
+      toast.error(err instanceof ApiError ? err.message : t("assays.dialogDownloadFailed"));
     }
   }
 
   async function onRerun() {
     try {
       await rerun.mutateAsync(lookup);
-      toast.success("Ensaye repetido");
+      toast.success(t("assays.dialogReran"));
       await refetch();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo repetir el ensaye");
+      toast.error(err instanceof ApiError ? err.message : t("assays.dialogRerunFailed"));
     }
   }
 
@@ -90,13 +92,9 @@ export function AssayDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FlaskConical className="size-4" />
-            Assay · {name} {version}
+            {t("assays.dialogTitle", { name, version })}
           </DialogTitle>
-          <DialogDescription>
-            Ensaye metalúrgico del artefacto: composición (inventario, licencias declaradas) e
-            impurezas (vulnerabilidades conocidas según OSV, Open Source Vulnerabilities). No
-            bloquea descargas ni publicaciones.
-          </DialogDescription>
+          <DialogDescription>{t("assays.dialogHint")}</DialogDescription>
         </DialogHeader>
 
         {isPending ? (
@@ -137,28 +135,29 @@ function AssayBody({
   onDownload: () => void;
   onRerun: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">
-            Estado: <span className="text-foreground">{statusLabel(assay.status)}</span>
+            {t("assays.status", { status: statusLabel(assay.status, t) })}
             {assay.scanned_at
               ? ` · ${new Date(assay.scanned_at).toLocaleString()}`
               : null}
           </p>
           <AssayCountPills counts={assay.counts} />
-          <LicenseChips licenses={uniqueLicenses(assay)} empty="Sin licencia declarada" />
+          <LicenseChips licenses={uniqueLicenses(assay)} empty={t("assays.noLicense")} />
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onDownload}>
             <Download />
-            Descargar CycloneDX
+            {t("assays.downloadSbom")}
           </Button>
           {canRerun ? (
             <Button type="button" size="sm" disabled={rerunPending} onClick={onRerun}>
               <RefreshCw className={rerunPending ? "animate-spin" : ""} />
-              Repetir ensaye
+              {t("assays.repeat")}
             </Button>
           ) : null}
         </div>

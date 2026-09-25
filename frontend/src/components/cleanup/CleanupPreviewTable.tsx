@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,8 +15,8 @@ import { formatBytes } from "@/lib/format";
 export function CleanupPreviewTable({
   preview,
   showRepository,
-  dryRunLabel = "Simulación",
-  appliedLabel = "Aplicado",
+  dryRunLabel,
+  appliedLabel,
   summary,
 }: {
   preview: CleanupPreviewResponse;
@@ -23,11 +25,14 @@ export function CleanupPreviewTable({
   appliedLabel?: string;
   summary: string;
 }) {
+  const { t } = useTranslation();
+  const resolvedDryRun = dryRunLabel ?? t("common.simulate");
+  const resolvedApplied = appliedLabel ?? t("common.apply");
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={preview.dry_run ? "outline" : "destructive"}>
-          {preview.dry_run ? dryRunLabel : appliedLabel}
+          {preview.dry_run ? resolvedDryRun : resolvedApplied}
         </Badge>
         <p className="text-sm text-muted-foreground">{summary}</p>
       </div>
@@ -35,11 +40,11 @@ export function CleanupPreviewTable({
         <Table>
           <TableHeader>
             <TableRow>
-              {showRepository ? <TableHead>Repositorio</TableHead> : null}
-              <TableHead>Paquete</TableHead>
-              <TableHead>Versión</TableHead>
-              <TableHead>Motivo</TableHead>
-              <TableHead className="text-right">Tamaño</TableHead>
+              {showRepository ? <TableHead>{t("common.repository")}</TableHead> : null}
+              <TableHead>{t("common.package")}</TableHead>
+              <TableHead>{t("common.version")}</TableHead>
+              <TableHead>{t("common.reason")}</TableHead>
+              <TableHead className="text-right">{t("common.size")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

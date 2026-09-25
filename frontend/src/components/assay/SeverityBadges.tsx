@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { AssayCountsDto } from "@/api/generated/AssayCountsDto";
 import type { AssaySeverityDto } from "@/api/generated/AssaySeverityDto";
 import { Badge } from "@/components/ui/badge";
@@ -11,18 +13,11 @@ const SEVERITY_CLASS: Record<AssaySeverityDto, string> = {
   unknown: "border-border bg-muted text-muted-foreground",
 };
 
-const SEVERITY_LABEL: Record<AssaySeverityDto, string> = {
-  critical: "Crítica",
-  high: "Alta",
-  medium: "Media",
-  low: "Baja",
-  unknown: "Sin puntuación",
-};
-
 export function SeverityBadge({ severity }: { severity: AssaySeverityDto }) {
+  const { t } = useTranslation();
   return (
     <Badge variant="outline" className={SEVERITY_CLASS[severity]}>
-      {SEVERITY_LABEL[severity]}
+      {t(`severity.${severity}`)}
     </Badge>
   );
 }
@@ -46,12 +41,13 @@ export function AssayCountPills({
         ["low", counts.low],
         ["unknown", counts.unknown],
       ];
+  const { t } = useTranslation();
   const visible = items.filter(([, count]) => count > 0);
   if (visible.length === 0) {
     if (compact) {
       return null;
     }
-    return <span className="text-xs text-muted-foreground">Sin hallazgos</span>;
+    return <span className="text-xs text-muted-foreground">{t("severity.none")}</span>;
   }
   return (
     <span className="flex flex-wrap items-center gap-1">
@@ -62,7 +58,7 @@ export function AssayCountPills({
           className={cn("font-mono", compact && "px-1.5 py-0 text-[10px]", SEVERITY_CLASS[severity])}
         >
           {count}
-          {compact ? "" : ` ${SEVERITY_LABEL[severity].toLowerCase()}`}
+          {compact ? "" : ` ${t(`severity.${severity}`).toLowerCase()}`}
         </Badge>
       ))}
     </span>

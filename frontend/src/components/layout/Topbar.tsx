@@ -1,11 +1,13 @@
 import { type FormEvent, useState } from "react";
 import { LogOut, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthProvider";
 import { roleLabel } from "@/auth/roles";
 import { HealthIndicator } from "@/components/layout/HealthIndicator";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +15,7 @@ import { Input } from "@/components/ui/input";
 export function Topbar() {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout } = useAuth();
+  const { t } = useTranslation();
   const isDark = resolvedTheme === "dark";
   const location = useLocation();
   const [params] = useSearchParams();
@@ -31,15 +34,16 @@ export function Topbar() {
             <Badge variant="outline">{roleLabel(user.role)}</Badge>
           </span>
         ) : null}
+        <LanguageSwitcher />
         <Button
           variant="ghost"
           size="icon"
-          aria-label={isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+          aria-label={isDark ? t("topbar.themeToLight") : t("topbar.themeToDark")}
           onClick={() => setTheme(isDark ? "light" : "dark")}
         >
           {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </Button>
-        <Button variant="ghost" size="icon" aria-label="Cerrar sesión" onClick={logout}>
+        <Button variant="ghost" size="icon" aria-label={t("topbar.logout")} onClick={logout}>
           <LogOut className="size-4" />
         </Button>
       </div>
@@ -49,6 +53,7 @@ export function Topbar() {
 
 function TopbarSearch({ initial }: { initial: string }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [query, setQuery] = useState(initial);
 
   function onSearch(event: FormEvent<HTMLFormElement>) {
@@ -64,8 +69,8 @@ function TopbarSearch({ initial }: { initial: string }) {
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar paquetes…"
-          aria-label="Buscar paquetes"
+          placeholder={t("topbar.searchPlaceholder")}
+          aria-label={t("topbar.searchAria")}
           className="pl-8"
         />
       </div>

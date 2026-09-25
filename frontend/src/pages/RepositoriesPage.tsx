@@ -1,4 +1,5 @@
 import { Boxes } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { useAuth } from "@/auth/AuthProvider";
 import { canWriteArtifacts } from "@/auth/roles";
@@ -6,6 +7,7 @@ import { CreateRepositoryDialog } from "@/components/repository/CreateRepository
 
 export function RepositoriesPage() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const canWrite = canWriteArtifacts(user?.role);
 
   return (
@@ -14,11 +16,8 @@ export function RepositoriesPage() {
         <Boxes className="size-6 text-muted-foreground" />
       </div>
       <div className="max-w-md space-y-1">
-        <h1 className="text-xl font-semibold text-foreground">Repositorios</h1>
-        <p className="text-sm text-muted-foreground">
-          Elige un repositorio en el árbol de la izquierda. Están agrupados por
-          ecosistema (Cargo, npm…) y por tipo: Forge, Mirror o Alloy.
-        </p>
+        <h1 className="text-xl font-semibold text-foreground">{t("repositories.emptyTitle")}</h1>
+        <p className="text-sm text-muted-foreground">{t("repositories.emptyBody")}</p>
       </div>
       {canWrite ? <CreateRepositoryDialog /> : null}
     </div>

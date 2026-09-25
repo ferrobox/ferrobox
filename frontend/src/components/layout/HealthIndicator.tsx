@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 
@@ -8,6 +9,7 @@ async function fetchHealth(): Promise<boolean> {
 }
 
 export function HealthIndicator() {
+  const { t } = useTranslation();
   const { data: healthy, isFetching } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
@@ -19,10 +21,10 @@ export function HealthIndicator() {
 
   const label =
     status === "checking"
-      ? "Comprobando conexión…"
+      ? t("health.checking")
       : status === "ok"
-        ? "Backend conectado"
-        : "Backend no disponible";
+        ? t("health.ok")
+        : t("health.down");
 
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 import type { AssayCountsDto } from "@/api/generated/AssayCountsDto";
@@ -33,6 +34,7 @@ export function RepositoryBrowser({
   selectedId?: string;
 }) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const canWrite = canWriteArtifacts(user?.role);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<RepositoryStorageKind | "all">("all");
@@ -102,7 +104,7 @@ export function RepositoryBrowser({
     <aside className="flex h-full w-80 shrink-0 flex-col border-r border-border bg-card">
       <div className="space-y-3 border-b border-border p-4">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-foreground">Artefactos</h2>
+          <h2 className="text-sm font-semibold text-foreground">{t("repositories.artifacts")}</h2>
           {canWrite ? <CreateRepositoryDialog compact /> : null}
         </div>
         <div className="relative">
@@ -110,16 +112,16 @@ export function RepositoryBrowser({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar repositorio…"
+            placeholder={t("repositories.search")}
             className="pl-8"
-            aria-label="Buscar repositorio"
+            aria-label={t("repositories.searchAria")}
           />
         </div>
         <div className="flex flex-wrap gap-1">
           <FilterChip
             active={kindFilter === "all"}
             onClick={() => setKindFilter("all")}
-            label="Todos"
+            label={t("kinds.all")}
           />
           {KIND_FILTERS.map((kind) => (
             <FilterChip
@@ -127,7 +129,7 @@ export function RepositoryBrowser({
               active={kindFilter === kind}
               onClick={() => setKindFilter(kind)}
               label={KIND_META[kind].label}
-              title={KIND_META[kind].description}
+              title={t(KIND_META[kind].hintKey)}
             />
           ))}
         </div>
@@ -136,11 +138,11 @@ export function RepositoryBrowser({
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
         {repositories.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            Aún no hay repositorios. Crea uno para empezar.
+            {t("repositories.noneYet")}
           </p>
         ) : groups.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            Ningún repositorio coincide con el filtro.
+            {t("repositories.noneMatch")}
           </p>
         ) : (
           groups.map((group) => {
@@ -177,7 +179,7 @@ export function RepositoryBrowser({
                         <li key={repository.id}>
                           <NavLink
                             to={`/repositories/${repository.id}`}
-                            title={kind.description}
+                            title={t(kind.hintKey)}
                             className={({ isActive }) =>
                               cn(
                                 "flex items-start gap-2.5 px-4 py-2 text-sm transition-colors",

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
-import { useNavigate, useParams, NavLink } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -37,6 +38,7 @@ export function RepositoryDetailPage() {
 }
 
 function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data: repository, isPending, isError, error, refetch, isFetching } =
@@ -50,10 +52,10 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   async function onDeleteRepository() {
     try {
       await deleteRepository.mutateAsync(repositoryId);
-      toast.success(`Repositorio «${repository?.name ?? repositoryId}» eliminado`);
+      toast.success(t("repositories.deleted", { name: repository?.name ?? repositoryId }));
       navigate("/repositories", { replace: true });
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el repositorio");
+      toast.error(err instanceof ApiError ? err.message : t("repositories.deleteFailed"));
       throw err;
     }
   }
@@ -69,18 +71,18 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
 
   if (isError) {
     if (error instanceof ApiError && (error.status === 404 || error.status === 403)) {
-      return <NotFoundPage message="Ese repositorio no existe o no tienes acceso." />;
+      return <NotFoundPage message={t("repositories.missing")} />;
     }
 
     return (
       <Alert variant="destructive">
         <AlertCircle />
-        <AlertTitle>No se pudo cargar el repositorio</AlertTitle>
+        <AlertTitle>{t("repositories.loadFailed")}</AlertTitle>
         <AlertDescription className="flex items-center justify-between gap-4">
           <span>{error.message}</span>
           <Button size="sm" variant="outline" onClick={() => void refetch()}>
             <RefreshCw className={isFetching ? "animate-spin" : ""} />
-            Reintentar
+            {t("common.retry")}
           </Button>
         </AlertDescription>
       </Alert>
@@ -129,12 +131,12 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <EcosystemBadge ecosystem={repository.ecosystem} />
               <RepositoryKindBadge kind={repository.kind} />
-              {repository.restricted ? <Badge variant="outline">Restringido</Badge> : null}
+              {repository.restricted ? <Badge variant="outline">{t("repositories.restricted")}</Badge> : null}
               <button
                 type="button"
                 onClick={() => void copyPath()}
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"
-                title="Copiar ruta"
+                title={t("repositories.copyPath")}
               >
                 {copiedPath ? <Check className="size-3" /> : <Copy className="size-3" />}
                 {path}
@@ -142,20 +144,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             </div>
             {alloyMembers.length > 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">
-                Agrega{" "}
-                {alloyMembers.map((member, index) => (
-                  <span key={member.id}>
-                    {index > 0 ? ", " : null}
-                    <NavLink
-                      to={`/repositories/${member.id}`}
-                      className="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                      {member.name}
-                    </NavLink>
-                  </span>
-                ))}
-                . Las lecturas se resuelven en ese orden; publica en un Forge
-                miembro.
+                {t("repositories.alloyMembers", {
+                  members: alloyMembers.map((member) => member.name).join(", "),
+                })}
               </p>
             ) : null}
           </div>
@@ -184,14 +175,14 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             ) : null}
             {canWrite ? (
               <ConfirmDeleteDialog
-                title={`Eliminar «${repository.name}»`}
-                description="Se borrarán el repositorio, sus artefactos, el índice de paquetes y los objetos almacenados. Esta acción no se puede deshacer."
+                title={t("repositories.deleteTitle", { name: repository.name })}
+                description={t("repositories.deleteBody")}
                 pending={deleteRepository.isPending}
                 onConfirm={onDeleteRepository}
                 trigger={
                   <Button variant="outline">
                     <Trash2 />
-                    Eliminar
+                    {t("common.delete")}
                   </Button>
                 }
               />
@@ -202,22 +193,22 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
 
       <Tabs defaultValue="packages">
         <TabsList variant="line">
-          <TabsTrigger value="packages">Paquetes</TabsTrigger>
-          {showAdmission ? <TabsTrigger value="admission">Políticas</TabsTrigger> : null}
+          <TabsTrigger value="packages">{t("tabs.packages")}</TabsTrigger>
+          {showAdmission ? <TabsTrigger value="admission">{t("tabs.admission")}</TabsTrigger> : null}
           {repository.kind.type !== "alloy" ? (
-            <TabsTrigger value="retention">Retención</TabsTrigger>
+            <TabsTrigger value="retention">{t("tabs.retention")}</TabsTrigger>
           ) : null}
           {repository.kind.type !== "alloy" ? (
-            <TabsTrigger value="quota">Cuota</TabsTrigger>
+            <TabsTrigger value="quota">{t("tabs.quota")}</TabsTrigger>
           ) : null}
           {repository.kind.type !== "alloy" ? (
-            <TabsTrigger value="webhooks">Avisos</TabsTrigger>
+            <TabsTrigger value="webhooks">{t("tabs.webhooks")}</TabsTrigger>
           ) : null}
-          {isAdmin ? <TabsTrigger value="access">Acceso</TabsTrigger> : null}
+          {isAdmin ? <TabsTrigger value="access">{t("tabs.access")}</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="packages" className="mt-4 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Agrupados por nombre, con cada versión debajo.
+            {t("repositories.groupedHint")}
           </p>
           <ArtifactsTable
             repositoryId={repositoryId}

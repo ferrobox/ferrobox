@@ -1,4 +1,5 @@
 import { Boxes, FlaskConical, Package, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthProvider";
@@ -6,7 +7,7 @@ import { canManageUsers } from "@/auth/roles";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
-  readonly label: string;
+  readonly labelKey: string;
   readonly to: string;
   readonly icon: typeof Boxes;
   readonly disabled?: boolean;
@@ -14,18 +15,19 @@ interface NavItem {
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Repositorios", to: "/repositories", icon: Boxes },
-  { label: "Búsqueda", to: "/search", icon: Search },
-  { label: "Assays", to: "/assays", icon: FlaskConical },
-  { label: "Seguridad", to: "/security", icon: ShieldCheck },
-  { label: "Usuarios", to: "/users", icon: Users, adminOnly: true },
-  { label: "Grupos", to: "/groups", icon: UsersRound, adminOnly: true },
-  { label: "Auditoría", to: "/audit", icon: ScrollText, adminOnly: true },
-  { label: "Configuración", to: "/settings", icon: Settings2 },
+  { labelKey: "nav.repositories", to: "/repositories", icon: Boxes },
+  { labelKey: "nav.search", to: "/search", icon: Search },
+  { labelKey: "nav.assays", to: "/assays", icon: FlaskConical },
+  { labelKey: "nav.security", to: "/security", icon: ShieldCheck },
+  { labelKey: "nav.users", to: "/users", icon: Users, adminOnly: true },
+  { labelKey: "nav.groups", to: "/groups", icon: UsersRound, adminOnly: true },
+  { labelKey: "nav.audit", to: "/audit", icon: ScrollText, adminOnly: true },
+  { labelKey: "nav.settings", to: "/settings", icon: Settings2 },
 ];
 
 export function Sidebar() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const items = NAV_ITEMS.filter((item) => !item.adminOnly || canManageUsers(user?.role));
 
   return (
@@ -35,8 +37,8 @@ export function Sidebar() {
           <Package className="size-4.5" strokeWidth={2.25} />
         </span>
         <div className="leading-tight">
-          <p className="text-sm font-semibold tracking-wide">FerroBox</p>
-          <p className="text-[11px] text-sidebar-foreground/60">Gestor de artefactos</p>
+          <p className="text-sm font-semibold tracking-wide">{t("app.name")}</p>
+          <p className="text-[11px] text-sidebar-foreground/60">{t("app.tagline")}</p>
         </div>
       </div>
 
@@ -47,7 +49,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-sidebar-border px-5 py-3 text-[11px] text-sidebar-foreground/50">
-        FerroBox v0.1.0
+        {t("app.version")}
       </div>
     </aside>
   );
@@ -55,19 +57,21 @@ export function Sidebar() {
 
 function SidebarLink({ item }: { item: NavItem }) {
   const Icon = item.icon;
+  const { t } = useTranslation();
+  const label = t(item.labelKey);
 
   if (item.disabled) {
     return (
       <div
         className="flex cursor-not-allowed items-center justify-between rounded-md px-3 py-2 text-sm text-sidebar-foreground/35"
-        title="Próximamente"
+        title={t("nav.comingSoon")}
       >
         <span className="flex items-center gap-2.5">
           <Icon className="size-4" />
-          {item.label}
+          {label}
         </span>
         <span className="rounded-full bg-sidebar-accent/60 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          Pronto
+          {t("nav.soon")}
         </span>
       </div>
     );
@@ -86,7 +90,7 @@ function SidebarLink({ item }: { item: NavItem }) {
       }
     >
       <Icon className="size-4" />
-      {item.label}
+      {label}
     </NavLink>
   );
 }

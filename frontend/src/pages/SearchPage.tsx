@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { NavLink, useSearchParams } from "react-router-dom";
 
 import { usePackageSearch } from "@/api/queries";
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/table";
 
 export function SearchPage() {
+  const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const urlQuery = params.get("q") ?? "";
   const { data, isPending, isError, error, isFetching } = usePackageSearch(urlQuery);
@@ -39,20 +41,15 @@ export function SearchPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Búsqueda"
-        description="Encuentra paquetes ya indexados en Forge y Mirror sin recorrer la barra de repositorios. Un Mirror solo muestra lo que alguien ha resuelto o cacheado; no consulta el upstream."
-      />
+      <PageHeader title={t("search.title")} description={t("search.description")} />
 
       <SearchForm key={urlQuery} initial={urlQuery} onSearch={onSearch} />
 
       {!searching ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
           <Search className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 font-medium text-foreground">Escribe un nombre de paquete</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Por ejemplo serde, lodash o alpine. No aparecen capas internas ni agregados Alloy.
-          </p>
+          <p className="mt-3 font-medium text-foreground">{t("search.emptyTitle")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("search.emptyBody")}</p>
         </div>
       ) : null}
 
@@ -67,17 +64,15 @@ export function SearchPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudo buscar</AlertTitle>
+          <AlertTitle>{t("search.failed")}</AlertTitle>
           <AlertDescription>{error.message}</AlertDescription>
         </Alert>
       ) : null}
 
       {searching && data && hits.length === 0 && !isFetching ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
-          <p className="font-medium text-foreground">Sin coincidencias para «{urlQuery}»</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Prueba otro nombre, o publica / resuelve el paquete en un Forge o Mirror.
-          </p>
+          <p className="font-medium text-foreground">{t("search.noHits", { query: urlQuery })}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("search.noHitsHint")}</p>
         </div>
       ) : null}
 
@@ -86,10 +81,10 @@ export function SearchPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Paquete</TableHead>
-                <TableHead>Repositorio</TableHead>
-                <TableHead>Ecosistema</TableHead>
-                <TableHead>Tipo</TableHead>
+                <TableHead>{t("common.package")}</TableHead>
+                <TableHead>{t("common.repository")}</TableHead>
+                <TableHead>{t("common.ecosystem")}</TableHead>
+                <TableHead>{t("common.type")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -139,6 +134,7 @@ function SearchForm({
   initial: string;
   onSearch: (query: string) => void;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(initial);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -151,12 +147,12 @@ function SearchForm({
       <Input
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        placeholder="Nombre del paquete"
-        aria-label="Nombre del paquete"
+        placeholder={t("search.placeholder")}
+        aria-label={t("search.placeholder")}
       />
       <Button type="submit" variant="outline">
         <Search />
-        Buscar
+        {t("search.submit")}
       </Button>
     </form>
   );

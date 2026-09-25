@@ -1,4 +1,5 @@
 import { Terminal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
 import { ConanRegistryPanel } from "@/components/repository/ConanRegistryPanel";
@@ -26,51 +27,19 @@ export function SetMeUpDialog({
   kind?: RepositoryStorageKind;
   ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan";
 }) {
-  const description =
-    ecosystem === "npm" ? (
-      <>
-        Copia estos fragmentos en <code className="font-mono">.npmrc</code>. El token se crea en
-        Seguridad.
-      </>
-    ) : ecosystem === "pypi" ? (
-      <>
-        Copia estos fragmentos en <code className="font-mono">~/.pypirc</code> o en el comando de{" "}
-        <code className="font-mono">pip</code> / <code className="font-mono">uv</code>. El token se
-        crea en Seguridad.
-      </>
-    ) : ecosystem === "oci" ? (
-      <>
-        Copia estos fragmentos para <code className="font-mono">docker login</code> /{" "}
-        <code className="font-mono">docker push</code> y, si quieres,{" "}
-        <code className="font-mono">cosign sign</code>. El token se crea en Seguridad.
-      </>
-    ) : ecosystem === "helm" ? (
-      <>
-        Copia estos fragmentos para <code className="font-mono">helm registry login</code> /{" "}
-        <code className="font-mono">helm push</code>. El token se crea en Seguridad.
-      </>
-    ) : ecosystem === "conan" ? (
-      <>
-        Copia estos fragmentos para <code className="font-mono">conan remote</code> /{" "}
-        <code className="font-mono">conan upload</code>. El token se crea en Seguridad.
-      </>
-    ) : (
-      <>
-        Copia estos fragmentos en tu crate o en <code className="font-mono">~/.cargo</code>. El
-        token se crea en Seguridad.
-      </>
-    );
+  const { t } = useTranslation();
+  const description = t(`setup.${ecosystem}`);
 
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="icon" aria-label="Configurar cliente" title="Configurar cliente">
+        <Button type="button" variant="outline" size="icon" aria-label={t("setup.aria")} title={t("setup.aria")}>
           <Terminal />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Configurar cliente</DialogTitle>
+          <DialogTitle>{t("setup.title")}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {ecosystem === "npm" ? (

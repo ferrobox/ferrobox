@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError, downloadArtifact } from "@/api/client";
@@ -73,8 +74,8 @@ function downloadName(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto
   return slash >= 0 ? label.slice(slash + 1) : label;
 }
 
-function displayName(artifact: ArtifactResponse): string {
-  return artifact.name ?? "Artefacto sin índice";
+function displayName(artifact: ArtifactResponse, unnamed: string): string {
+  return artifact.name ?? unnamed;
 }
 
 function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
@@ -159,6 +160,7 @@ export function ArtifactsTable({
   canWrite: boolean;
   memberNames?: Readonly<Record<string, string>>;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError, error, refetch, isFetching } =
     useRepositoryArtifacts(repositoryId);
   const { data: assays } = useRepositoryAssays(repositoryId);
@@ -196,9 +198,9 @@ export function ArtifactsTable({
   async function onDelete(artifactId: string) {
     try {
       await deleteArtifact.mutateAsync(artifactId);
-      toast.success("Artefacto eliminado");
+      toast.success(t("artifacts.deleted"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el artefacto");
+      toast.error(err instanceof ApiError ? err.message : t("artifacts.deleteFailed"));
       throw err;
     }
   }
@@ -217,11 +219,11 @@ export function ArtifactsTable({
       const label = versionLabel(artifact.version, ecosystem);
       toast.success(
         yanked
-          ? `${artifact.name} ${label} marcado como yanked`
-          : `${artifact.name} ${label} restaurado`,
+          ? t("artifacts.yanked", { name: artifact.name, version: label })
+          : t("artifacts.restored", { name: artifact.name, version: label }),
       );
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo actualizar el yank");
+      toast.error(err instanceof ApiError ? err.message : t("artifacts.yankFailed"));
     }
   }
 
@@ -241,7 +243,7 @@ export function ArtifactsTable({
     void downloadArtifact(artifact.id, downloadName(artifact, ecosystem)).catch(
       (err: unknown) => {
         toast.error(
-          err instanceof ApiError ? err.message : "No se pudo descargar el artefacto",
+          err instanceof ApiError ? err.message : t("artifacts.downloadFailed"),
         );
       },
     );
@@ -261,12 +263,12 @@ export function ArtifactsTable({
     return (
       <Alert variant="destructive">
         <AlertCircle />
-        <AlertTitle>No se pudieron cargar los artefactos</AlertTitle>
+        <AlertTitle>{t("artifacts.loadFailed")}</AlertTitle>
         <AlertDescription className="flex items-center justify-between gap-4">
           <span>{error.message}</span>
           <Button size="sm" variant="outline" onClick={() => void refetch()}>
             <RefreshCw className={isFetching ? "animate-spin" : ""} />
-            Reintentar
+            {t("common.retry")}
           </Button>
         </AlertDescription>
       </Alert>
@@ -279,53 +281,33 @@ export function ArtifactsTable({
         <div className="flex size-12 items-center justify-center rounded-full bg-muted">
           <FileBox className="size-6 text-muted-foreground" />
         </div>
-        <p className="font-medium text-foreground">Este repositorio está vacío</p>
+        <p className="font-medium text-foreground">{t("artifacts.empty")}</p>
         <p className="max-w-sm text-sm text-muted-foreground">
-          {kind === "alloy" ? (
-            "Los paquetes aparecen cuando existen en los Forges o Mirrors miembros. Publica en un Forge miembro."
-          ) : kind === "mirror" ? (
-            ecosystem === "npm"
-              ? "Los paquetes se cachean la primera vez que npm install los resuelve contra este Mirror."
-              : ecosystem === "pypi"
-                ? "Los paquetes se cachean la primera vez que pip install los resuelve contra este Mirror."
-                : ecosystem === "oci"
-                  ? "Las imágenes se cachean la primera vez que docker pull las resuelve contra este Mirror."
-                  : ecosystem === "helm"
-                    ? "Los charts se cachean la primera vez que helm pull los resuelve contra este Mirror."
-                    : ecosystem === "conan"
-                      ? "Los paquetes se cachean la primera vez que conan install los resuelve contra este Mirror."
-                      : "Los paquetes se cachean la primera vez que cargo los resuelve contra este Mirror."
-          ) : ecosystem === "npm" ? (
-            <>
-              Publica un paquete con <code className="font-mono">npm publish</code> apuntando a
-              este registro.
-            </>
-          ) : ecosystem === "pypi" ? (
-            <>
-              Publica un paquete con <code className="font-mono">twine upload</code> apuntando a
-              este registro.
-            </>
-          ) : ecosystem === "oci" ? (
-            <>
-              Publica una imagen con <code className="font-mono">docker push</code> apuntando a este
-              registro.
-            </>
-          ) : ecosystem === "helm" ? (
-            <>
-              Publica un chart con <code className="font-mono">helm push</code> apuntando a este
-              registro.
-            </>
-          ) : ecosystem === "conan" ? (
-            <>
-              Publica un paquete con <code className="font-mono">conan upload</code> apuntando a
-              este registro.
-            </>
-          ) : (
-            <>
-              Publica un crate con <code className="font-mono">cargo publish --registry ferrobox</code>{" "}
-              o sube un binario genérico.
-            </>
-          )}
+          {kind === "alloy"
+            ? t("artifacts.emptyAlloy")
+            : kind === "mirror"
+              ? ecosystem === "npm"
+                ? t("artifacts.emptyMirrorNpm")
+                : ecosystem === "pypi"
+                  ? t("artifacts.emptyMirrorPypi")
+                  : ecosystem === "oci"
+                    ? t("artifacts.emptyMirrorOci")
+                    : ecosystem === "helm"
+                      ? t("artifacts.emptyMirrorHelm")
+                      : ecosystem === "conan"
+                        ? t("artifacts.emptyMirrorConan")
+                        : t("artifacts.emptyMirrorCargo")
+              : ecosystem === "npm"
+                ? t("artifacts.emptyForgeNpm")
+                : ecosystem === "pypi"
+                  ? t("artifacts.emptyForgePypi")
+                  : ecosystem === "oci"
+                    ? t("artifacts.emptyForgeOci")
+                    : ecosystem === "helm"
+                      ? t("artifacts.emptyForgeHelm")
+                      : ecosystem === "conan"
+                        ? t("artifacts.emptyForgeConan")
+                        : t("artifacts.emptyForgeCargo")}
         </p>
       </div>
     );
@@ -367,7 +349,7 @@ export function ArtifactsTable({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-foreground">
-                  {displayName(latest)}
+                  {displayName(latest, t("artifacts.unnamed"))}
                 </span>
                 <span className="block text-xs text-muted-foreground">
                   {group.versions.length === 1
@@ -470,6 +452,7 @@ function VersionRows({
   assayByKey: ReadonlyMap<string, AssayResponse>;
   onAssay: (artifact: ArtifactResponse) => void;
 }) {
+  const { t } = useTranslation();
   const representative = bucket.artifacts[0];
   if (!representative) {
     return null;
@@ -516,24 +499,27 @@ function VersionRows({
               <Badge
                 variant="outline"
                 className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                title="La firma Cosign verifica contra las claves públicas del repositorio"
+                title={t("artifacts.cosignTitle")}
               >
                 <ShieldCheck />
-                Verificada
+                {t("artifacts.verified")}
               </Badge>
             ) : signed ? (
               <Badge
                 variant="outline"
                 className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                title="Hay una firma Cosign o Notation enlazada a esta etiqueta"
+                title={t("artifacts.signedTitle")}
               >
                 <ShieldCheck />
-                Firmada
+                {t("artifacts.signed")}
               </Badge>
             ) : null}
             <span className="text-xs text-muted-foreground">
               {nested
-                ? `${bucket.artifacts.length} ficheros · ${formatBytes(totalBytes)}`
+                ? t("artifacts.files", {
+                    count: bucket.artifacts.length,
+                    size: formatBytes(totalBytes),
+                  })
                 : formatBytes(representative.size_bytes)}
             </span>
             {memberName ? (
@@ -556,7 +542,7 @@ function VersionRows({
           {nested ? null : (
             <Button variant="ghost" size="sm" onClick={() => onDownload(representative)}>
               <Download />
-              Descargar
+              {t("artifacts.download")}
             </Button>
           )}
           {representative.name && representative.version ? (
@@ -584,27 +570,25 @@ function VersionRows({
               variant="ghost"
               size="sm"
               disabled={yankPending}
-              title={
-                yanked
-                  ? "Vuelve a ofrecer esta versión en resoluciones nuevas"
-                  : "Deja de usarse en resoluciones nuevas; sigue descargable si ya está fijado"
-              }
+              title={yanked ? t("artifacts.unyankHint") : t("artifacts.yankHint")}
               onClick={() => void onSetYanked(representative, !yanked)}
             >
               {yanked ? <RotateCcw /> : <Ban />}
-              {yanked ? "Restaurar" : "Yank"}
+              {yanked ? t("artifacts.unyank") : t("artifacts.yank")}
             </Button>
           ) : null}
           {nested || !canWrite || kind === "alloy" ? null : (
             <ConfirmDeleteDialog
-              title={`Eliminar ${downloadName(representative, ecosystem)}`}
-              description="Se borrarán el objeto almacenado, los metadatos y la entrada de índice asociada. Esta acción no se puede deshacer."
+              title={t("artifacts.deleteTitle", {
+                name: downloadName(representative, ecosystem),
+              })}
+              description={t("artifacts.deleteObject")}
               pending={deletePending}
               onConfirm={() => onDelete(representative.id)}
               trigger={
                 <Button variant="ghost" size="sm">
                   <Trash2 />
-                  Eliminar
+                  {t("common.delete")}
                 </Button>
               }
             />
@@ -629,18 +613,20 @@ function VersionRows({
               <div className="flex shrink-0 gap-1">
                 <Button variant="ghost" size="sm" onClick={() => onDownload(artifact)}>
                   <Download />
-                  Descargar
+                  {t("artifacts.download")}
                 </Button>
                 {canWrite && kind !== "alloy" ? (
                   <ConfirmDeleteDialog
-                    title={`Eliminar ${downloadName(artifact, ecosystem)}`}
-                    description="Se borrará este fichero del almacenamiento. El resto de la versión no se modifica. Esta acción no se puede deshacer."
+                    title={t("artifacts.deleteTitle", {
+                      name: downloadName(artifact, ecosystem),
+                    })}
+                    description={t("artifacts.deleteFile")}
                     pending={deletePending}
                     onConfirm={() => onDelete(artifact.id)}
                     trigger={
                       <Button variant="ghost" size="sm">
                         <Trash2 />
-                        Eliminar
+                        {t("common.delete")}
                       </Button>
                     }
                   />
