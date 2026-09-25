@@ -54,6 +54,10 @@ pub mod oci;
 /// `conan install`) del patrón Strategy.
 pub mod conan;
 
+/// La implementación de Maven (layout HTTP clásico: `mvn deploy` /
+/// `mvn dependency:get`) del patrón Strategy.
+pub mod maven;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -560,6 +564,7 @@ mod tests {
 
     use super::cargo::CargoPackagingStrategy;
     use super::conan::ConanPackagingStrategy;
+    use super::maven::MavenPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
     use super::oci::OciPackagingStrategy;
     use super::pypi::PypiPackagingStrategy;
@@ -631,6 +636,16 @@ mod tests {
         ))
     }
 
+    fn maven_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(MavenPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
@@ -639,7 +654,8 @@ mod tests {
             .register(pypi_strategy())
             .register(oci_strategy())
             .register(helm_strategy())
-            .register(conan_strategy());
+            .register(conan_strategy())
+            .register(maven_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
@@ -647,6 +663,7 @@ mod tests {
         assert!(registry.strategy_for(PackageEcosystem::Oci).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Helm).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Conan).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Maven).is_some());
     }
 
     #[test]

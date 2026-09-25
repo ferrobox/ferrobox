@@ -1,4 +1,4 @@
-import { Box, Container, FileArchive, Package, Ship, Sparkle, Wrench } from "lucide-react";
+import { Box, Coffee, Container, FileArchive, Package, Ship, Sparkle, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
@@ -42,6 +42,11 @@ const ECOSYSTEM_META: Record<
     label: "Conan",
     icon: Wrench,
     className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  },
+  maven: {
+    label: "Maven",
+    icon: Coffee,
+    className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
   },
 };
 

@@ -38,6 +38,10 @@ pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Optio
         }
         _ => name.to_string(),
     };
+    if ecosystem == PackageEcosystem::Maven {
+        let (group, artifact) = name.split_once(':')?;
+        return Some(format!("pkg:maven/{group}/{artifact}@{version}"));
+    }
     let prefix = match ecosystem {
         PackageEcosystem::Npm => "pkg:npm/",
         PackageEcosystem::PyPi => "pkg:pypi/",
@@ -45,7 +49,8 @@ pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Optio
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
-        | PackageEcosystem::Conan => return None,
+        | PackageEcosystem::Conan
+        | PackageEcosystem::Maven => return None,
     };
     Some(format!("{prefix}{encoded}@{version}"))
 }
@@ -57,6 +62,7 @@ pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
         PackageEcosystem::Npm => Some("npm"),
         PackageEcosystem::PyPi => Some("PyPI"),
         PackageEcosystem::Cargo => Some("crates.io"),
+        PackageEcosystem::Maven => Some("Maven"),
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
@@ -199,7 +205,8 @@ pub fn extract_components(
         | PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
-        | PackageEcosystem::Conan => {}
+        | PackageEcosystem::Conan
+        | PackageEcosystem::Maven => {}
     }
 
     components
@@ -398,6 +405,19 @@ mod tests {
         assert_eq!(lodash.version(), "4.17.21");
         assert_eq!(lodash.kind(), AssayComponentKind::Direct);
         assert_eq!(lodash.purl(), Some("pkg:npm/lodash@4.17.21"));
+    }
+
+    #[test]
+    fn maven_purl_uses_group_and_artifact() {
+        assert_eq!(
+            purl_for(
+                PackageEcosystem::Maven,
+                "org.apache.commons:commons-lang3",
+                "3.14.0"
+            ),
+            Some("pkg:maven/org.apache.commons/commons-lang3@3.14.0".to_string())
+        );
+        assert_eq!(osv_ecosystem(PackageEcosystem::Maven), Some("Maven"));
     }
 
     #[test]

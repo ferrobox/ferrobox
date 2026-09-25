@@ -361,6 +361,28 @@ export function unyankConan(
   );
 }
 
+export function yankMaven(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/index/maven/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/yank`,
+    { method: "DELETE" },
+  );
+}
+
+export function unyankMaven(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/index/maven/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/unyank`,
+    { method: "PUT" },
+  );
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,

@@ -37,6 +37,8 @@ pub(crate) enum PackageEcosystemDto {
     Helm,
     /// Paquetes C/C++ de Conan.
     Conan,
+    /// Artefactos Maven.
+    Maven,
 }
 
 impl From<PackageEcosystem> for PackageEcosystemDto {
@@ -49,6 +51,7 @@ impl From<PackageEcosystem> for PackageEcosystemDto {
             PackageEcosystem::Oci => Self::Oci,
             PackageEcosystem::Helm => Self::Helm,
             PackageEcosystem::Conan => Self::Conan,
+            PackageEcosystem::Maven => Self::Maven,
         }
     }
 }
@@ -63,6 +66,7 @@ impl From<PackageEcosystemDto> for PackageEcosystem {
             PackageEcosystemDto::Oci => Self::Oci,
             PackageEcosystemDto::Helm => Self::Helm,
             PackageEcosystemDto::Conan => Self::Conan,
+            PackageEcosystemDto::Maven => Self::Maven,
         }
     }
 }
