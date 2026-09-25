@@ -63,6 +63,7 @@ export function useRepositoryArtifacts(repositoryId: string) {
   return useQuery({
     queryKey: queryKeys.repositoryArtifacts(repositoryId),
     queryFn: () => api.listRepositoryArtifacts(repositoryId),
+    refetchOnWindowFocus: "always",
   });
 }
 
@@ -494,6 +495,7 @@ export function useRepositoryAssays(repositoryId: string) {
     queryKey: queryKeys.repositoryAssays(repositoryId),
     queryFn: () => api.listRepositoryAssays(repositoryId),
     refetchInterval: refetchWhileAssaysRun,
+    refetchOnWindowFocus: "always",
   });
 }
 

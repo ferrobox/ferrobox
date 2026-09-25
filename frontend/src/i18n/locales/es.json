@@ -334,6 +334,7 @@
     "emptyForgeConan": "Publica un paquete con conan upload apuntando a este registro.",
     "emptyForgeMaven": "Publica un paquete con mvn deploy apuntando a este registro.",
     "emptyForgeCargo": "Publica un crate con cargo publish --registry ferrobox o sube un binario genérico.",
+    "refreshHint": "Recargar paquetes publicados fuera de esta página",
     "snapshot": "SNAPSHOT",
     "release": "Release",
     "cosignTitle": "La firma Cosign verifica contra las claves públicas del repositorio",

@@ -5,7 +5,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useDeleteRepository, useRepositories, useRepository } from "@/api/queries";
+import {
+  useDeleteRepository,
+  useRepositories,
+  useRepository,
+  useRepositoryArtifacts,
+  useRepositoryAssays,
+} from "@/api/queries";
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, canWriteRepository } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
@@ -208,9 +214,12 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
           {isAdmin ? <TabsTrigger value="access">{t("tabs.access")}</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="packages" className="mt-4 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            {t("repositories.groupedHint")}
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {t("repositories.groupedHint")}
+            </p>
+            <RefreshPackagesButton repositoryId={repositoryId} />
+          </div>
           <ArtifactsTable
             repositoryId={repositoryId}
             kind={repository.kind.type}
@@ -248,5 +257,28 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         ) : null}
       </Tabs>
     </div>
+  );
+}
+
+function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
+  const { t } = useTranslation();
+  const artifacts = useRepositoryArtifacts(repositoryId);
+  const assays = useRepositoryAssays(repositoryId);
+  const fetching = artifacts.isFetching || assays.isFetching;
+
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      title={t("artifacts.refreshHint")}
+      onClick={() => {
+        void artifacts.refetch();
+        void assays.refetch();
+      }}
+    >
+      <RefreshCw className={fetching ? "animate-spin" : ""} />
+      {t("common.refresh")}
+    </Button>
   );
 }
