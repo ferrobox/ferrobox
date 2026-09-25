@@ -10,11 +10,11 @@ mod auth_extract;
 mod authz;
 mod cargo_registry;
 mod conan_registry;
-mod maven_registry;
 mod config;
 mod dto;
 mod error;
 mod groups;
+mod maven_registry;
 mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
@@ -30,7 +30,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use aws_sdk_s3::Client as S3Client;
-use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
+use aws_sdk_s3::config::{
+    BehaviorVersion, Credentials, Region, RequestChecksumCalculation, ResponseChecksumValidation,
+};
 use axum::Router;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
@@ -157,6 +159,14 @@ async fn main() {
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
     let webhook_store = Arc::new(PostgresWebhookStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
+    storage.ensure_reachable().await.unwrap_or_else(|err| {
+        panic!(
+            "S3 bucket '{}' is not reachable at {}: {err}. \
+             For host cargo run, set S3_ENDPOINT_URL=http://127.0.0.1:3900 and use the same \
+             S3_BUCKET / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY as infra/.env (compose default bucket: ferrobox).",
+            config.s3_bucket, config.s3_endpoint_url
+        );
+    });
     let http_client = Arc::new(ReqwestHttpClient::new());
 
     bootstrap_admin(&config, user_store.clone()).await;
@@ -653,6 +663,9 @@ fn build_s3_client(config: &Config) -> S3Client {
         .endpoint_url(&config.s3_endpoint_url)
         .credentials_provider(credentials)
         .force_path_style(true)
+        // Garage rejects the AWS SDK default CRC32 checksums on PutObject.
+        .request_checksum_calculation(RequestChecksumCalculation::WhenRequired)
+        .response_checksum_validation(ResponseChecksumValidation::WhenRequired)
         .build();
 
     S3Client::from_conf(s3_config)

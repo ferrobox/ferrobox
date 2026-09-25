@@ -54,9 +54,7 @@ pub(crate) async fn require_repo_read(
     groups
         .access_on(user, repository_id)
         .await?
-        .ok_or_else(|| {
-            ApiError::Forbidden("you do not have access to this repository".to_string())
-        })
+        .ok_or_else(|| ApiError::Forbidden("you do not have access to this repository".to_string()))
 }
 
 /// Exige escritura en el repositorio.

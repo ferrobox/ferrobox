@@ -9,7 +9,7 @@ const ECOSYSTEM_META: Record<
   { label: string; icon: typeof Box; className: string }
 > = {
   generic: {
-    label: "Genérico",
+    label: "Generic",
     icon: Box,
     className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300",
   },

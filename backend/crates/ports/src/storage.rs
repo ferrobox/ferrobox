@@ -42,7 +42,7 @@ pub enum StorageError {
     /// un error opaco porque este crate de puertos no depende de ningún
     /// backend concreto -- cada adaptador traduce su propio tipo de
     /// error a esta variante en el límite de la capa.
-    #[error("storage backend failure")]
+    #[error("storage backend failure: {0}")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -165,5 +165,12 @@ mod tests {
         storage.delete(&key).await.unwrap();
 
         assert!(!storage.exists(&key).await.unwrap());
+    }
+
+    #[test]
+    fn backend_error_includes_the_inner_message() {
+        let error = StorageError::Backend(Box::new(std::io::Error::other("NoSuchBucket")));
+
+        assert_eq!(error.to_string(), "storage backend failure: NoSuchBucket");
     }
 }
