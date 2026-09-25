@@ -24,6 +24,7 @@ const ACTION_KEYS = [
   "user.role_changed",
   "user.password_reset",
   "user.password_changed",
+  "user.sso_signed_in",
   "token.created",
   "token.revoked",
   "group.created",

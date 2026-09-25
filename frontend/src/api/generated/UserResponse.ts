@@ -9,4 +9,8 @@ export type UserResponse = { id: string, username: string,
  * Correo de la cuenta, o `null` si el administrador de arranque
  * no tiene uno.
  */
-email: string | null, role: RoleDto, };
+email: string | null, role: RoleDto, 
+/**
+ * `true` si la cuenta está vinculada a un emisor `OIDC`.
+ */
+sso: boolean, };

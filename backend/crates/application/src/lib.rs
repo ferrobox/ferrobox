@@ -55,6 +55,9 @@ pub mod bootstrap_admin;
 /// Caso de uso: autenticar con usuario y contraseña.
 pub mod login;
 
+/// Inicio de sesión federado (`OIDC`): PKCE, JIT y mapeo de grupos.
+pub mod oidc;
+
 /// Caso de uso: el usuario autenticado cambia su propia contraseña.
 pub mod change_password;
 

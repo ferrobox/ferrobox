@@ -30,6 +30,7 @@ import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyRes
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
 import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { SettingsResponse } from "@/api/generated/SettingsResponse";
+import type { OidcStatusResponse } from "@/api/generated/OidcStatusResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
 import type { UserResponse } from "@/api/generated/UserResponse";
@@ -127,6 +128,20 @@ export function login(payload: LoginRequest): Promise<LoginResponse> {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getOidcStatus(): Promise<OidcStatusResponse> {
+  return request<OidcStatusResponse>("/auth/oidc");
+}
+
+export async function completeSsoSession(token: string): Promise<UserResponse> {
+  setStoredToken(token);
+  try {
+    return await getMe();
+  } catch (error) {
+    setStoredToken(null);
+    throw error;
+  }
 }
 
 export function getMe(): Promise<UserResponse> {

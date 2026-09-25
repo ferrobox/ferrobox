@@ -29,6 +29,9 @@ pub mod package_coordinate;
 /// La entidad `User` y los objetos de valor `Username` y `Email`.
 pub mod user;
 
+/// Identidad federada (`OIDC`) y mapeo de roles y grupos del `IdP`.
+pub mod oidc;
+
 /// La entidad `Group` y el acceso de un grupo a un repositorio.
 pub mod group;
 

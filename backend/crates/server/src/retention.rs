@@ -301,6 +301,7 @@ mod tests {
             audit: ferrobox_application::audit::AuditService::new(Arc::new(
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
+            oidc: None,
         });
 
         let developer = state

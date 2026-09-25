@@ -96,6 +96,22 @@ impl GroupStore for PostgresGroupStore {
         row.map(|row| row_to_group(row.id, row.name)).transpose()
     }
 
+    async fn find_by_name(&self, name: &GroupName) -> Result<Option<Group>, GroupStoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id, name
+            FROM groups
+            WHERE name = $1
+            "#,
+            name.as_str(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+
+        row.map(|row| row_to_group(row.id, row.name)).transpose()
+    }
+
     async fn find_all(&self) -> Result<Vec<Group>, GroupStoreError> {
         let rows = sqlx::query!(
             r#"
@@ -214,6 +230,109 @@ impl GroupStore for PostgresGroupStore {
             .into_iter()
             .map(|row| GroupId::from(row.group_id))
             .collect())
+    }
+
+    async fn add_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError> {
+        let group_id: Uuid = group_id.into();
+        let user_id: Uuid = user_id.into();
+        sqlx::query!(
+            r#"
+            INSERT INTO group_members (group_id, user_id)
+            VALUES ($1, $2)
+            ON CONFLICT (group_id, user_id) DO NOTHING
+            "#,
+            group_id,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn remove_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError> {
+        let group_id: Uuid = group_id.into();
+        let user_id: Uuid = user_id.into();
+        sqlx::query!(
+            r#"
+            DELETE FROM group_members
+            WHERE group_id = $1 AND user_id = $2
+            "#,
+            group_id,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn sso_memberships(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError> {
+        let user_id: Uuid = user_id.into();
+        let rows = sqlx::query!(
+            r#"
+            SELECT group_id
+            FROM sso_group_memberships
+            WHERE user_id = $1
+            "#,
+            user_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|row| GroupId::from(row.group_id))
+            .collect())
+    }
+
+    async fn set_sso_memberships(
+        &self,
+        user_id: UserId,
+        group_ids: &[GroupId],
+    ) -> Result<(), GroupStoreError> {
+        let user_id: Uuid = user_id.into();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|err| backend_error(err.to_string()))?;
+        sqlx::query!(
+            r#"
+            DELETE FROM sso_group_memberships
+            WHERE user_id = $1
+            "#,
+            user_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| backend_error(err.to_string()))?;
+        for group_id in group_ids {
+            let group_id: Uuid = (*group_id).into();
+            sqlx::query!(
+                r#"
+                INSERT INTO sso_group_memberships (user_id, group_id)
+                VALUES ($1, $2)
+                "#,
+                user_id,
+                group_id,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| backend_error(err.to_string()))?;
+        }
+        tx.commit()
+            .await
+            .map_err(|err| backend_error(err.to_string()))?;
+        Ok(())
     }
 
     async fn set_group_repositories(

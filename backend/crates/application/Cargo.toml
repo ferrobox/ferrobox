@@ -29,6 +29,7 @@ flate2.workspace = true
 tar.workspace = true
 zip.workspace = true
 tokio = { workspace = true, features = ["time"] }
+jsonwebtoken.workspace = true
 
 [features]
 default = []

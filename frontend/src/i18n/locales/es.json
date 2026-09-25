@@ -23,7 +23,10 @@
     "submit": "Entrar",
     "submitting": "Entrando…",
     "forgot": "Si olvidaste la contraseña, pide a un administrador que la restablezca.",
-    "failed": "No se pudo iniciar sesión"
+    "failed": "No se pudo iniciar sesión",
+    "sso": "Entrar con SSO",
+    "ssoSubmitting": "Redirigiendo al proveedor de identidad…",
+    "ssoFailed": "No se pudo completar el inicio de sesión federado"
   },
   "topbar": {
     "searchPlaceholder": "Buscar paquetes…",
@@ -183,6 +186,9 @@
     "copyPublicUrl": "Copiar URL pública",
     "urlCopied": "URL copiada",
     "serverVersion": "Versión del servidor",
+    "sso": "Inicio de sesión federado",
+    "ssoOff": "No configurado. Define OIDC_ISSUER y OIDC_CLIENT_ID para activarlo.",
+    "ssoLinked": "Vinculada al proveedor de identidad",
     "groups": "Grupos",
     "groupsHint": "Los grupos a los que perteneces determinan qué repositorios ves.",
     "groupsFailed": "No se pudieron cargar tus grupos",
@@ -265,6 +271,7 @@
     "new": "Nuevo usuario",
     "newHint": "El nombre de usuario y el correo deben ser únicos. La contraseña debe cumplir la política de la instancia.",
     "username": "Usuario",
+    "sso": "SSO",
     "password": "Contraseña",
     "confirmPassword": "Confirmar contraseña",
     "email": "Correo",
@@ -461,6 +468,7 @@
     "user.role_changed": "Cambió el rol",
     "user.password_reset": "Restableció una contraseña",
     "user.password_changed": "Cambió su contraseña",
+    "user.sso_signed_in": "Entró con SSO",
     "token.created": "Creó un token",
     "token.revoked": "Revocó un token",
     "group.created": "Creó un grupo",

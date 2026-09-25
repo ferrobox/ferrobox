@@ -45,6 +45,13 @@ pub trait GroupStore: Send + Sync {
     /// [`GroupStoreError::Backend`] si el backend falla.
     async fn find_by_id(&self, id: GroupId) -> Result<Option<Group>, GroupStoreError>;
 
+    /// Busca un grupo por nombre.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupStoreError::Backend`] si el backend falla.
+    async fn find_by_name(&self, name: &GroupName) -> Result<Option<Group>, GroupStoreError>;
+
     /// Lista todos los grupos, ordenados por nombre.
     ///
     /// # Errors
@@ -84,6 +91,46 @@ pub trait GroupStore: Send + Sync {
     ///
     /// [`GroupStoreError::Backend`] si el backend falla.
     async fn groups_for_user(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError>;
+
+    /// Añade un miembro si aún no lo es.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupStoreError::Backend`] si el backend falla.
+    async fn add_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError>;
+
+    /// Quita un miembro. No es un error si no lo era.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupStoreError::Backend`] si el backend falla.
+    async fn remove_member(
+        &self,
+        group_id: GroupId,
+        user_id: UserId,
+    ) -> Result<(), GroupStoreError>;
+
+    /// Grupos cuya pertenencia de este usuario gestiona el `IdP`.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupStoreError::Backend`] si el backend falla.
+    async fn sso_memberships(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError>;
+
+    /// Sustituye el conjunto de grupos cuya pertenencia gestiona el `IdP`.
+    ///
+    /// # Errors
+    ///
+    /// [`GroupStoreError::Backend`] si el backend falla.
+    async fn set_sso_memberships(
+        &self,
+        user_id: UserId,
+        group_ids: &[GroupId],
+    ) -> Result<(), GroupStoreError>;
 
     /// Sustituye los repositorios asignados a un grupo.
     ///

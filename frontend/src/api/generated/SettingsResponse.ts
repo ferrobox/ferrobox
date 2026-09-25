@@ -12,4 +12,12 @@ public_base_url: string,
 /**
  * Versión del servidor (`CARGO_PKG_VERSION`).
  */
-version: string, };
+version: string, 
+/**
+ * `true` si hay un IdP `OIDC` configurado.
+ */
+oidc_enabled: boolean, 
+/**
+ * Emisor `OIDC`, si el SSO está activo.
+ */
+oidc_issuer: string | null, };

@@ -52,3 +52,4 @@ md-5 = "0.10"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }

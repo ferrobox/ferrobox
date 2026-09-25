@@ -128,6 +128,33 @@ spec:
                 secretKeyRef:
                   name: {{ include "ferrobox.appSecretName" . }}
                   key: ADMIN_PASSWORD
+            - name: OIDC_ISSUER
+              value: {{ .Values.oidc.issuer | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.oidc.clientId | quote }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ferrobox.appSecretName" . }}
+                  key: OIDC_CLIENT_SECRET
+            - name: OIDC_REDIRECT_URI
+              value: {{ .Values.oidc.redirectUri | quote }}
+            - name: OIDC_SUCCESS_REDIRECT
+              value: {{ .Values.oidc.successRedirect | quote }}
+            - name: OIDC_SCOPES
+              value: {{ .Values.oidc.scopes | quote }}
+            - name: OIDC_ADMIN_ROLES
+              value: {{ .Values.oidc.adminRoles | quote }}
+            - name: OIDC_DEVELOPER_ROLES
+              value: {{ .Values.oidc.developerRoles | quote }}
+            - name: OIDC_READER_ROLES
+              value: {{ .Values.oidc.readerRoles | quote }}
+            - name: OIDC_ROLE_CLAIM
+              value: {{ .Values.oidc.roleClaim | quote }}
+            - name: OIDC_GROUP_CLAIM
+              value: {{ .Values.oidc.groupClaim | quote }}
+            - name: OIDC_AUTO_CREATE_GROUPS
+              value: {{ .Values.oidc.autoCreateGroups | quote }}
           readinessProbe:
             httpGet:
               path: /health

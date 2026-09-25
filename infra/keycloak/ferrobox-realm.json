@@ -1,0 +1,106 @@
+{
+  "realm": "ferrobox",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "ferrobox-admin", "description": "FerroBox instance admin" },
+      { "name": "ferrobox-developer", "description": "FerroBox developer" },
+      { "name": "ferrobox-reader", "description": "FerroBox reader" }
+    ]
+  },
+  "groups": [
+    { "name": "platform", "path": "/platform" },
+    { "name": "backend", "path": "/backend" }
+  ],
+  "clients": [
+    {
+      "clientId": "ferrobox",
+      "name": "FerroBox",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "ferrobox-dev-secret",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://127.0.0.1:3000/api/auth/oidc/callback",
+        "http://localhost:3000/api/auth/oidc/callback",
+        "http://127.0.0.1:5173/api/auth/oidc/callback",
+        "http://localhost:5173/api/auth/oidc/callback"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "ada",
+      "enabled": true,
+      "email": "ada@example.com",
+      "emailVerified": true,
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "credentials": [
+        { "type": "password", "value": "AdaLogin1", "temporary": false }
+      ],
+      "realmRoles": ["ferrobox-developer"],
+      "groups": ["/platform"]
+    },
+    {
+      "username": "grace",
+      "enabled": true,
+      "email": "grace@example.com",
+      "emailVerified": true,
+      "firstName": "Grace",
+      "lastName": "Hopper",
+      "credentials": [
+        { "type": "password", "value": "GraceLogin1", "temporary": false }
+      ],
+      "realmRoles": ["ferrobox-admin"],
+      "groups": ["/platform", "/backend"]
+    }
+  ]
+}
