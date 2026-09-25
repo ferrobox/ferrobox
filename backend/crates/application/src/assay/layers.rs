@@ -118,7 +118,10 @@ pub async fn extract_inventory(
             extract_oci(storage, index, repository_id, coordinate, entry).await
         }
         PackageEcosystem::Conan => extract_conan(storage, coordinate, entry).await,
-        PackageEcosystem::Generic | PackageEcosystem::Maven | PackageEcosystem::Nuget => {
+        PackageEcosystem::Generic
+        | PackageEcosystem::Maven
+        | PackageEcosystem::Nuget
+        | PackageEcosystem::Go => {
             extract_components(
                 coordinate.ecosystem(),
                 coordinate.name().as_str(),

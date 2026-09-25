@@ -5,6 +5,7 @@ import { CargoRegistryPanel } from "@/components/repository/CargoRegistryPanel";
 import { ConanRegistryPanel } from "@/components/repository/ConanRegistryPanel";
 import { HelmRegistryPanel } from "@/components/repository/HelmRegistryPanel";
 import { MavenRegistryPanel } from "@/components/repository/MavenRegistryPanel";
+import { GoRegistryPanel } from "@/components/repository/GoRegistryPanel";
 import { NugetRegistryPanel } from "@/components/repository/NugetRegistryPanel";
 import { NpmRegistryPanel } from "@/components/repository/NpmRegistryPanel";
 import { OciRegistryPanel } from "@/components/repository/OciRegistryPanel";
@@ -27,7 +28,7 @@ export function SetMeUpDialog({
 }: {
   repositoryId: string;
   kind?: RepositoryStorageKind;
-  ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan" | "maven" | "nuget";
+  ecosystem?: "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan" | "maven" | "nuget" | "go";
 }) {
   const { t } = useTranslation();
   const description = t(`setup.${ecosystem}`);
@@ -58,6 +59,8 @@ export function SetMeUpDialog({
           <MavenRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : ecosystem === "nuget" ? (
           <NugetRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
+        ) : ecosystem === "go" ? (
+          <GoRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         ) : (
           <CargoRegistryPanel repositoryId={repositoryId} kind={kind} framed={false} />
         )}

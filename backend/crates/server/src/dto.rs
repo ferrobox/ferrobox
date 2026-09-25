@@ -41,6 +41,8 @@ pub(crate) enum PackageEcosystemDto {
     Maven,
     /// Paquetes `NuGet`.
     Nuget,
+    /// Módulos `Go`.
+    Go,
 }
 
 impl From<PackageEcosystem> for PackageEcosystemDto {
@@ -55,6 +57,7 @@ impl From<PackageEcosystem> for PackageEcosystemDto {
             PackageEcosystem::Conan => Self::Conan,
             PackageEcosystem::Maven => Self::Maven,
             PackageEcosystem::Nuget => Self::Nuget,
+            PackageEcosystem::Go => Self::Go,
         }
     }
 }
@@ -71,6 +74,7 @@ impl From<PackageEcosystemDto> for PackageEcosystem {
             PackageEcosystemDto::Conan => Self::Conan,
             PackageEcosystemDto::Maven => Self::Maven,
             PackageEcosystemDto::Nuget => Self::Nuget,
+            PackageEcosystemDto::Go => Self::Go,
         }
     }
 }

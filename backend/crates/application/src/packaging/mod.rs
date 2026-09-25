@@ -62,6 +62,10 @@ pub mod maven;
 /// `dotnet restore`) del patrón Strategy.
 pub mod nuget;
 
+/// La implementación de Go (protocolo `GOPROXY`: `go get` /
+/// `go mod download`) del patrón Strategy.
+pub mod golang;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -568,6 +572,7 @@ mod tests {
 
     use super::cargo::CargoPackagingStrategy;
     use super::conan::ConanPackagingStrategy;
+    use super::golang::GoPackagingStrategy;
     use super::maven::MavenPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
     use super::nuget::NugetPackagingStrategy;
@@ -662,6 +667,16 @@ mod tests {
         ))
     }
 
+    fn go_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(GoPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
@@ -672,7 +687,8 @@ mod tests {
             .register(helm_strategy())
             .register(conan_strategy())
             .register(maven_strategy())
-            .register(nuget_strategy());
+            .register(nuget_strategy())
+            .register(go_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
@@ -682,6 +698,7 @@ mod tests {
         assert!(registry.strategy_for(PackageEcosystem::Conan).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Maven).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Nuget).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Go).is_some());
     }
 
     #[test]

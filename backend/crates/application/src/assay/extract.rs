@@ -47,6 +47,7 @@ pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Optio
         PackageEcosystem::PyPi => "pkg:pypi/",
         PackageEcosystem::Cargo => "pkg:cargo/",
         PackageEcosystem::Nuget => "pkg:nuget/",
+        PackageEcosystem::Go => "pkg:golang/",
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
@@ -65,6 +66,7 @@ pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
         PackageEcosystem::Cargo => Some("crates.io"),
         PackageEcosystem::Maven => Some("Maven"),
         PackageEcosystem::Nuget => Some("NuGet"),
+        PackageEcosystem::Go => Some("Go"),
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
@@ -209,7 +211,8 @@ pub fn extract_components(
         | PackageEcosystem::Helm
         | PackageEcosystem::Conan
         | PackageEcosystem::Maven
-        | PackageEcosystem::Nuget => {}
+        | PackageEcosystem::Nuget
+        | PackageEcosystem::Go => {}
     }
 
     components
@@ -430,6 +433,15 @@ mod tests {
             Some("pkg:nuget/Newtonsoft.Json@13.0.3".to_string())
         );
         assert_eq!(osv_ecosystem(PackageEcosystem::Nuget), Some("NuGet"));
+    }
+
+    #[test]
+    fn go_purl_uses_module_path() {
+        assert_eq!(
+            purl_for(PackageEcosystem::Go, "github.com/google/uuid", "v1.6.0"),
+            Some("pkg:golang/github.com/google/uuid@v1.6.0".to_string())
+        );
+        assert_eq!(osv_ecosystem(PackageEcosystem::Go), Some("Go"));
     }
 
     #[test]

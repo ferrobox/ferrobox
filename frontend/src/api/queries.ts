@@ -217,6 +217,11 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankNuget(repositoryId, name, version)
           : api.unyankNuget(repositoryId, name, version);
       }
+      if (ecosystem === "go") {
+        return yanked
+          ? api.yankGo(repositoryId, name, version)
+          : api.unyankGo(repositoryId, name, version);
+      }
       return yanked
         ? api.yankCrate(repositoryId, name, version)
         : api.unyankCrate(repositoryId, name, version);
