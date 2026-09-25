@@ -119,6 +119,7 @@ impl CreateRepositoryUseCase {
                         | PackageEcosystem::Helm
                         | PackageEcosystem::Maven
                         | PackageEcosystem::Nuget
+                        | PackageEcosystem::Go
                 ) {
                     return Err(CreateRepositoryError::UnsupportedMirrorEcosystem);
                 }
@@ -401,6 +402,50 @@ mod tests {
             other => panic!("expected mirror, got {other:?}"),
         }
         assert_eq!(mirror.ecosystem(), PackageEcosystem::Nuget);
+    }
+
+    #[tokio::test]
+    async fn creates_a_go_forge_and_mirror() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let forge_id = use_case
+            .execute(
+                RepositoryName::parse("go-local").unwrap(),
+                PackageEcosystem::Go,
+                CreateRepositoryKind::Forge,
+            )
+            .await
+            .unwrap();
+        let forge = repository_store.find_by_id(forge_id).await.unwrap().unwrap();
+        assert!(matches!(forge.kind(), RepositoryKind::Forge));
+        assert_eq!(forge.ecosystem(), PackageEcosystem::Go);
+
+        let mirror_id = use_case
+            .execute(
+                RepositoryName::parse("go-proxy").unwrap(),
+                PackageEcosystem::Go,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://proxy.golang.org".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let mirror = repository_store
+            .find_by_id(mirror_id)
+            .await
+            .unwrap()
+            .unwrap();
+        match mirror.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(
+                    upstream.as_str().trim_end_matches('/'),
+                    "https://proxy.golang.org"
+                );
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
+        assert_eq!(mirror.ecosystem(), PackageEcosystem::Go);
     }
 
     #[tokio::test]

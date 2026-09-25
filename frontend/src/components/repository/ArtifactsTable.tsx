@@ -59,7 +59,9 @@ function fallbackFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
                 ? "jar"
                 : ecosystem === "nuget"
                   ? "nupkg"
-                  : "crate";
+                  : ecosystem === "go"
+                    ? "zip"
+                    : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -188,7 +190,8 @@ export function ArtifactsTable({
       ecosystem === "helm" ||
       ecosystem === "conan" ||
       ecosystem === "maven" ||
-      ecosystem === "nuget");
+      ecosystem === "nuget" ||
+      ecosystem === "go");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [assayTarget, setAssayTarget] = useState<{
     repositoryId: string;
@@ -314,7 +317,9 @@ export function ArtifactsTable({
                           ? t("artifacts.emptyMirrorMaven")
                           : ecosystem === "nuget"
                             ? t("artifacts.emptyMirrorNuget")
-                            : t("artifacts.emptyMirrorCargo")
+                            : ecosystem === "go"
+                              ? t("artifacts.emptyMirrorGo")
+                              : t("artifacts.emptyMirrorCargo")
               : ecosystem === "npm"
                 ? t("artifacts.emptyForgeNpm")
                 : ecosystem === "pypi"
@@ -329,7 +334,9 @@ export function ArtifactsTable({
                           ? t("artifacts.emptyForgeMaven")
                           : ecosystem === "nuget"
                             ? t("artifacts.emptyForgeNuget")
-                            : t("artifacts.emptyForgeCargo")}
+                            : ecosystem === "go"
+                              ? t("artifacts.emptyForgeGo")
+                              : t("artifacts.emptyForgeCargo")}
         </p>
       </div>
     );
@@ -523,14 +530,14 @@ function VersionRows({
               <Badge variant="outline" className="border-slate-400/40 text-muted-foreground">
                 {t("artifacts.release")}
               </Badge>
-            ) : ecosystem === "nuget" && isNugetPrerelease(bucket.version) ? (
+            ) : (ecosystem === "nuget" || ecosystem === "go") && isNugetPrerelease(bucket.version) ? (
               <Badge
                 variant="outline"
                 className="border-violet-500/40 bg-violet-500/10 text-violet-800 dark:text-violet-300"
               >
                 {t("artifacts.prerelease")}
               </Badge>
-            ) : ecosystem === "nuget" && bucket.version ? (
+            ) : (ecosystem === "nuget" || ecosystem === "go") && bucket.version ? (
               <Badge variant="outline" className="border-slate-400/40 text-muted-foreground">
                 {t("artifacts.release")}
               </Badge>

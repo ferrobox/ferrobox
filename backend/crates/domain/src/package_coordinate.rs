@@ -32,6 +32,8 @@ pub enum PackageEcosystem {
     Maven,
     /// Paquetes `NuGet` (API V3: `dotnet nuget push` / `dotnet restore`).
     Nuget,
+    /// Módulos Go (protocolo `GOPROXY`: `go get` / `go mod download`).
+    Go,
 }
 
 impl PackageEcosystem {
@@ -48,6 +50,7 @@ impl PackageEcosystem {
             Self::Conan => "conan",
             Self::Maven => "maven",
             Self::Nuget => "nuget",
+            Self::Go => "go",
         }
     }
 }
