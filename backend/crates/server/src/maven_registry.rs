@@ -77,17 +77,25 @@ async fn load_maven_repository(
 
 fn content_type_for(path: &str) -> &'static str {
     let filename = path.rsplit('/').next().unwrap_or(path);
-    if filename.ends_with(".md5")
-        || filename.ends_with(".sha1")
-        || filename.ends_with(".sha256")
-        || filename.ends_with(".sha512")
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    if extension.eq_ignore_ascii_case("md5")
+        || extension.eq_ignore_ascii_case("sha1")
+        || extension.eq_ignore_ascii_case("sha256")
+        || extension.eq_ignore_ascii_case("sha512")
     {
         return "text/plain";
     }
-    if filename == "maven-metadata.xml" || filename.ends_with(".pom") || filename.ends_with(".xml")
+    if filename.eq_ignore_ascii_case("maven-metadata.xml")
+        || extension.eq_ignore_ascii_case("pom")
+        || extension.eq_ignore_ascii_case("xml")
     {
         "application/xml"
-    } else if filename.ends_with(".jar") || filename.ends_with(".war") || filename.ends_with(".ear")
+    } else if extension.eq_ignore_ascii_case("jar")
+        || extension.eq_ignore_ascii_case("war")
+        || extension.eq_ignore_ascii_case("ear")
     {
         "application/java-archive"
     } else {

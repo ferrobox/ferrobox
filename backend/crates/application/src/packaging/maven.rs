@@ -1211,8 +1211,7 @@ fn render_artifact_metadata(group_id: &str, artifact_id: &str, versions: &[Versi
         .iter()
         .filter(|entry| !entry.yanked && !entry.snapshot)
         .max_by(|left, right| left.updated.cmp(&right.updated))
-        .map(|entry| entry.version.as_str())
-        .unwrap_or("");
+        .map_or("", |entry| entry.version.as_str());
     let last_updated = versions
         .iter()
         .map(|entry| entry.updated.as_str())
@@ -1278,12 +1277,15 @@ fn render_version_metadata(entry: &VersionEntry) -> String {
         let classifier = file.classifier.as_ref().map_or(String::new(), |classifier| {
             format!("        <classifier>{}</classifier>\n", xml_escape(classifier))
         });
-        snapshot_versions.push_str(&format!(
-            "      <snapshotVersion>\n{classifier}        <extension>{}</extension>\n        <value>{}</value>\n        <updated>{}</updated>\n      </snapshotVersion>\n",
-            xml_escape(&file.extension),
-            xml_escape(&value),
-            xml_escape(&entry.updated)
-        ));
+        snapshot_versions.push_str("      <snapshotVersion>\n");
+        snapshot_versions.push_str(&classifier);
+        snapshot_versions.push_str("        <extension>");
+        snapshot_versions.push_str(&xml_escape(&file.extension));
+        snapshot_versions.push_str("</extension>\n        <value>");
+        snapshot_versions.push_str(&xml_escape(&value));
+        snapshot_versions.push_str("</value>\n        <updated>");
+        snapshot_versions.push_str(&xml_escape(&entry.updated));
+        snapshot_versions.push_str("</updated>\n      </snapshotVersion>\n");
     }
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
