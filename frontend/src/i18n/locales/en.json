@@ -334,6 +334,7 @@
     "emptyForgeConan": "Publish a package with conan upload pointed at this registry.",
     "emptyForgeMaven": "Publish a package with mvn deploy pointed at this registry.",
     "emptyForgeCargo": "Publish a crate with cargo publish --registry ferrobox, or upload a generic binary.",
+    "refreshHint": "Reload packages published outside this page",
     "snapshot": "SNAPSHOT",
     "release": "Release",
     "cosignTitle": "The Cosign signature verifies against this repository’s public keys",
