@@ -363,6 +363,7 @@ fn spa_service(dir: &str) -> ServeDir<ServeFile> {
         .fallback(ServeFile::new(index))
 }
 
+#[cfg(test)]
 fn build_router(state: Arc<AppState>) -> axum::Router {
     build_router_with_frontend(state, None)
 }
