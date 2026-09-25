@@ -55,7 +55,9 @@ function fallbackFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
             ? "json"
             : ecosystem === "conan"
               ? "tgz"
-              : "crate";
+              : ecosystem === "maven"
+                ? "jar"
+                : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -174,7 +176,8 @@ export function ArtifactsTable({
       ecosystem === "pypi" ||
       ecosystem === "oci" ||
       ecosystem === "helm" ||
-      ecosystem === "conan");
+      ecosystem === "conan" ||
+      ecosystem === "maven");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [assayTarget, setAssayTarget] = useState<{
     repositoryId: string;
@@ -296,7 +299,9 @@ export function ArtifactsTable({
                       ? t("artifacts.emptyMirrorHelm")
                       : ecosystem === "conan"
                         ? t("artifacts.emptyMirrorConan")
-                        : t("artifacts.emptyMirrorCargo")
+                        : ecosystem === "maven"
+                          ? t("artifacts.emptyMirrorMaven")
+                          : t("artifacts.emptyMirrorCargo")
               : ecosystem === "npm"
                 ? t("artifacts.emptyForgeNpm")
                 : ecosystem === "pypi"
@@ -307,7 +312,9 @@ export function ArtifactsTable({
                       ? t("artifacts.emptyForgeHelm")
                       : ecosystem === "conan"
                         ? t("artifacts.emptyForgeConan")
-                        : t("artifacts.emptyForgeCargo")}
+                        : ecosystem === "maven"
+                          ? t("artifacts.emptyForgeMaven")
+                          : t("artifacts.emptyForgeCargo")}
         </p>
       </div>
     );
@@ -490,6 +497,18 @@ function VersionRows({
                 {truncateMiddle(representative.id)}
               </span>
             )}
+            {ecosystem === "maven" && bucket.version?.endsWith("-SNAPSHOT") ? (
+              <Badge
+                variant="outline"
+                className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              >
+                {t("artifacts.snapshot")}
+              </Badge>
+            ) : ecosystem === "maven" && bucket.version ? (
+              <Badge variant="outline" className="border-slate-400/40 text-muted-foreground">
+                {t("artifacts.release")}
+              </Badge>
+            ) : null}
             {yanked ? (
               <Badge variant="outline" className="border-destructive/40 text-destructive">
                 Yanked

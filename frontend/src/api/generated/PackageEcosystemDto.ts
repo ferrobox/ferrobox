@@ -4,4 +4,4 @@
  * Ecosistema de paquetes de un repositorio, tal y como viaja en la API
  * HTTP.
  */
-export type PackageEcosystemDto = "generic" | "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan";
+export type PackageEcosystemDto = "generic" | "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan" | "maven";

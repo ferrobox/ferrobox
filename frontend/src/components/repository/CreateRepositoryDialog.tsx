@@ -37,6 +37,7 @@ const MIRROR_ECOSYSTEMS: readonly PackageEcosystemDto[] = [
   "pypi",
   "oci",
   "helm",
+  "maven",
 ];
 const DEFAULT_UPSTREAM = {
   cargo: "https://index.crates.io/",
@@ -44,13 +45,14 @@ const DEFAULT_UPSTREAM = {
   pypi: "https://pypi.org/simple/",
   oci: "https://registry-1.docker.io",
   helm: "https://registry-1.docker.io",
+  maven: "https://repo1.maven.org/maven2/",
 } as const;
 
 type KindChoice = "forge" | "mirror" | "alloy";
 
 function isMirrorEcosystem(
   ecosystem: PackageEcosystemDto,
-): ecosystem is "cargo" | "npm" | "pypi" | "oci" | "helm" {
+): ecosystem is "cargo" | "npm" | "pypi" | "oci" | "helm" | "maven" {
   return MIRROR_ECOSYSTEMS.includes(ecosystem);
 }
 
@@ -67,6 +69,9 @@ function defaultUpstreamFor(ecosystem: PackageEcosystemDto): string {
   if (ecosystem === "helm") {
     return DEFAULT_UPSTREAM.helm;
   }
+  if (ecosystem === "maven") {
+    return DEFAULT_UPSTREAM.maven;
+  }
   return DEFAULT_UPSTREAM.cargo;
 }
 
@@ -78,7 +83,8 @@ function isKnownDefaultUpstream(value: string): boolean {
     trimmed === DEFAULT_UPSTREAM.npm ||
     trimmed === DEFAULT_UPSTREAM.pypi ||
     trimmed === DEFAULT_UPSTREAM.oci ||
-    trimmed === DEFAULT_UPSTREAM.helm
+    trimmed === DEFAULT_UPSTREAM.helm ||
+    trimmed === DEFAULT_UPSTREAM.maven
   );
 }
 
@@ -270,7 +276,9 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                         ? t("upstream.oci")
                         : ecosystem === "helm"
                           ? t("upstream.helm")
-                          : t("upstream.cargo")}
+                          : ecosystem === "maven"
+                            ? t("upstream.maven")
+                            : t("upstream.cargo")}
                 </Label>
                 <Input
                   id="repository-upstream"
@@ -287,7 +295,9 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                         ? t("upstream.ociHint")
                         : ecosystem === "helm"
                           ? t("upstream.helmHint")
-                          : t("upstream.cargoHint")}
+                          : ecosystem === "maven"
+                            ? t("upstream.mavenHint")
+                            : t("upstream.cargoHint")}
                 </p>
               </div>
             ) : null}

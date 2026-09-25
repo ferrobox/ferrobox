@@ -117,6 +117,7 @@ impl CreateRepositoryUseCase {
                         | PackageEcosystem::PyPi
                         | PackageEcosystem::Oci
                         | PackageEcosystem::Helm
+                        | PackageEcosystem::Maven
                 ) {
                     return Err(CreateRepositoryError::UnsupportedMirrorEcosystem);
                 }
@@ -317,6 +318,47 @@ mod tests {
         let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
         assert!(matches!(repository.kind(), RepositoryKind::Forge));
         assert_eq!(repository.ecosystem(), PackageEcosystem::Conan);
+    }
+
+    #[tokio::test]
+    async fn creates_a_maven_forge_and_mirror() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let forge_id = use_case
+            .execute(
+                RepositoryName::parse("maven-local").unwrap(),
+                PackageEcosystem::Maven,
+                CreateRepositoryKind::Forge,
+            )
+            .await
+            .unwrap();
+        let forge = repository_store.find_by_id(forge_id).await.unwrap().unwrap();
+        assert!(matches!(forge.kind(), RepositoryKind::Forge));
+        assert_eq!(forge.ecosystem(), PackageEcosystem::Maven);
+
+        let mirror_id = use_case
+            .execute(
+                RepositoryName::parse("maven-central").unwrap(),
+                PackageEcosystem::Maven,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://repo1.maven.org/maven2/".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let mirror = repository_store
+            .find_by_id(mirror_id)
+            .await
+            .unwrap()
+            .unwrap();
+        match mirror.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(upstream.as_str(), "https://repo1.maven.org/maven2/");
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
+        assert_eq!(mirror.ecosystem(), PackageEcosystem::Maven);
     }
 
     #[tokio::test]

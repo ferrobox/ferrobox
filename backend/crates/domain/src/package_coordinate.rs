@@ -28,6 +28,8 @@ pub enum PackageEcosystem {
     Helm,
     /// Paquetes C/C++ del gestor Conan (API v2 con revisiones).
     Conan,
+    /// Artefactos Maven (`groupId:artifactId`, layout HTTP clásico).
+    Maven,
 }
 
 impl PackageEcosystem {
@@ -42,6 +44,7 @@ impl PackageEcosystem {
             Self::Oci => "oci",
             Self::Helm => "helm",
             Self::Conan => "conan",
+            Self::Maven => "maven",
         }
     }
 }

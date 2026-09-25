@@ -206,6 +206,11 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankConan(repositoryId, name, version)
           : api.unyankConan(repositoryId, name, version);
       }
+      if (ecosystem === "maven") {
+        return yanked
+          ? api.yankMaven(repositoryId, name, version)
+          : api.unyankMaven(repositoryId, name, version);
+      }
       return yanked
         ? api.yankCrate(repositoryId, name, version)
         : api.unyankCrate(repositoryId, name, version);
