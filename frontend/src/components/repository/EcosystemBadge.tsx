@@ -1,4 +1,4 @@
-import { Box, Coffee, Container, FileArchive, Package, Ship, Sparkle, Wrench } from "lucide-react";
+import { Box, Boxes, Coffee, Container, FileArchive, Package, Ship, Sparkle, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
@@ -47,6 +47,11 @@ const ECOSYSTEM_META: Record<
     label: "Maven",
     icon: Coffee,
     className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  },
+  nuget: {
+    label: "NuGet",
+    icon: Boxes,
+    className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
   },
 };
 

@@ -163,7 +163,8 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             repository.ecosystem === "oci" ||
             repository.ecosystem === "helm" ||
             repository.ecosystem === "conan" ||
-            repository.ecosystem === "maven" ? (
+            repository.ecosystem === "maven" ||
+            repository.ecosystem === "nuget" ? (
               <SetMeUpDialog
                 repositoryId={repositoryId}
                 kind={repository.kind.type}
@@ -177,7 +178,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
                 members={repository.kind.members}
               />
             ) : null}
-            {canWrite && !isReadOnly && repository.ecosystem !== "oci" && repository.ecosystem !== "helm" && repository.ecosystem !== "conan" && repository.ecosystem !== "maven" ? (
+            {canWrite && !isReadOnly && repository.ecosystem !== "oci" && repository.ecosystem !== "helm" && repository.ecosystem !== "conan" && repository.ecosystem !== "maven" && repository.ecosystem !== "nuget" ? (
               <UploadArtifactButton repositoryId={repositoryId} />
             ) : null}
             {canWrite ? (

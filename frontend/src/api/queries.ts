@@ -212,6 +212,11 @@ export function useSetYanked(repositoryId: string) {
           ? api.yankMaven(repositoryId, name, version)
           : api.unyankMaven(repositoryId, name, version);
       }
+      if (ecosystem === "nuget") {
+        return yanked
+          ? api.yankNuget(repositoryId, name, version)
+          : api.unyankNuget(repositoryId, name, version);
+      }
       return yanked
         ? api.yankCrate(repositoryId, name, version)
         : api.unyankCrate(repositoryId, name, version);

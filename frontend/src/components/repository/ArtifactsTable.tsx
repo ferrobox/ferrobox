@@ -57,7 +57,9 @@ function fallbackFilename(artifact: ArtifactResponse, ecosystem: PackageEcosyste
               ? "tgz"
               : ecosystem === "maven"
                 ? "jar"
-                : "crate";
+                : ecosystem === "nuget"
+                  ? "nupkg"
+                  : "crate";
     const base = artifact.name.includes("/")
       ? artifact.name.slice(artifact.name.lastIndexOf("/") + 1)
       : artifact.name;
@@ -78,6 +80,14 @@ function downloadName(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto
 
 function displayName(artifact: ArtifactResponse, unnamed: string): string {
   return artifact.name ?? unnamed;
+}
+
+function isNugetPrerelease(version: string | null | undefined): boolean {
+  if (!version) {
+    return false;
+  }
+  const core = version.split("+", 1)[0] ?? version;
+  return core.includes("-");
 }
 
 function versionLabel(version: string, ecosystem: PackageEcosystemDto): string {
@@ -177,7 +187,8 @@ export function ArtifactsTable({
       ecosystem === "oci" ||
       ecosystem === "helm" ||
       ecosystem === "conan" ||
-      ecosystem === "maven");
+      ecosystem === "maven" ||
+      ecosystem === "nuget");
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [assayTarget, setAssayTarget] = useState<{
     repositoryId: string;
@@ -301,7 +312,9 @@ export function ArtifactsTable({
                         ? t("artifacts.emptyMirrorConan")
                         : ecosystem === "maven"
                           ? t("artifacts.emptyMirrorMaven")
-                          : t("artifacts.emptyMirrorCargo")
+                          : ecosystem === "nuget"
+                            ? t("artifacts.emptyMirrorNuget")
+                            : t("artifacts.emptyMirrorCargo")
               : ecosystem === "npm"
                 ? t("artifacts.emptyForgeNpm")
                 : ecosystem === "pypi"
@@ -314,7 +327,9 @@ export function ArtifactsTable({
                         ? t("artifacts.emptyForgeConan")
                         : ecosystem === "maven"
                           ? t("artifacts.emptyForgeMaven")
-                          : t("artifacts.emptyForgeCargo")}
+                          : ecosystem === "nuget"
+                            ? t("artifacts.emptyForgeNuget")
+                            : t("artifacts.emptyForgeCargo")}
         </p>
       </div>
     );
@@ -505,6 +520,17 @@ function VersionRows({
                 {t("artifacts.snapshot")}
               </Badge>
             ) : ecosystem === "maven" && bucket.version ? (
+              <Badge variant="outline" className="border-slate-400/40 text-muted-foreground">
+                {t("artifacts.release")}
+              </Badge>
+            ) : ecosystem === "nuget" && isNugetPrerelease(bucket.version) ? (
+              <Badge
+                variant="outline"
+                className="border-violet-500/40 bg-violet-500/10 text-violet-800 dark:text-violet-300"
+              >
+                {t("artifacts.prerelease")}
+              </Badge>
+            ) : ecosystem === "nuget" && bucket.version ? (
               <Badge variant="outline" className="border-slate-400/40 text-muted-foreground">
                 {t("artifacts.release")}
               </Badge>

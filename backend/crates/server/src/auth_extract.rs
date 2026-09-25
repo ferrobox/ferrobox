@@ -286,6 +286,15 @@ pub(crate) async fn require_auth(
 /// sin esquema. La UI y curl suelen usar `Bearer` o `Token`. `twine`
 /// envía HTTP Basic (`__token__` / `fb_…`): se usa la contraseña.
 pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    if let Some(key) = headers
+        .get("x-nuget-apikey")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(key.to_string());
+    }
+
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
     if value.is_empty() {
         return None;
@@ -338,6 +347,16 @@ mod tests {
             HeaderValue::from_str(value).expect("valid header"),
         );
         map
+    }
+
+    #[test]
+    fn extracts_nuget_api_key_header() {
+        let mut map = HeaderMap::new();
+        map.insert(
+            HeaderName::from_static("x-nuget-apikey"),
+            HeaderValue::from_static("fb_nuget"),
+        );
+        assert_eq!(extract_bearer_token(&map).as_deref(), Some("fb_nuget"));
     }
 
     #[test]
