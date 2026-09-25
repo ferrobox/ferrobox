@@ -19,6 +19,7 @@ pub(crate) fn to_column(ecosystem: PackageEcosystem) -> &'static str {
         PackageEcosystem::Helm => "helm",
         PackageEcosystem::Conan => "conan",
         PackageEcosystem::Maven => "maven",
+        PackageEcosystem::Nuget => "nuget",
     }
 }
 
@@ -40,6 +41,7 @@ pub(crate) fn from_column(ecosystem: &str) -> Result<PackageEcosystem, String> {
         "helm" => Ok(PackageEcosystem::Helm),
         "conan" => Ok(PackageEcosystem::Conan),
         "maven" => Ok(PackageEcosystem::Maven),
+        "nuget" => Ok(PackageEcosystem::Nuget),
         other => Err(format!("unknown package ecosystem: {other}")),
     }
 }

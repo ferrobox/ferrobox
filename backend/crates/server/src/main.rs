@@ -15,6 +15,7 @@ mod dto;
 mod error;
 mod groups;
 mod maven_registry;
+mod nuget_registry;
 mod npm_registry;
 mod oci_registry;
 mod pypi_registry;
@@ -77,6 +78,7 @@ use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::packaging::conan::ConanPackagingStrategy;
 use ferrobox_application::packaging::maven::MavenPackagingStrategy;
+use ferrobox_application::packaging::nuget::NugetPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
@@ -222,6 +224,7 @@ fn protocol_public_router() -> Router<Arc<AppState>> {
         .merge(oci_registry::public_router())
         .merge(conan_registry::public_router())
         .merge(maven_registry::public_router())
+        .merge(nuget_registry::public_router())
 }
 
 fn protocol_write_router() -> Router<Arc<AppState>> {
@@ -232,6 +235,7 @@ fn protocol_write_router() -> Router<Arc<AppState>> {
         .merge(oci_registry::write_router())
         .merge(conan_registry::write_router())
         .merge(maven_registry::write_router())
+        .merge(nuget_registry::write_router())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -653,8 +657,20 @@ fn packaging_registry(
                 artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
+                http_client.clone(),
+                repository_store.clone(),
+            )
+            .with_assays(assays.clone())
+            .with_quota(quota.clone()),
+        ))
+        .register(Arc::new(
+            NugetPackagingStrategy::new(
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
                 http_client,
                 repository_store.clone(),
+                public_base_url.to_string(),
             )
             .with_assays(assays.clone())
             .with_quota(quota),

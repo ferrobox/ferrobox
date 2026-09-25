@@ -58,6 +58,10 @@ pub mod conan;
 /// `mvn dependency:get`) del patrón Strategy.
 pub mod maven;
 
+/// La implementación de `NuGet` (API V3: `dotnet nuget push` /
+/// `dotnet restore`) del patrón Strategy.
+pub mod nuget;
+
 /// Motivos por los que una operación de empaquetado puede fallar.
 #[derive(Debug, Error)]
 pub enum PackagingError {
@@ -566,6 +570,7 @@ mod tests {
     use super::conan::ConanPackagingStrategy;
     use super::maven::MavenPackagingStrategy;
     use super::npm::NpmPackagingStrategy;
+    use super::nuget::NugetPackagingStrategy;
     use super::oci::OciPackagingStrategy;
     use super::pypi::PypiPackagingStrategy;
     use super::*;
@@ -646,6 +651,17 @@ mod tests {
         ))
     }
 
+    fn nuget_strategy() -> Arc<dyn PackagingStrategy> {
+        Arc::new(NugetPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000",
+        ))
+    }
+
     #[test]
     fn registers_and_finds_a_strategy_by_ecosystem() {
         let registry = PackagingRegistry::new()
@@ -655,7 +671,8 @@ mod tests {
             .register(oci_strategy())
             .register(helm_strategy())
             .register(conan_strategy())
-            .register(maven_strategy());
+            .register(maven_strategy())
+            .register(nuget_strategy());
 
         assert!(registry.strategy_for(PackageEcosystem::Cargo).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Npm).is_some());
@@ -664,6 +681,7 @@ mod tests {
         assert!(registry.strategy_for(PackageEcosystem::Helm).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Conan).is_some());
         assert!(registry.strategy_for(PackageEcosystem::Maven).is_some());
+        assert!(registry.strategy_for(PackageEcosystem::Nuget).is_some());
     }
 
     #[test]

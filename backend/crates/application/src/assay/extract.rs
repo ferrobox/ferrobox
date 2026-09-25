@@ -46,6 +46,7 @@ pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Optio
         PackageEcosystem::Npm => "pkg:npm/",
         PackageEcosystem::PyPi => "pkg:pypi/",
         PackageEcosystem::Cargo => "pkg:cargo/",
+        PackageEcosystem::Nuget => "pkg:nuget/",
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
@@ -63,6 +64,7 @@ pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
         PackageEcosystem::PyPi => Some("PyPI"),
         PackageEcosystem::Cargo => Some("crates.io"),
         PackageEcosystem::Maven => Some("Maven"),
+        PackageEcosystem::Nuget => Some("NuGet"),
         PackageEcosystem::Generic
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
@@ -206,7 +208,8 @@ pub fn extract_components(
         | PackageEcosystem::Oci
         | PackageEcosystem::Helm
         | PackageEcosystem::Conan
-        | PackageEcosystem::Maven => {}
+        | PackageEcosystem::Maven
+        | PackageEcosystem::Nuget => {}
     }
 
     components
@@ -418,6 +421,15 @@ mod tests {
             Some("pkg:maven/org.apache.commons/commons-lang3@3.14.0".to_string())
         );
         assert_eq!(osv_ecosystem(PackageEcosystem::Maven), Some("Maven"));
+    }
+
+    #[test]
+    fn nuget_purl_uses_package_id() {
+        assert_eq!(
+            purl_for(PackageEcosystem::Nuget, "Newtonsoft.Json", "13.0.3"),
+            Some("pkg:nuget/Newtonsoft.Json@13.0.3".to_string())
+        );
+        assert_eq!(osv_ecosystem(PackageEcosystem::Nuget), Some("NuGet"));
     }
 
     #[test]

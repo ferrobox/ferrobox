@@ -30,6 +30,8 @@ pub enum PackageEcosystem {
     Conan,
     /// Artefactos Maven (`groupId:artifactId`, layout HTTP clásico).
     Maven,
+    /// Paquetes `NuGet` (API V3: `dotnet nuget push` / `dotnet restore`).
+    Nuget,
 }
 
 impl PackageEcosystem {
@@ -45,6 +47,7 @@ impl PackageEcosystem {
             Self::Helm => "helm",
             Self::Conan => "conan",
             Self::Maven => "maven",
+            Self::Nuget => "nuget",
         }
     }
 }

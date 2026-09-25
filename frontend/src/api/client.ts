@@ -383,6 +383,28 @@ export function unyankMaven(
   );
 }
 
+export function yankNuget(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/index/nuget/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/yank`,
+    { method: "DELETE" },
+  );
+}
+
+export function unyankNuget(
+  repositoryId: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  return request<void>(
+    `/index/nuget/${repositoryId}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/unyank`,
+    { method: "PUT" },
+  );
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,
