@@ -129,9 +129,22 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
-
+    let dotenv_files = config::load_dotenv();
     let config = Config::from_env().expect("invalid configuration");
+    if !dotenv_files.is_empty() {
+        eprintln!(
+            "ferrobox: loaded {}",
+            dotenv_files
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    eprintln!(
+        "ferrobox: s3 endpoint={} bucket={}",
+        config.s3_endpoint_url, config.s3_bucket
+    );
 
     let pool = PgPoolOptions::new()
         .max_connections(10)

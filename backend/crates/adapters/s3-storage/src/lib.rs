@@ -123,8 +123,35 @@ impl StoragePort for S3StorageAdapter {
 }
 
 fn backend_error(err: impl std::error::Error + Send + Sync + 'static) -> StorageError {
-    StorageError::Backend(Box::new(err))
+    StorageError::Backend(Box::new(BackendFailure(format_error_chain(&err))))
 }
+
+fn format_error_chain(err: &dyn std::error::Error) -> String {
+    let mut parts = Vec::new();
+    let mut current = Some(err);
+    while let Some(item) = current {
+        let text = item.to_string();
+        if parts
+            .last()
+            .is_none_or(|previous: &String| previous != &text)
+        {
+            parts.push(text);
+        }
+        current = item.source();
+    }
+    parts.join(": ")
+}
+
+#[derive(Debug)]
+struct BackendFailure(String);
+
+impl std::fmt::Display for BackendFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BackendFailure {}
 
 #[cfg(test)]
 mod tests {
@@ -176,5 +203,17 @@ mod tests {
 
         adapter.delete(&key).await.unwrap();
         assert!(!adapter.exists(&key).await.unwrap());
+    }
+
+    #[test]
+    fn backend_error_includes_the_source_chain() {
+        let inner = std::io::Error::other("NoSuchBucket");
+        let outer = std::io::Error::new(std::io::ErrorKind::Other, inner);
+        let error = backend_error(outer);
+        let message = error.to_string();
+        assert!(
+            message.contains("NoSuchBucket"),
+            "expected the inner S3 code in {message}"
+        );
     }
 }

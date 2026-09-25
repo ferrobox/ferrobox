@@ -1,5 +1,7 @@
 //! Configuración del servidor, leída desde variables de entorno.
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// Motivos por los que la configuración del servidor es inválida.
@@ -64,17 +66,89 @@ impl Config {
     }
 }
 
+/// Carga ficheros `.env` y **pisa** variables ya exportadas en el shell.
+///
+/// El último fichero gana. `backend/.env` (junto al crate del servidor)
+/// se aplica al final para que `cargo run` no se quede con un
+/// `S3_BUCKET` antiguo exportado en la terminal. El bucket no se lee
+/// de la base de datos.
+pub fn load_dotenv() -> Vec<PathBuf> {
+    let mut loaded = Vec::new();
+    for path in dotenv_candidates() {
+        let Ok(canonical) = path.canonicalize() else {
+            continue;
+        };
+        if loaded.iter().any(|seen| seen == &canonical) {
+            continue;
+        }
+        if dotenvy::from_path_override(&canonical).is_ok() {
+            loaded.push(canonical);
+        }
+    }
+    loaded
+}
+
+fn dotenv_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        paths.push(cwd.join(".env"));
+        paths.push(cwd.join("backend/.env"));
+    }
+    paths.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env"));
+    paths
+}
+
 fn require_env(key: &'static str) -> Result<String, ConfigError> {
-    std::env::var(key).map_err(|_| ConfigError::MissingVar(key))
+    std::env::var(key)
+        .ok()
+        .and_then(normalize_env)
+        .ok_or(ConfigError::MissingVar(key))
 }
 
 fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_string())
+    std::env::var(key)
+        .ok()
+        .and_then(normalize_env)
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn optional_env(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    std::env::var(key).ok().and_then(normalize_env)
+}
+
+fn normalize_env(value: impl AsRef<str>) -> Option<String> {
+    let trimmed = value.as_ref().trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crate_dotenv_is_backend_env() {
+        let last = dotenv_candidates()
+            .pop()
+            .expect("the crate-relative backend/.env is always a candidate");
+        assert!(
+            last.ends_with("../../.env"),
+            "expected crates/server/../../.env (backend/.env), got {}",
+            last.display()
+        );
+    }
+
+    #[test]
+    fn normalize_env_trims_and_rejects_blank() {
+        assert_eq!(normalize_env("  ferrobox  ").as_deref(), Some("ferrobox"));
+        assert_eq!(
+            normalize_env("ferrobox-artifacts").as_deref(),
+            Some("ferrobox-artifacts")
+        );
+        assert_eq!(normalize_env("   "), None);
+        assert_eq!(normalize_env(""), None);
+    }
 }
