@@ -29,6 +29,22 @@ impl S3StorageAdapter {
             bucket: bucket.into(),
         }
     }
+
+    /// Comprueba que el bucket configurado existe y es alcanzable.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`StorageError::Backend`] si el *endpoint* no responde,
+    /// las credenciales no sirven o el bucket no existe.
+    pub async fn ensure_reachable(&self) -> Result<(), StorageError> {
+        self.client
+            .head_bucket()
+            .bucket(&self.bucket)
+            .send()
+            .await
+            .map_err(backend_error)?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -41,7 +57,7 @@ impl StoragePort for S3StorageAdapter {
             .body(ByteStream::from(content))
             .send()
             .await
-            .map_err(|err| StorageError::Backend(Box::new(err.into_service_error())))?;
+            .map_err(backend_error)?;
 
         Ok(())
     }
@@ -54,16 +70,18 @@ impl StoragePort for S3StorageAdapter {
             .key(key.as_str())
             .send()
             .await
-            .map_err(|err| match err.into_service_error() {
-                GetObjectError::NoSuchKey(_) => StorageError::NotFound(key.clone()),
-                other => StorageError::Backend(Box::new(other)),
+            .map_err(|err| {
+                if err
+                    .as_service_error()
+                    .is_some_and(|inner| matches!(inner, GetObjectError::NoSuchKey(_)))
+                {
+                    StorageError::NotFound(key.clone())
+                } else {
+                    backend_error(err)
+                }
             })?;
 
-        let data = output
-            .body
-            .collect()
-            .await
-            .map_err(|err| StorageError::Backend(Box::new(err)))?;
+        let data = output.body.collect().await.map_err(backend_error)?;
 
         Ok(data.into_bytes())
     }
@@ -75,7 +93,7 @@ impl StoragePort for S3StorageAdapter {
             .key(key.as_str())
             .send()
             .await
-            .map_err(|err| StorageError::Backend(Box::new(err.into_service_error())))?;
+            .map_err(backend_error)?;
 
         Ok(())
     }
@@ -90,12 +108,22 @@ impl StoragePort for S3StorageAdapter {
             .await
         {
             Ok(_) => Ok(true),
-            Err(err) => match err.into_service_error() {
-                HeadObjectError::NotFound(_) => Ok(false),
-                other => Err(StorageError::Backend(Box::new(other))),
-            },
+            Err(err) => {
+                if err
+                    .as_service_error()
+                    .is_some_and(|inner| matches!(inner, HeadObjectError::NotFound(_)))
+                {
+                    Ok(false)
+                } else {
+                    Err(backend_error(err))
+                }
+            }
         }
     }
+}
+
+fn backend_error(err: impl std::error::Error + Send + Sync + 'static) -> StorageError {
+    StorageError::Backend(Box::new(err))
 }
 
 #[cfg(test)]
@@ -119,6 +147,12 @@ mod tests {
             .endpoint_url(endpoint)
             .credentials_provider(credentials)
             .force_path_style(true)
+            .request_checksum_calculation(
+                aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired,
+            )
+            .response_checksum_validation(
+                aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired,
+            )
             .build();
 
         Client::from_conf(config)
@@ -127,7 +161,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a running Garage instance; run with `cargo test -- --ignored`"]
     async fn put_get_and_delete_a_real_object_in_garage() {
-        let adapter = S3StorageAdapter::new(client_from_env(), "ferrobox-artifacts");
+        let bucket =
+            std::env::var("FERROBOX_TEST_S3_BUCKET").unwrap_or_else(|_| "ferrobox".to_string());
+        let adapter = S3StorageAdapter::new(client_from_env(), bucket);
         let key = StorageKey::new("integration-test/hello.txt");
 
         adapter

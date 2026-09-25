@@ -121,7 +121,8 @@ async fn maven_head(
     Path((repository_id, path)): Path<(Uuid, String)>,
     headers: HeaderMap,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
-    let (status, headers, _) = maven_get(State(state), Path((repository_id, path)), headers).await?;
+    let (status, headers, _) =
+        maven_get(State(state), Path((repository_id, path)), headers).await?;
     Ok((status, headers, Bytes::new()))
 }
 
@@ -154,9 +155,7 @@ async fn maven_put(
     let repository = load_maven_repository(&state, repository_id).await?;
     let strategy = maven_strategy(&state)?;
     let path = path.trim_matches('/');
-    strategy
-        .put_protocol_file(&repository, path, body)
-        .await?;
+    strategy.put_protocol_file(&repository, path, body).await?;
     Ok(StatusCode::CREATED)
 }
 
@@ -217,7 +216,9 @@ async fn set_yanked(
         PackageName::parse(name).map_err(|err| ApiError::BadRequest(err.to_string()))?,
         PackageVersion::parse(version).map_err(|err| ApiError::BadRequest(err.to_string()))?,
     );
-    strategy.set_yanked(&repository, &coordinate, yanked).await?;
+    strategy
+        .set_yanked(&repository, &coordinate, yanked)
+        .await?;
     Ok(())
 }
 
@@ -446,7 +447,10 @@ mod tests {
                 Request::builder()
                     .method("PUT")
                     .uri(&path)
-                    .header("authorization", format!("Bearer {}", fixture.developer_token))
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", fixture.developer_token),
+                    )
                     .body(Body::from("jar-bytes"))
                     .unwrap(),
             )
