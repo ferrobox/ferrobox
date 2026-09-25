@@ -1,10 +1,11 @@
 import { type FormEvent, type ReactNode, useState } from "react";
 import { KeyRound, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import { useResetUserPassword } from "@/api/queries";
-import { PASSWORD_POLICY_HINT, passwordMeetsPolicy } from "@/auth/passwordPolicy";
+import { passwordMeetsPolicy } from "@/auth/passwordPolicy";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +28,7 @@ export function ResetPasswordDialog({
   username: string;
   trigger: ReactNode;
 }) {
+  const { t } = useTranslation();
   const resetPassword = useResetUserPassword();
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -41,12 +43,12 @@ export function ResetPasswordDialog({
     event.preventDefault();
 
     if (!passwordMeetsPolicy(password)) {
-      toast.error(PASSWORD_POLICY_HINT);
+      toast.error(t("password.policy"));
       return;
     }
 
     if (password !== confirmPassword) {
-      toast.error("La contraseña y su confirmación no coinciden");
+      toast.error(t("users.mismatch"));
       return;
     }
 
@@ -54,11 +56,9 @@ export function ResetPasswordDialog({
       await resetPassword.mutateAsync({ userId, password });
       resetForm();
       setOpen(false);
-      toast.success(`Contraseña de «${username}» restablecida`);
+      toast.success(t("users.resetDone", { name: username }));
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "No se pudo restablecer la contraseña",
-      );
+      toast.error(err instanceof ApiError ? err.message : t("users.resetFailed"));
     }
   }
 
@@ -76,14 +76,11 @@ export function ResetPasswordDialog({
       <DialogContent>
         <form onSubmit={(event) => void onSubmit(event)} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>Restablecer contraseña</DialogTitle>
-            <DialogDescription>
-              Asigna una contraseña nueva a «{username}». No puedes restablecer la tuya aquí:
-              usa Configuración.
-            </DialogDescription>
+            <DialogTitle>{t("users.resetTitle")}</DialogTitle>
+            <DialogDescription>{t("users.resetHint", { name: username })}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor={`reset-password-${userId}`}>Nueva contraseña</Label>
+            <Label htmlFor={`reset-password-${userId}`}>{t("settings.newPassword")}</Label>
             <Input
               id={`reset-password-${userId}`}
               type="password"
@@ -92,10 +89,10 @@ export function ResetPasswordDialog({
               required
               autoComplete="new-password"
             />
-            <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_HINT}</p>
+            <p className="text-xs text-muted-foreground">{t("password.policy")}</p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`reset-password-confirm-${userId}`}>Confirmar contraseña</Label>
+            <Label htmlFor={`reset-password-confirm-${userId}`}>{t("users.confirmPassword")}</Label>
             <Input
               id={`reset-password-confirm-${userId}`}
               type="password"
@@ -108,7 +105,7 @@ export function ResetPasswordDialog({
           <DialogFooter>
             <Button type="submit" disabled={resetPassword.isPending}>
               {resetPassword.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />}
-              {resetPassword.isPending ? "Guardando…" : "Restablecer"}
+              {resetPassword.isPending ? t("common.saving") : t("users.reset")}
             </Button>
           </DialogFooter>
         </form>

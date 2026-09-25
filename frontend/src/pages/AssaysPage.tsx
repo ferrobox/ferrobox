@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AlertCircle, FlaskConical, Loader2, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -29,6 +30,7 @@ function isPlaceholderLicense(license: string): boolean {
 }
 
 function AssayLicenseSummary({ assay }: { assay: AssayResponse }) {
+  const { t } = useTranslation();
   const root = assay.components.find((component) => component.kind === "root");
   const rootLicenses = [...new Set((root?.licenses ?? []).filter((license) => !isPlaceholderLicense(license)))];
   const all = [
@@ -53,36 +55,32 @@ function AssayLicenseSummary({ assay }: { assay: AssayResponse }) {
         </Badge>
       ))}
       {extra > 0 ? (
-        <span className="text-xs text-muted-foreground">+{extra} en la composición</span>
+        <span className="text-xs text-muted-foreground">
+          {t("assays.extraInComposition", { count: extra })}
+        </span>
       ) : null}
     </span>
   );
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string, t: (key: string) => string): string {
   if (status === "ready") {
-    return "Listo";
+    return t("assays.ready");
   }
   if (status === "failed") {
-    return "Fallido";
+    return t("assays.failed");
   }
   if (status === "unsupported") {
-    return "Aún no aplica";
+    return t("assays.unsupported");
   }
   if (status === "running") {
-    return "En curso";
+    return t("assays.running");
   }
   return status;
 }
 
-function rerunAllMessage(scheduled: number): string {
-  if (scheduled === 1) {
-    return "1 ensaye en curso";
-  }
-  return `${scheduled} ensayes en curso`;
-}
-
 export function AssaysPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canWrite = canWriteArtifacts(user?.role);
   const { data, isPending, isError, error, refetch, isFetching } = useAssays();
@@ -96,8 +94,8 @@ export function AssaysPage() {
   return (
     <div>
       <PageHeader
-        title="Assays"
-        description="Ensayes de la instancia: composición, licencias declaradas e impurezas de cada versión publicada o cacheada. Incluyen lockfiles, paquetes de distro e imágenes declaradas en Helm. Se lanzan solos al publicar o al cachear; no bloquean install ni publish."
+        title={t("assays.title")}
+        description={t("assays.description")}
         actions={
           canWrite && data && data.length > 0 ? (
             <Button
@@ -107,14 +105,18 @@ export function AssaysPage() {
               onClick={() => {
                 void rerunAll.mutateAsync().then(
                   (result) => {
-                    toast.success(rerunAllMessage(result.scheduled));
+                    toast.success(
+                      result.scheduled === 1
+                        ? t("assays.rerunOne")
+                        : t("assays.rerunMany", { count: result.scheduled }),
+                    );
                   },
                   () => undefined,
                 );
               }}
             >
               <RefreshCw className={batchRunning ? "animate-spin" : ""} />
-              {batchRunning ? "Reensayando…" : "Reensayar todos"}
+              {batchRunning ? t("assays.rerunning") : t("assays.rerunAll")}
             </Button>
           ) : null
         }
@@ -131,12 +133,12 @@ export function AssaysPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudieron cargar los ensayes</AlertTitle>
+          <AlertTitle>{t("assays.loadFailed")}</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{error.message}</span>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
               <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -145,7 +147,7 @@ export function AssaysPage() {
       {rerunAll.isError ? (
         <Alert variant="destructive" className="mb-4">
           <AlertCircle />
-          <AlertTitle>No se pudo lanzar el reensaye</AlertTitle>
+          <AlertTitle>{t("assays.rerunFailed")}</AlertTitle>
           <AlertDescription>{rerunAll.error.message}</AlertDescription>
         </Alert>
       ) : null}
@@ -153,13 +155,8 @@ export function AssaysPage() {
       {data && data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
           <FlaskConical className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 font-medium text-foreground">Todavía no hay ensayes</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Publica un paquete o haz install/pull contra un Mirror: el ensaye se lanza solo. También
-            puedes abrir una versión y pulsar Assay. El inventario se consulta contra OSV (Open
-            Source Vulnerabilities). Helm y Conan muestran composición si hay Chart.yaml o
-            requires; OSV no los indexa.
-          </p>
+          <p className="mt-3 font-medium text-foreground">{t("assays.emptyTitle")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("assays.emptyBody")}</p>
         </div>
       ) : null}
 
@@ -168,11 +165,11 @@ export function AssaysPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Paquete</TableHead>
-                <TableHead>Repositorio</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Licencias</TableHead>
-                <TableHead>Hallazgos</TableHead>
+                <TableHead>{t("common.package")}</TableHead>
+                <TableHead>{t("common.repository")}</TableHead>
+                <TableHead>{t("common.status")}</TableHead>
+                <TableHead>{t("common.licenses")}</TableHead>
+                <TableHead>{t("common.findings")}</TableHead>
                 <TableHead className="w-[1%]" />
               </TableRow>
             </TableHeader>
@@ -196,7 +193,7 @@ export function AssaysPage() {
                       {assay.status === "running" ? (
                         <Loader2 className="size-3 animate-spin" />
                       ) : null}
-                      {statusLabel(assay.status)}
+                      {statusLabel(assay.status, t)}
                     </Badge>
                   </TableCell>
                   <TableCell className="whitespace-normal">
@@ -212,7 +209,7 @@ export function AssaysPage() {
                       size="sm"
                       onClick={() => setOpenAssay(assay)}
                     >
-                      Ver
+                      {t("common.view")}
                     </Button>
                   </TableCell>
                 </TableRow>

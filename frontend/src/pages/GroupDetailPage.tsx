@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, ArrowLeft, Loader2, Pencil, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -44,6 +45,7 @@ export function GroupDetailPage() {
 }
 
 function GroupDetailContent({ groupId }: { groupId: string }) {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const editing = searchParams.get("edit") === "1";
   const groupQuery = useGroup(groupId);
@@ -90,17 +92,17 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
 
   if (groupQuery.isError) {
     if (groupQuery.error instanceof ApiError && groupQuery.error.status === 404) {
-      return <NotFoundPage message="Ese grupo no existe." />;
+      return <NotFoundPage message={t("groups.missing")} />;
     }
     return (
       <Alert variant="destructive">
         <AlertCircle />
-        <AlertTitle>No se pudo cargar el grupo</AlertTitle>
+        <AlertTitle>{t("groups.loadOneFailed")}</AlertTitle>
         <AlertDescription className="flex items-center justify-between gap-4">
           <span>{groupQuery.error.message}</span>
           <Button size="sm" variant="outline" onClick={() => void groupQuery.refetch()}>
             <RefreshCw className={groupQuery.isFetching ? "animate-spin" : ""} />
-            Reintentar
+            {t("common.retry")}
           </Button>
         </AlertDescription>
       </Alert>
@@ -143,9 +145,9 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
       setDraftUserIds(null);
       setDraftRepoRoles(null);
       setSearchParams({});
-      toast.success("Grupo actualizado");
+      toast.success(t("groups.updated"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo guardar el grupo");
+      toast.error(err instanceof ApiError ? err.message : t("groups.saveFailed"));
     }
   }
 
@@ -155,31 +157,27 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
         <Button variant="ghost" size="sm" asChild className="mb-3 -ml-2">
           <Link to="/groups">
             <ArrowLeft />
-            Grupos
+            {t("groups.title")}
           </Link>
         </Button>
         <PageHeader
           title={group.name}
-          description={
-            editing
-              ? "Elige los miembros y los repositorios. Quien esté en este grupo solo verá esos repositorios, con rol Lector o Desarrollador."
-              : "Miembros y repositorios de este grupo. Quien pertenezca al grupo solo ve esos repositorios."
-          }
+          description={editing ? t("groups.editHint") : t("groups.viewHint")}
           actions={
             editing ? (
               <>
                 <Button variant="outline" onClick={cancelEdit} disabled={saveGroup.isPending}>
-                  Cancelar
+                  {t("common.cancel")}
                 </Button>
                 <Button onClick={() => void onSave()} disabled={saveGroup.isPending}>
                   {saveGroup.isPending ? <Loader2 className="animate-spin" /> : null}
-                  Guardar
+                  {t("common.save")}
                 </Button>
               </>
             ) : (
               <Button onClick={enterEdit}>
                 <Pencil />
-                Editar
+                {t("common.edit")}
               </Button>
             )
           }
@@ -209,16 +207,17 @@ function GroupDetailContent({ groupId }: { groupId: string }) {
 }
 
 function GroupOverview({ group }: { group: GroupDetailResponse }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Miembros</CardTitle>
-          <CardDescription>Usuarios que pertenecen a este grupo.</CardDescription>
+          <CardTitle>{t("groups.members")}</CardTitle>
+          <CardDescription>{t("groups.membersHint")}</CardDescription>
         </CardHeader>
         <CardContent>
           {group.members.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Este grupo no tiene miembros.</p>
+            <p className="text-sm text-muted-foreground">{t("groups.noMembers")}</p>
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
               {group.members.map((member) => (
@@ -234,15 +233,13 @@ function GroupOverview({ group }: { group: GroupDetailResponse }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Repositorios</CardTitle>
-          <CardDescription>
-            Repositorios que este grupo puede ver, con el rol concedido.
-          </CardDescription>
+          <CardTitle>{t("nav.repositories")}</CardTitle>
+          <CardDescription>{t("groups.reposHint")}</CardDescription>
         </CardHeader>
         <CardContent>
           {group.repositories.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Este grupo no tiene repositorios asignados.
+              {t("groups.noReposAssigned")}
             </p>
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
@@ -280,16 +277,17 @@ function GroupEditor({
   onToggleUser: (userId: string) => void;
   onChangeRepoRole: (repositoryId: string, role: RoleDto | "none") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Miembros</CardTitle>
-          <CardDescription>Los usuarios marcados pertenecen a este grupo.</CardDescription>
+          <CardTitle>{t("groups.members")}</CardTitle>
+          <CardDescription>{t("groups.membersEditHint")}</CardDescription>
         </CardHeader>
         <CardContent>
           {users.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No hay usuarios en la instancia.</p>
+            <p className="text-sm text-muted-foreground">{t("groups.noUsers")}</p>
           ) : (
             <ul className="max-h-80 space-y-1 overflow-y-auto rounded-md border border-border p-2">
               {users.map((entry) => (
@@ -313,14 +311,12 @@ function GroupEditor({
 
       <Card>
         <CardHeader>
-          <CardTitle>Repositorios</CardTitle>
-          <CardDescription>
-            Asigna un rol por repositorio. «Sin acceso» deja ese repositorio fuera del grupo.
-          </CardDescription>
+          <CardTitle>{t("nav.repositories")}</CardTitle>
+          <CardDescription>{t("groups.reposEditHint")}</CardDescription>
         </CardHeader>
         <CardContent>
           {repositories.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No hay repositorios.</p>
+            <p className="text-sm text-muted-foreground">{t("groups.none")}</p>
           ) : (
             <ul className="max-h-80 space-y-2 overflow-y-auto rounded-md border border-border p-2">
               {repositories.map((repository) => {
@@ -340,13 +336,13 @@ function GroupEditor({
                       }
                     >
                       <SelectTrigger
-                        aria-label={`Rol de ${groupName} en ${repository.name}`}
+                        aria-label={t("groups.roleIn", { group: groupName, repository: repository.name })}
                         className="h-8 w-[150px]"
                       >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Sin acceso</SelectItem>
+                        <SelectItem value="none">{t("common.noAccess")}</SelectItem>
                         {GROUP_ROLES.map((option) => (
                           <SelectItem key={option} value={option}>
                             {roleLabel(option)}

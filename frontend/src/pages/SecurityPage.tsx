@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, Copy, KeyRound, RefreshCw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/table";
 
 export function SecurityPage() {
+  const { t } = useTranslation();
   const { data, isPending, isError, error, refetch, isFetching } = useApiTokens();
   const createToken = useCreateApiToken();
   const revokeToken = useRevokeApiToken();
@@ -40,34 +42,31 @@ export function SecurityPage() {
       const result = await createToken.mutateAsync({ name: name.trim() });
       setCreatedSecret(result.token);
       setName("");
-      toast.success("Token creado");
+      toast.success(t("security.created"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo crear el token");
+      toast.error(err instanceof ApiError ? err.message : t("security.createFailed"));
     }
   }
 
   async function onRevoke(tokenId: string, tokenName: string) {
     try {
       await revokeToken.mutateAsync(tokenId);
-      toast.success(`Token «${tokenName}» revocado`);
+      toast.success(t("security.revoked", { name: tokenName }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo revocar el token");
+      toast.error(err instanceof ApiError ? err.message : t("security.revokeFailed"));
     }
   }
 
   return (
     <div>
-      <PageHeader
-        title="Seguridad"
-        description="Emite y revoca tokens de API para la UI, cargo publish y automatizaciones."
-      />
+      <PageHeader title={t("security.title")} description={t("security.description")} />
 
       <form
         onSubmit={(event) => void onCreate(event)}
         className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end"
       >
         <div className="w-full space-y-2 sm:max-w-sm">
-          <Label htmlFor="token-name">Nombre del token</Label>
+          <Label htmlFor="token-name">{t("security.tokenName")}</Label>
           <Input
             id="token-name"
             placeholder="cargo-publish"
@@ -78,7 +77,7 @@ export function SecurityPage() {
         </div>
         <Button type="submit" disabled={createToken.isPending || name.trim().length === 0}>
           <KeyRound />
-          {createToken.isPending ? "Creando…" : "Crear token"}
+          {createToken.isPending ? t("security.creating") : t("security.createToken")}
         </Button>
       </form>
 
@@ -93,12 +92,12 @@ export function SecurityPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudieron cargar los tokens</AlertTitle>
+          <AlertTitle>{t("security.loadFailed")}</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{error.message}</span>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
               <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -106,10 +105,8 @@ export function SecurityPage() {
 
       {data && data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center">
-          <p className="font-medium text-foreground">Todavía no hay tokens</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Crea uno para autenticar `cargo publish` o integraciones.
-          </p>
+          <p className="font-medium text-foreground">{t("security.emptyTitle")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("security.emptyBody")}</p>
         </div>
       ) : null}
 
@@ -118,10 +115,10 @@ export function SecurityPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Prefijo</TableHead>
-                <TableHead>Creado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
+                <TableHead>{t("common.name")}</TableHead>
+                <TableHead>{t("security.prefix")}</TableHead>
+                <TableHead>{t("security.createdAt")}</TableHead>
+                <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -142,7 +139,7 @@ export function SecurityPage() {
                       onClick={() => void onRevoke(token.id, token.name)}
                     >
                       <Trash2 />
-                      Revocar
+                      {t("security.revoke")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -155,13 +152,8 @@ export function SecurityPage() {
       <Dialog open={createdSecret !== null} onOpenChange={(open) => !open && setCreatedSecret(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Copia el token ahora</DialogTitle>
-            <DialogDescription>
-              Este secreto solo se muestra una vez. En{" "}
-              <code className="font-mono">~/.cargo/credentials.toml</code> usa{" "}
-              <code className="font-mono">[registries.ferrobox]</code> y{" "}
-              <code className="font-mono">token = "fb_…"</code>.
-            </DialogDescription>
+            <DialogTitle>{t("security.copyNow")}</DialogTitle>
+            <DialogDescription>{t("security.copyNowHint")}</DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
             <Input readOnly value={createdSecret ?? ""} className="font-mono text-xs" />
@@ -169,11 +161,11 @@ export function SecurityPage() {
               type="button"
               variant="outline"
               size="icon"
-              aria-label="Copiar token"
+              aria-label={t("security.copyToken")}
               onClick={() => {
                 if (createdSecret) {
                   void navigator.clipboard.writeText(createdSecret);
-                  toast.success("Token copiado");
+                  toast.success(t("security.tokenCopied"));
                 }
               }}
             >
@@ -182,7 +174,7 @@ export function SecurityPage() {
           </div>
           <DialogFooter>
             <Button type="button" onClick={() => setCreatedSecret(null)}>
-              He guardado el token
+              {t("security.saved")}
             </Button>
           </DialogFooter>
         </DialogContent>

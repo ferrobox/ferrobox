@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Loader2, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -82,6 +83,7 @@ function isKnownDefaultUpstream(value: string): boolean {
 }
 
 export function CreateRepositoryDialog({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [ecosystem, setEcosystem] = useState<PackageEcosystemDto>("generic");
@@ -109,31 +111,29 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
 
     const trimmed = name.trim();
     if (trimmed.length === 0) {
-      setValidationError("El nombre no puede estar vacío.");
+      setValidationError(t("repositories.nameEmpty"));
       return;
     }
     if (!NAME_PATTERN.test(trimmed)) {
-      setValidationError(
-        "Solo se permiten letras, números, guiones ('-') y guiones bajos ('_').",
-      );
+      setValidationError(t("repositories.nameChars"));
       return;
     }
 
     if (kind === "mirror") {
       if (!isMirrorEcosystem(ecosystem)) {
-        setValidationError("Los Mirror están disponibles para Cargo, npm, PyPI, OCI y Helm.");
+        setValidationError(t("repositories.mirrorEcosystems"));
         return;
       }
       try {
         void new URL(upstream.trim());
       } catch {
-        setValidationError("La URL upstream no es válida.");
+        setValidationError(t("repositories.upstreamInvalid"));
         return;
       }
     }
 
     if (kind === "alloy" && memberIds.length === 0) {
-      setValidationError("Un Alloy necesita al menos un repositorio Forge o Mirror.");
+      setValidationError(t("repositories.alloyNeedsMember"));
       return;
     }
 
@@ -148,7 +148,7 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
       { name: trimmed, ecosystem, kind: kindPayload },
       {
         onSuccess: (response) => {
-          toast.success(`Repositorio «${trimmed}» creado correctamente.`);
+          toast.success(t("repositories.created", { name: trimmed }));
           resetAndClose();
           navigate(`/repositories/${response.id}`);
         },
@@ -173,39 +173,34 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
       <DialogTrigger asChild>
         <Button
           size={compact ? "icon-sm" : "default"}
-          aria-label={compact ? "Nuevo repositorio" : undefined}
-          title={compact ? "Nuevo repositorio" : undefined}
+          aria-label={compact ? t("repositories.new") : undefined}
+          title={compact ? t("repositories.new") : undefined}
         >
           <Plus />
-          {compact ? null : "Nuevo repositorio"}
+          {compact ? null : t("repositories.new")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Crear repositorio</DialogTitle>
-            <DialogDescription>
-              Un Forge guarda artefactos que publicas tú. Un Mirror cachea un
-              registro externo (crates.io, registry.npmjs.org, pypi.org, Docker Hub
-              o charts OCI). Un Alloy agrega Forges y/o Mirrors del mismo ecosistema
-              en una sola URL.
-            </DialogDescription>
+            <DialogTitle>{t("repositories.create")}</DialogTitle>
+            <DialogDescription>{t("repositories.createHint")}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="repository-name">Nombre</Label>
+              <Label htmlFor="repository-name">{t("repositories.name")}</Label>
               <Input
                 id="repository-name"
                 autoFocus
-                placeholder="mi-repositorio-cargo"
+                placeholder={t("repositories.namePlaceholder")}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="repository-kind">Tipo</Label>
+              <Label htmlFor="repository-kind">{t("repositories.kind")}</Label>
               <Select
                 value={kind}
                 onValueChange={(value) => {
@@ -236,7 +231,7 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="repository-ecosystem">Ecosistema de paquetes</Label>
+              <Label htmlFor="repository-ecosystem">{t("repositories.ecosystem")}</Label>
               <Select
                 value={ecosystem}
                 onValueChange={(value) => {
@@ -268,14 +263,14 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
               <div className="grid gap-2">
                 <Label htmlFor="repository-upstream">
                   {ecosystem === "npm"
-                    ? "Upstream (registro npm)"
+                    ? t("upstream.npm")
                     : ecosystem === "pypi"
-                      ? "Upstream (índice simple PyPI)"
+                      ? t("upstream.pypi")
                       : ecosystem === "oci"
-                        ? "Upstream (registro OCI)"
+                        ? t("upstream.oci")
                         : ecosystem === "helm"
-                          ? "Upstream (registro OCI de charts)"
-                          : "Upstream (índice disperso)"}
+                          ? t("upstream.helm")
+                          : t("upstream.cargo")}
                 </Label>
                 <Input
                   id="repository-upstream"
@@ -284,35 +279,15 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                   onChange={(event) => setUpstream(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {ecosystem === "npm" ? (
-                    <>
-                      URL base del registro npm (por ejemplo{" "}
-                      <code className="font-mono">https://registry.npmjs.org/</code>).
-                    </>
-                  ) : ecosystem === "pypi" ? (
-                    <>
-                      URL del índice simple (por ejemplo{" "}
-                      <code className="font-mono">https://pypi.org/simple/</code>).
-                    </>
-                  ) : ecosystem === "oci" ? (
-                    <>
-                      URL del registro OCI (por ejemplo{" "}
-                      <code className="font-mono">https://registry-1.docker.io</code>
-                      ). Las imágenes oficiales de Docker Hub se resuelven como{" "}
-                      <code className="font-mono">library/&lt;nombre&gt;</code>.
-                    </>
-                  ) : ecosystem === "helm" ? (
-                    <>
-                      URL del registro OCI de charts (por ejemplo{" "}
-                      <code className="font-mono">https://registry-1.docker.io</code>
-                      ). Usa el nombre completo, como{" "}
-                      <code className="font-mono">bitnami/nginx</code>.
-                    </>
-                  ) : (
-                    <>
-                      URL base del índice sparse (sin el prefijo <code>sparse+</code>).
-                    </>
-                  )}
+                  {ecosystem === "npm"
+                    ? t("upstream.npmHint")
+                    : ecosystem === "pypi"
+                      ? t("upstream.pypiHint")
+                      : ecosystem === "oci"
+                        ? t("upstream.ociHint")
+                        : ecosystem === "helm"
+                          ? t("upstream.helmHint")
+                          : t("upstream.cargoHint")}
                 </p>
               </div>
             ) : null}
@@ -332,11 +307,11 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={resetAndClose}>
-              Cancelar
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
-              Crear repositorio
+              {mutation.isPending ? t("repositories.creating") : t("repositories.create")}
             </Button>
           </DialogFooter>
         </form>

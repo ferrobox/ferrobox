@@ -1,4 +1,5 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 
 import { useAuditEvents } from "@/api/queries";
@@ -17,49 +18,50 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const ACTION_LABELS: Record<string, string> = {
-  "user.created": "Creó un usuario",
-  "user.deleted": "Eliminó un usuario",
-  "user.role_changed": "Cambió el rol",
-  "user.password_reset": "Restableció una contraseña",
-  "user.password_changed": "Cambió su contraseña",
-  "token.created": "Creó un token",
-  "token.revoked": "Revocó un token",
-  "group.created": "Creó un grupo",
-  "group.deleted": "Eliminó un grupo",
-  "group.members_changed": "Cambió los miembros de un grupo",
-  "group.repositories_changed": "Cambió el acceso de un grupo",
-  "repository.created": "Creó un repositorio",
-  "repository.deleted": "Eliminó un repositorio",
-  "repository.members_changed": "Cambió los miembros de un Alloy",
-  "artifact.published": "Publicó un artefacto",
-  "artifact.deleted": "Eliminó un artefacto",
-  "package.published": "Publicó un paquete",
-  "package.yanked": "Yankeó un paquete",
-  "package.unyanked": "Deshizo un yank",
-  "package.promoted": "Promovió un paquete",
-  "admission.policy_changed": "Cambió la política de admisión",
-  "retention.policy_changed": "Cambió la retención",
-  "retention.applied": "Aplicó la retención",
-  "retention.gc": "Ejecutó la recolección de basura",
-  "quota.changed": "Cambió la cuota",
-  "webhook.created": "Creó un aviso",
-  "webhook.updated": "Actualizó un aviso",
-  "webhook.deleted": "Eliminó un aviso",
-};
+const ACTION_KEYS = [
+  "user.created",
+  "user.deleted",
+  "user.role_changed",
+  "user.password_reset",
+  "user.password_changed",
+  "token.created",
+  "token.revoked",
+  "group.created",
+  "group.deleted",
+  "group.members_changed",
+  "group.repositories_changed",
+  "repository.created",
+  "repository.deleted",
+  "repository.members_changed",
+  "artifact.published",
+  "artifact.deleted",
+  "package.published",
+  "package.yanked",
+  "package.unyanked",
+  "package.promoted",
+  "admission.policy_changed",
+  "retention.policy_changed",
+  "retention.applied",
+  "retention.gc",
+  "quota.changed",
+  "webhook.created",
+  "webhook.updated",
+  "webhook.deleted",
+] as const;
 
-function formatWhen(value: string): string {
+function formatWhen(value: string, locale: string): string {
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) {
     return value;
   }
-  return new Intl.DateTimeFormat("es", {
+  return new Intl.DateTimeFormat(locale.startsWith("es") ? "es" : "en", {
     dateStyle: "short",
     timeStyle: "medium",
   }).format(parsed);
 }
 
 export function AuditPage() {
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } = useAuditEvents(
     canManageUsers(user?.role),
@@ -72,12 +74,12 @@ export function AuditPage() {
   return (
     <div>
       <PageHeader
-        title="Auditoría"
-        description="Quién publicó, yankeó, cambió un grupo o creó un usuario. Las últimas 200 escrituras de la instancia."
+        title={t("audit.title")}
+        description={t("audit.description")}
         actions={
           <Button size="sm" variant="outline" onClick={() => void refetch()}>
             <RefreshCw className={isFetching ? "animate-spin" : ""} />
-            Actualizar
+            {t("common.refresh")}
           </Button>
         }
       />
@@ -93,19 +95,19 @@ export function AuditPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudo cargar el registro</AlertTitle>
+          <AlertTitle>{t("audit.loadFailed")}</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{error.message}</span>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
               <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
 
       {data && data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Aún no hay escrituras registradas.</p>
+        <p className="text-sm text-muted-foreground">{t("audit.empty")}</p>
       ) : null}
 
       {data && data.length > 0 ? (
@@ -113,21 +115,25 @@ export function AuditPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Cuándo</TableHead>
-                <TableHead>Quién</TableHead>
-                <TableHead>Acción</TableHead>
-                <TableHead>Destino</TableHead>
-                <TableHead>Detalle</TableHead>
+                <TableHead>{t("common.when")}</TableHead>
+                <TableHead>{t("common.who")}</TableHead>
+                <TableHead>{t("common.action")}</TableHead>
+                <TableHead>{t("common.target")}</TableHead>
+                <TableHead>{t("common.detail")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data.map((event) => (
                 <TableRow key={event.id}>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatWhen(event.created_at)}
+                    {formatWhen(event.created_at, i18n.resolvedLanguage ?? "en")}
                   </TableCell>
                   <TableCell className="font-medium">{event.actor}</TableCell>
-                  <TableCell>{ACTION_LABELS[event.action] ?? event.action}</TableCell>
+                  <TableCell>
+                    {ACTION_KEYS.includes(event.action as (typeof ACTION_KEYS)[number])
+                      ? t(`audit.${event.action}`)
+                      : event.action}
+                  </TableCell>
                   <TableCell>
                     <span className="text-muted-foreground">{event.target_kind}</span>
                     {event.target ? (

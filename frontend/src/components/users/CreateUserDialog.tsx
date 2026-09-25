@@ -1,11 +1,12 @@
 import { type FormEvent, useState } from "react";
 import { Loader2, UserPlus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import { useCreateUser } from "@/api/queries";
-import { PASSWORD_POLICY_HINT, passwordMeetsPolicy } from "@/auth/passwordPolicy";
+import { passwordMeetsPolicy } from "@/auth/passwordPolicy";
 import { roleLabel } from "@/auth/roles";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ import {
 const ROLE_OPTIONS: readonly RoleDto[] = ["admin", "developer", "reader"];
 
 export function CreateUserDialog() {
+  const { t } = useTranslation();
   const createUser = useCreateUser();
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("");
@@ -50,12 +52,12 @@ export function CreateUserDialog() {
     event.preventDefault();
 
     if (!passwordMeetsPolicy(password)) {
-      toast.error(PASSWORD_POLICY_HINT);
+      toast.error(t("password.policy"));
       return;
     }
 
     if (password !== confirmPassword) {
-      toast.error("La contraseña y su confirmación no coinciden");
+      toast.error(t("users.mismatch"));
       return;
     }
 
@@ -68,9 +70,9 @@ export function CreateUserDialog() {
       });
       resetForm();
       setOpen(false);
-      toast.success("Usuario creado");
+      toast.success(t("users.created"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo crear el usuario");
+      toast.error(err instanceof ApiError ? err.message : t("users.createFailed"));
     }
   }
 
@@ -87,20 +89,17 @@ export function CreateUserDialog() {
       <DialogTrigger asChild>
         <Button type="button">
           <UserPlus />
-          Nuevo usuario
+          {t("users.new")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={(event) => void onSubmit(event)} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>Nuevo usuario</DialogTitle>
-            <DialogDescription>
-              El nombre de usuario y el correo deben ser únicos. La contraseña debe cumplir la
-              política de la instancia.
-            </DialogDescription>
+            <DialogTitle>{t("users.new")}</DialogTitle>
+            <DialogDescription>{t("users.newHint")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="new-username">Usuario</Label>
+            <Label htmlFor="new-username">{t("users.username")}</Label>
             <Input
               id="new-username"
               value={username}
@@ -110,7 +109,7 @@ export function CreateUserDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-email">Correo</Label>
+            <Label htmlFor="new-email">{t("users.email")}</Label>
             <Input
               id="new-email"
               type="email"
@@ -121,7 +120,7 @@ export function CreateUserDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-password">Contraseña</Label>
+            <Label htmlFor="new-password">{t("users.password")}</Label>
             <Input
               id="new-password"
               type="password"
@@ -130,10 +129,10 @@ export function CreateUserDialog() {
               required
               autoComplete="new-password"
             />
-            <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_HINT}</p>
+            <p className="text-xs text-muted-foreground">{t("password.policy")}</p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-password-confirm">Confirmar contraseña</Label>
+            <Label htmlFor="new-password-confirm">{t("users.confirmPassword")}</Label>
             <Input
               id="new-password-confirm"
               type="password"
@@ -144,7 +143,7 @@ export function CreateUserDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-role">Rol</Label>
+            <Label htmlFor="new-role">{t("users.role")}</Label>
             <Select value={role} onValueChange={(value) => setRole(value as RoleDto)}>
               <SelectTrigger id="new-role" className="w-full">
                 <SelectValue />
@@ -161,7 +160,7 @@ export function CreateUserDialog() {
           <DialogFooter>
             <Button type="submit" disabled={createUser.isPending}>
               {createUser.isPending ? <Loader2 className="animate-spin" /> : <UserPlus />}
-              {createUser.isPending ? "Creando…" : "Crear usuario"}
+              {createUser.isPending ? t("users.creating") : t("users.create")}
             </Button>
           </DialogFooter>
         </form>

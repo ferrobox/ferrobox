@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import { useRepositories } from "@/api/queries";
@@ -16,6 +17,7 @@ export function AlloyMemberPicker({
   onChange: (ids: string[]) => void;
   excludeId?: string;
 }) {
+  const { t } = useTranslation();
   const repositoriesQuery = useRepositories();
 
   const eligibleMembers = useMemo(() => {
@@ -40,12 +42,9 @@ export function AlloyMemberPicker({
 
   return (
     <div className="grid gap-2">
-      <Label>Miembros</Label>
+      <Label>{t("repositories.members")}</Label>
       {eligibleMembers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No hay repositorios Forge o Mirror de este ecosistema. Crea uno primero
-          para poder agregarlo.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("repositories.membersEmpty")}</p>
       ) : (
         <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border p-2">
           {eligibleMembers.map((repository) => {
@@ -76,8 +75,7 @@ export function AlloyMemberPicker({
         </ul>
       )}
       <p className="text-xs text-muted-foreground">
-        El orden de selección es el de resolución: el primer miembro gana si hay
-        la misma versión en varios.
+        {t("repositories.membersHint")}
       </p>
     </div>
   );

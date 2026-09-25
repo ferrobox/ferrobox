@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -24,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const GROUP_ROLES: readonly Exclude<RoleDto, "admin">[] = ["reader", "developer"];
 
 export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }) {
+  const { t } = useTranslation();
   const groupsQuery = useGroups();
   const accessQuery = useRepositoryAccess(repositoryId, true);
   const saveAccess = useSetRepositoryAccess(repositoryId);
@@ -52,11 +54,11 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
       setDraft(null);
       toast.success(
         grants.length === 0
-          ? "El repositorio vuelve a ser visible según el rol de instancia"
-          : "Acceso del repositorio actualizado",
+          ? t("access.unrestricted")
+          : t("access.updated"),
       );
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo guardar el acceso");
+      toast.error(err instanceof ApiError ? err.message : t("access.saveFailed"));
     }
   }
 

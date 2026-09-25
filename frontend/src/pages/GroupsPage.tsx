@@ -1,4 +1,5 @@
 import { AlertCircle, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/table";
 
 export function GroupsPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data, isPending, isError, error, refetch, isFetching } = useGroups();
@@ -35,9 +37,9 @@ export function GroupsPage() {
   async function onDelete(groupId: string, name: string) {
     try {
       await deleteGroup.mutateAsync(groupId);
-      toast.success(`Grupo «${name}» eliminado`);
+      toast.success(t("groups.deleted", { name }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el grupo");
+      toast.error(err instanceof ApiError ? err.message : t("groups.deleteFailed"));
       throw err;
     }
   }
@@ -45,8 +47,8 @@ export function GroupsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Grupos"
-        description="Pulsa un grupo para ver sus miembros y repositorios. Editar cambia quién pertenece y a qué tiene acceso. Un miembro de grupo solo ve esos repositorios. Quien no esté en ningún grupo sigue el rol de la instancia en los repositorios sin restringir."
+        title={t("groups.title")}
+        description={t("groups.description")}
         actions={<CreateGroupDialog />}
       />
 
@@ -61,12 +63,12 @@ export function GroupsPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudieron cargar los grupos</AlertTitle>
+          <AlertTitle>{t("groups.loadFailed")}</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{error.message}</span>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
               <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -74,7 +76,7 @@ export function GroupsPage() {
 
       {data && data.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Todavía no hay grupos. Crea uno para restringir el acceso a repositorios concretos.
+          {t("groups.noneYet")}
         </p>
       ) : null}
 
@@ -83,10 +85,10 @@ export function GroupsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Grupo</TableHead>
-                <TableHead>Miembros</TableHead>
-                <TableHead>Repositorios</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
+                <TableHead>{t("groups.title")}</TableHead>
+                <TableHead>{t("common.members")}</TableHead>
+                <TableHead>{t("nav.repositories")}</TableHead>
+                <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -106,10 +108,10 @@ export function GroupsPage() {
                     </Link>
                   </TableCell>
                   <TableCell className="whitespace-normal">
-                    <NameChips names={group.member_names} empty="Ninguno" />
+                    <NameChips names={group.member_names} empty={t("common.none")} />
                   </TableCell>
                   <TableCell className="whitespace-normal">
-                    <NameChips names={group.repository_names} empty="Ninguno" />
+                    <NameChips names={group.repository_names} empty={t("common.none")} />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
@@ -122,11 +124,11 @@ export function GroupsPage() {
                         }}
                       >
                         <Pencil />
-                        Editar
+                        {t("common.edit")}
                       </Button>
                       <ConfirmDeleteDialog
-                        title={`Eliminar «${group.name}»`}
-                        description="Se quitarán los miembros y el acceso a repositorios de este grupo. Los repositorios no se borran."
+                        title={t("repositories.deleteTitle", { name: group.name })}
+                        description={t("groups.deleteBody")}
                         pending={deleteGroup.isPending}
                         onConfirm={() => onDelete(group.id, group.name)}
                         trigger={
@@ -136,7 +138,7 @@ export function GroupsPage() {
                             onClick={(event) => event.stopPropagation()}
                           >
                             <Trash2 />
-                            Eliminar
+                            {t("common.delete")}
                           </Button>
                         }
                       />

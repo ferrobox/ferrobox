@@ -1,5 +1,6 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { ArrowRightLeft, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -56,6 +57,7 @@ export function PromotePackageDialog({
   artifact: ArtifactResponse;
   versionLabel: string;
 }) {
+  const { t } = useTranslation();
   const { data: repositories } = useRepositories();
   const promote = usePromotePackage(sourceRepositoryId);
   const [open, setOpen] = useState(false);
@@ -69,7 +71,7 @@ export function PromotePackageDialog({
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!targetId) {
-      toast.error("Elige el Forge de destino");
+      toast.error(t("promote.chooseForge"));
       return;
     }
     try {
@@ -88,12 +90,17 @@ export function PromotePackageDialog({
       setOpen(false);
       setTargetId("");
       toast.success(
-        `Copiado a «${targetName}»: ${outcome.artifacts_copied} ${
-          outcome.artifacts_copied === 1 ? "artefacto" : "artefactos"
-        }`,
+        t("promote.copied", {
+          name: targetName,
+          count: outcome.artifacts_copied,
+          kind:
+            outcome.artifacts_copied === 1
+              ? t("promote.artifact")
+              : t("promote.artifacts"),
+        }),
       );
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo promover la versión");
+      toast.error(err instanceof ApiError ? err.message : t("promote.failed"));
     }
   }
 
@@ -119,24 +126,21 @@ export function PromotePackageDialog({
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm">
           <ArrowRightLeft />
-          Promover
+          {t("promote.action")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={(event) => void onSubmit(event)}>
           <DialogHeader>
-            <DialogTitle>Promover a otro Forge</DialogTitle>
-            <DialogDescription>
-              Copia {subject} a un Forge del mismo ecosistema. La versión de destino
-              queda publicada de nuevo; un yank en origen no se hereda.
-            </DialogDescription>
+            <DialogTitle>{t("promote.title")}</DialogTitle>
+            <DialogDescription>{t("promote.hint", { subject })}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="promote-target">Forge destino</Label>
+              <Label htmlFor="promote-target">{t("promote.target")}</Label>
               <Select value={targetId || undefined} onValueChange={setTargetId}>
                 <SelectTrigger id="promote-target" className="w-full">
-                  <SelectValue placeholder="Selecciona un Forge" />
+                  <SelectValue placeholder={t("promote.selectForge")} />
                 </SelectTrigger>
                 <SelectContent>
                   {targets.map((repository) => (
@@ -151,7 +155,7 @@ export function PromotePackageDialog({
           <DialogFooter>
             <Button type="submit" disabled={!targetId || promote.isPending}>
               {promote.isPending ? <Loader2 className="animate-spin" /> : <ArrowRightLeft />}
-              Promover
+              {t("promote.action")}
             </Button>
           </DialogFooter>
         </form>

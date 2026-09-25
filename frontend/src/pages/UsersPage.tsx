@@ -1,4 +1,5 @@
 import { AlertCircle, KeyRound, RefreshCw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -34,6 +35,7 @@ import {
 const ROLE_OPTIONS: readonly RoleDto[] = ["admin", "developer", "reader"];
 
 export function UsersPage() {
+  const { t } = useTranslation();
   const { user, updateCurrentUser } = useAuth();
   const { data, isPending, isError, error, refetch, isFetching } = useUsers();
   const deleteUser = useDeleteUser();
@@ -49,18 +51,18 @@ export function UsersPage() {
       if (updated.id === user?.id) {
         updateCurrentUser(updated);
       }
-      toast.success(`Rol de «${name}» actualizado`);
+      toast.success(t("users.roleUpdated", { name }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo cambiar el rol");
+      toast.error(err instanceof ApiError ? err.message : t("users.roleFailed"));
     }
   }
 
   async function onDelete(userId: string, name: string) {
     try {
       await deleteUser.mutateAsync(userId);
-      toast.success(`Usuario «${name}» eliminado`);
+      toast.success(t("users.deleted", { name }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el usuario");
+      toast.error(err instanceof ApiError ? err.message : t("users.deleteFailed"));
       throw err;
     }
   }
@@ -68,8 +70,8 @@ export function UsersPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Usuarios"
-        description="Crea cuentas, asigna roles y restablece contraseñas. Si alguien olvida la suya, un administrador la restablece desde aquí."
+        title={t("users.title")}
+        description={t("users.description")}
         actions={<CreateUserDialog />}
       />
 
@@ -84,12 +86,12 @@ export function UsersPage() {
       {isError ? (
         <Alert variant="destructive">
           <AlertCircle />
-          <AlertTitle>No se pudieron cargar los usuarios</AlertTitle>
+          <AlertTitle>{t("users.loadFailed")}</AlertTitle>
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{error.message}</span>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
               <RefreshCw className={isFetching ? "animate-spin" : ""} />
-              Reintentar
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -100,10 +102,10 @@ export function UsersPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Usuario</TableHead>
-                <TableHead>Correo</TableHead>
-                <TableHead>Rol</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
+                <TableHead>{t("users.username")}</TableHead>
+                <TableHead>{t("users.email")}</TableHead>
+                <TableHead>{t("users.role")}</TableHead>
+                <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -128,7 +130,7 @@ export function UsersPage() {
                         }}
                       >
                         <SelectTrigger
-                          aria-label={`Rol de ${entry.username}`}
+                          aria-label={t("users.roleOf", { name: entry.username })}
                           className="h-8 w-[140px]"
                         >
                           <SelectValue />
@@ -150,19 +152,19 @@ export function UsersPage() {
                           trigger={
                             <Button variant="ghost" size="sm" disabled={isSelf}>
                               <KeyRound />
-                              Restablecer
+                              {t("users.reset")}
                             </Button>
                           }
                         />
                         <ConfirmDeleteDialog
-                          title={`Eliminar «${entry.username}»`}
-                          description="Se revocarán sus tokens de API. Esta acción no se puede deshacer."
+                          title={t("repositories.deleteTitle", { name: entry.username })}
+                          description={t("users.deleteTokens")}
                           pending={deleteUser.isPending}
                           onConfirm={() => onDelete(entry.id, entry.username)}
                           trigger={
                             <Button variant="ghost" size="sm" disabled={isSelf}>
                               <Trash2 />
-                              Eliminar
+                              {t("common.delete")}
                             </Button>
                           }
                         />

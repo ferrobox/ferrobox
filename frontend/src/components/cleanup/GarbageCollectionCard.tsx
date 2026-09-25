@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Eraser, FlaskConical } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function GarbageCollectionCard() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canWrite = canWriteArtifacts(user?.role);
   const dryRun = useDryRunGarbageCollection();
@@ -27,9 +29,9 @@ export function GarbageCollectionCard() {
     try {
       const result = await dryRun.mutateAsync();
       setPreview(result);
-      toast.success(previewGarbageMessage(result));
+      toast.success(previewGarbageMessage(result, t));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo simular la recolección");
+      toast.error(err instanceof ApiError ? err.message : t("gc.simulateFailed"));
     }
   }
 
@@ -37,9 +39,9 @@ export function GarbageCollectionCard() {
     try {
       const result = await collect.mutateAsync();
       setPreview(result);
-      toast.success(appliedGarbageMessage(result));
+      toast.success(appliedGarbageMessage(result, t));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo recolectar la basura");
+      toast.error(err instanceof ApiError ? err.message : t("gc.applyFailed"));
       throw err;
     }
   }
@@ -47,12 +49,8 @@ export function GarbageCollectionCard() {
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
-        <CardTitle>Recolección de basura</CardTitle>
-        <CardDescription>
-          Borra de disco los binarios que ya no están en ningún catálogo (versiones sacadas por
-          retención, restos de un Eliminar, capas OCI sin manifiesto). Simular no toca nada.
-          Install y publish siguen disponibles mientras corre.
-        </CardDescription>
+        <CardTitle>{t("gc.title")}</CardTitle>
+        <CardDescription>{t("gc.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {canWrite ? (
@@ -64,38 +62,38 @@ export function GarbageCollectionCard() {
               onClick={() => void onSimulate()}
             >
               <FlaskConical />
-              {dryRun.isPending ? "Simulando…" : "Simular"}
+              {dryRun.isPending ? t("common.simulating") : t("common.simulate")}
             </Button>
             <ConfirmDeleteDialog
-              title="Recolectar basura"
+              title={t("gc.collectTitle")}
               description={
                 preview === null
-                  ? "Se borrarán de disco los binarios huérfanos de toda la instancia. Simula primero para ver la lista. Esta acción no se puede deshacer."
-                  : `${previewGarbageMessage(preview)} Esta acción no se puede deshacer.`
+                  ? t("gc.applyHint")
+                  : t("gc.applyHintPreview", { preview: previewGarbageMessage(preview, t) })
               }
-              confirmLabel="Recolectar"
+              confirmLabel={t("gc.collect")}
               pending={collect.isPending}
               onConfirm={onCollect}
               trigger={
                 <Button type="button" variant="destructive" disabled={preview === null}>
                   <Eraser />
-                  Recolectar ahora
+                  {t("gc.collectNow")}
                 </Button>
               }
             />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Solo un usuario Developer o Admin puede simular y recolectar.
+            {t("gc.readOnly")}
           </p>
         )}
         {preview ? (
           <CleanupPreviewTable
             preview={preview}
             showRepository
-            appliedLabel="Recolectado"
+            appliedLabel={t("gc.collected")}
             summary={
-              preview.dry_run ? previewGarbageMessage(preview) : appliedGarbageMessage(preview)
+              preview.dry_run ? previewGarbageMessage(preview, t) : appliedGarbageMessage(preview, t)
             }
           />
         ) : null}

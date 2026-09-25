@@ -1,16 +1,19 @@
 import { type FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Package } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function LoginPage() {
   const { token, login, isLoading } = useAuth();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState("admin");
@@ -34,8 +37,7 @@ export function LoginPage() {
       await login(username.trim(), password);
       navigate(from, { replace: true });
     } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : "No se pudo iniciar sesión";
+      const message = error instanceof ApiError ? error.message : t("login.failed");
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -57,17 +59,19 @@ export function LoginPage() {
         className="pointer-events-none absolute -right-16 bottom-16 size-64 rounded-full bg-accent/40 blur-3xl"
       />
 
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+
       <div className="relative w-full max-w-md animate-in fade-in slide-in-from-bottom-2 duration-500">
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
             <Package className="size-6" strokeWidth={2.25} />
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            FerroBox
+            {t("app.name")}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Inicia sesión para gestionar repositorios y tokens de API.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{t("login.subtitle")}</p>
         </div>
 
         <form
@@ -75,7 +79,7 @@ export function LoginPage() {
           className="space-y-5 rounded-xl border border-border/80 bg-card/90 p-6 shadow-sm backdrop-blur"
         >
           <div className="space-y-2">
-            <Label htmlFor="username">Usuario</Label>
+            <Label htmlFor="username">{t("login.username")}</Label>
             <Input
               id="username"
               autoComplete="username"
@@ -85,7 +89,7 @@ export function LoginPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">Contraseña</Label>
+            <Label htmlFor="password">{t("login.password")}</Label>
             <Input
               id="password"
               type="password"
@@ -96,11 +100,9 @@ export function LoginPage() {
             />
           </div>
           <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? "Entrando…" : "Entrar"}
+            {submitting ? t("login.submitting") : t("login.submit")}
           </Button>
-          <p className="text-center text-xs text-muted-foreground">
-            Si olvidaste la contraseña, pide a un administrador que la restablezca.
-          </p>
+          <p className="text-center text-xs text-muted-foreground">{t("login.forgot")}</p>
         </form>
       </div>
     </div>

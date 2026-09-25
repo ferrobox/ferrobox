@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, FlaskConical, Save, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -50,11 +51,12 @@ function isMissingMigration(message: string): boolean {
 function payloadFromFields(
   keepLast: string,
   keepDays: string,
+  invalidMessage: string,
 ): RetentionPolicyRequest | undefined {
   const last = parseLimit(keepLast);
   const days = parseLimit(keepDays);
   if (last === undefined || days === undefined) {
-    toast.error("Los límites deben ser números enteros, o quedar vacíos");
+    toast.error(invalidMessage);
     return undefined;
   }
   return { keep_last: last ?? undefined, keep_days: days ?? undefined };
@@ -67,17 +69,14 @@ export function RetentionPanel({
   repositoryId: string;
   canWrite: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError, error } = useRetentionPolicy(repositoryId, true);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Retención</CardTitle>
-        <CardDescription>
-          Conserva las N versiones más recientes y/o las publicadas en los últimos N días. Vacío =
-          no hay límite. Aplicar las saca del catálogo; install y publish no se bloquean. El disco
-          se libera en Configuración → Recolección de basura.
-        </CardDescription>
+        <CardTitle>{t("retention.title")}</CardTitle>
+        <CardDescription>{t("retention.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isPending ? <Skeleton className="h-24 w-full rounded-md" /> : null}
@@ -87,10 +86,9 @@ export function RetentionPanel({
           ) : (
             <Alert variant="destructive">
               <AlertCircle />
-              <AlertTitle>No se pudo cargar la política guardada</AlertTitle>
+              <AlertTitle>{t("retention.loadFailed")}</AlertTitle>
               <AlertDescription>
-                {error.message}. Puedes configurar y simular igual; guardar y aplicar necesitan la
-                tabla de políticas.
+                {t("retention.loadFailedHint", { message: error.message })}
               </AlertDescription>
             </Alert>
           )
@@ -108,18 +106,17 @@ export function RetentionPanel({
 }
 
 function MigrationAlert() {
+  const { t } = useTranslation();
   return (
     <Alert variant="destructive">
       <AlertCircle />
-      <AlertTitle>Falta la migración SQL</AlertTitle>
+      <AlertTitle>{t("retention.migrationTitle")}</AlertTitle>
       <AlertDescription className="gap-2">
-        <p>
-          La tabla de políticas no existe. Desde el directorio <code>backend/</code> ejecuta:
-        </p>
+        <p>{t("retention.migrationBody")}</p>
         <pre className="mt-1 w-full overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
           sqlx migrate run
         </pre>
-        <p>Luego reinicia el backend. Simular funciona sin migrar; guardar y aplicar, no.</p>
+        <p>{t("retention.migrationHint")}</p>
       </AlertDescription>
     </Alert>
   );
@@ -134,6 +131,7 @@ function RetentionForm({
   canWrite: boolean;
   policy: RetentionPolicyResponse;
 }) {
+  const { t } = useTranslation();
   const savePolicy = useSaveRetentionPolicy(repositoryId);
   const dryRun = useDryRunRetention(repositoryId);
   const applyRetention = useApplyRetention(repositoryId);
@@ -157,22 +155,22 @@ function RetentionForm({
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const payload = payloadFromFields(keepLast, keepDays);
+    const payload = payloadFromFields(keepLast, keepDays, t("retention.limitsInvalid"));
     if (!payload) {
       return;
     }
     try {
       await savePolicy.mutateAsync(payload);
       setSchemaError(false);
-      toast.success("Política guardada. No se ha sacado nada del catálogo; pulsa Simular para ver el efecto.");
+      toast.success(t("retention.saved"));
     } catch (err) {
       rememberSchemaError(err);
-      toast.error(err instanceof ApiError ? err.message : "No se pudo guardar la política");
+      toast.error(err instanceof ApiError ? err.message : t("retention.saveFailed"));
     }
   }
 
   async function onSimulate() {
-    const payload = payloadFromFields(keepLast, keepDays);
+    const payload = payloadFromFields(keepLast, keepDays, t("retention.limitsInvalid"));
     if (!payload) {
       return;
     }
@@ -180,34 +178,34 @@ function RetentionForm({
       const result = await dryRun.mutateAsync(payload);
       setPreview(result);
       setSchemaError(false);
-      toast.success(previewCatalogMessage(result));
+      toast.success(previewCatalogMessage(result, t));
     } catch (err) {
       rememberSchemaError(err);
-      toast.error(err instanceof ApiError ? err.message : "No se pudo simular la retención");
+      toast.error(err instanceof ApiError ? err.message : t("retention.simulateFailed"));
     }
   }
 
   async function onApply() {
-    const payload = payloadFromFields(keepLast, keepDays);
+    const payload = payloadFromFields(keepLast, keepDays, t("retention.limitsInvalid"));
     if (!payload) {
-      throw new Error("política inválida");
+      throw new Error(t("retention.limitsInvalid"));
     }
     try {
       const result = await applyRetention.mutateAsync(payload);
       setPreview(result);
       setSchemaError(false);
-      toast.success(appliedCatalogMessage(result));
+      toast.success(appliedCatalogMessage(result, t));
     } catch (err) {
       rememberSchemaError(err);
-      toast.error(err instanceof ApiError ? err.message : "No se pudo aplicar la retención");
+      toast.error(err instanceof ApiError ? err.message : t("retention.applyFailed"));
       throw err;
     }
   }
 
   const applyDescription =
     preview === null
-      ? "Se guardará la política y se sacarán del catálogo las versiones fuera de ella. El disco no se borra hasta la recolección de basura. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer."
-      : `${previewCatalogMessage(preview)} Se guardará la política y se sacará esa lista del catálogo. El disco no se borra hasta la recolección de basura. En un Mirror, el siguiente install puede volver a cachearlas. Esta acción no se puede deshacer.`;
+      ? t("retention.applyHint")
+      : t("retention.applyWithPreview", { preview: previewCatalogMessage(preview, t) });
 
   return (
     <form onSubmit={(event) => void onSave(event)} className="space-y-5">
@@ -215,25 +213,25 @@ function RetentionForm({
 
       <ol className="space-y-4 text-sm">
         <li className="space-y-3">
-          <p className="font-medium text-foreground">1. Configurar</p>
+          <p className="font-medium text-foreground">{t("retention.step1")}</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="keep-last">Últimas versiones por paquete</Label>
+              <Label htmlFor="keep-last">{t("retention.keepLast")}</Label>
               <Input
                 id="keep-last"
                 inputMode="numeric"
-                placeholder="Sin límite"
+                placeholder={t("retention.noLimit")}
                 value={keepLast}
                 onChange={(event) => onFieldsChange(event.target.value, keepDays)}
                 disabled={!canWrite}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="keep-days">Días a conservar</Label>
+              <Label htmlFor="keep-days">{t("retention.keepDays")}</Label>
               <Input
                 id="keep-days"
                 inputMode="numeric"
-                placeholder="Sin límite"
+                placeholder={t("retention.noLimit")}
                 value={keepDays}
                 onChange={(event) => onFieldsChange(keepLast, event.target.value)}
                 disabled={!canWrite}
@@ -243,10 +241,8 @@ function RetentionForm({
         </li>
         {canWrite ? (
           <li className="space-y-3">
-            <p className="font-medium text-foreground">2. Simular</p>
-            <p className="text-muted-foreground">
-              Usa los números del formulario, no hace falta guardar. No saca nada del catálogo.
-            </p>
+            <p className="font-medium text-foreground">{t("retention.step2")}</p>
+            <p className="text-muted-foreground">{t("retention.step2Hint")}</p>
             <Button
               type="button"
               variant="outline"
@@ -254,12 +250,12 @@ function RetentionForm({
               onClick={() => void onSimulate()}
             >
               <FlaskConical />
-              {dryRun.isPending ? "Simulando…" : "Simular"}
+              {dryRun.isPending ? t("common.simulating") : t("common.simulate")}
             </Button>
           </li>
         ) : (
           <p className="text-muted-foreground">
-            Solo lectura: un usuario Developer o Admin puede simular y aplicar.
+            {t("retention.readOnly")}
           </p>
         )}
       </ol>
@@ -267,32 +263,31 @@ function RetentionForm({
       {preview ? (
         <CleanupPreviewTable
           preview={preview}
-          summary={preview.dry_run ? previewCatalogMessage(preview) : appliedCatalogMessage(preview)}
+          summary={
+            preview.dry_run ? previewCatalogMessage(preview, t) : appliedCatalogMessage(preview, t)
+          }
         />
       ) : null}
 
       {canWrite ? (
         <div className="space-y-3">
-          <p className="text-sm font-medium text-foreground">3. Aplicar o solo guardar</p>
-          <p className="text-sm text-muted-foreground">
-            Aplicar guarda estos números y saca del catálogo lo que mostró Simular. Simula primero.
-            Guardar no toca el catálogo. El disco se libera después, en Configuración.
-          </p>
+          <p className="text-sm font-medium text-foreground">{t("retention.step3")}</p>
+          <p className="text-sm text-muted-foreground">{t("retention.step3Hint")}</p>
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="outline" disabled={savePolicy.isPending}>
               <Save />
-              {savePolicy.isPending ? "Guardando…" : "Guardar sin aplicar"}
+              {savePolicy.isPending ? t("common.saving") : t("retention.saveNoApply")}
             </Button>
             <ConfirmDeleteDialog
-              title="Aplicar retención"
+              title={t("retention.applyTitle")}
               description={applyDescription}
-              confirmLabel="Aplicar"
+              confirmLabel={t("common.apply")}
               pending={applyRetention.isPending}
               onConfirm={onApply}
               trigger={
                 <Button type="button" variant="destructive" disabled={preview === null}>
                   <Trash2 />
-                  Aplicar ahora
+                  {t("retention.applyNow")}
                 </Button>
               }
             />
