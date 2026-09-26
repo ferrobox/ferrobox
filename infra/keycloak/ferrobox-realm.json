@@ -38,7 +38,11 @@
         "http://127.0.0.1:5173/auth/oidc/callback",
         "http://localhost:5173/auth/oidc/callback",
         "http://127.0.0.1:5173/api/auth/oidc/callback",
-        "http://localhost:5173/api/auth/oidc/callback"
+        "http://localhost:5173/api/auth/oidc/callback",
+        "http://127.0.0.1:3000/login",
+        "http://localhost:3000/login",
+        "http://127.0.0.1:5173/login",
+        "http://localhost:5173/login"
       ],
       "webOrigins": [
         "http://127.0.0.1:3000",
