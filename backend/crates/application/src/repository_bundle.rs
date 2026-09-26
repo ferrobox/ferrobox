@@ -196,7 +196,8 @@ impl RepositoryBundleService {
                     continue;
                 };
                 let checksum = artifact.checksum().to_string();
-                if let std::collections::hash_map::Entry::Vacant(slot) = blobs.entry(checksum.clone())
+                if let std::collections::hash_map::Entry::Vacant(slot) =
+                    blobs.entry(checksum.clone())
                 {
                     let content = self.storage.get(&storage_key_for(artifact_id)).await?;
                     let actual = sha256_checksum(&content);
@@ -328,7 +329,12 @@ impl RepositoryBundleService {
             .await?;
 
         let written = self
-            .write_new_blobs(repository.id(), &manifest.artifacts, &blobs, &mut checksum_to_id)
+            .write_new_blobs(
+                repository.id(),
+                &manifest.artifacts,
+                &blobs,
+                &mut checksum_to_id,
+            )
             .await?;
         let indexed = self
             .write_packages(
@@ -398,15 +404,11 @@ impl RepositoryBundleService {
             let version = PackageVersion::parse(package.version.clone())
                 .map_err(|err| BundleError::InvalidBundle(err.to_string()))?;
             let coordinate = PackageCoordinate::new(ecosystem, name, version);
-            if self
+            let already = self
                 .package_index
                 .artifact_for(repository_id, &coordinate)
                 .await?
-                .is_some()
-            {
-                count.skipped += 1;
-                continue;
-            }
+                .is_some();
             let entry = BASE64
                 .decode(package.index_entry_b64.as_bytes())
                 .map_err(|err| BundleError::InvalidBundle(err.to_string()))?;
@@ -416,10 +418,15 @@ impl RepositoryBundleService {
                 })?),
                 None => None,
             };
+            let entry = remap_index_entry(Bytes::from(entry), artifact_id);
             self.package_index
-                .upsert_entry(repository_id, &coordinate, artifact_id, Bytes::from(entry))
+                .upsert_entry(repository_id, &coordinate, artifact_id, entry)
                 .await?;
-            count.imported += 1;
+            if already {
+                count.skipped += 1;
+            } else {
+                count.imported += 1;
+            }
         }
         Ok(count)
     }
@@ -432,10 +439,7 @@ struct WriteCount {
     bytes_copied: u64,
 }
 
-fn write_bundle(
-    manifest: &[u8],
-    blobs: &HashMap<String, Bytes>,
-) -> Result<Bytes, BundleError> {
+fn write_bundle(manifest: &[u8], blobs: &HashMap<String, Bytes>) -> Result<Bytes, BundleError> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     {
         let mut archive = Builder::new(&mut encoder);
@@ -508,6 +512,37 @@ fn read_bundle(archive: &[u8]) -> Result<(BundleManifest, HashMap<String, Bytes>
     Ok((manifest, blobs))
 }
 
+/// El índice del origen guarda UUID locales en `files[].artifact_id`.
+/// Tras copiar el blob, esas claves tienen que apuntar al artefacto
+/// nuevo o el destino lista vacío y NuGet no puede bajar el `.nupkg`.
+fn remap_index_entry(entry: Bytes, dest_id: Option<ferrobox_domain::ids::ArtifactId>) -> Bytes {
+    let Some(dest_id) = dest_id else {
+        return entry;
+    };
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&entry) else {
+        return entry;
+    };
+    let dest = dest_id.to_string();
+    if let Some(files) = value
+        .get_mut("files")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for file in files {
+            if let Some(id) = file.get_mut("artifact_id") {
+                *id = serde_json::Value::String(dest.clone());
+            }
+        }
+    }
+    if value
+        .get("artifact_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+    {
+        value["artifact_id"] = serde_json::Value::String(dest);
+    }
+    serde_json::to_vec(&value).map(Bytes::from).unwrap_or(entry)
+}
+
 fn ecosystem_from_label(label: &str) -> Option<PackageEcosystem> {
     match label {
         "generic" => Some(PackageEcosystem::Generic),
@@ -535,10 +570,10 @@ mod tests {
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
-    use crate::prefetch_package::PrefetchPackageUseCase;
-    use crate::publish_artifact::PublishArtifactUseCase;
     use crate::packaging::PackagingRegistry;
     use crate::packaging::cargo::CargoPackagingStrategy;
+    use crate::prefetch_package::PrefetchPackageUseCase;
+    use crate::publish_artifact::PublishArtifactUseCase;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore,
         InMemoryRepositoryStore, InMemoryStorage,
@@ -709,12 +744,7 @@ mod tests {
         .await
         .unwrap();
 
-        let bundles = service(
-            repositories,
-            artifacts,
-            index.clone(),
-            storage,
-        );
+        let bundles = service(repositories, artifacts, index.clone(), storage);
         let exported = bundles.export(source.id()).await.unwrap();
         assert_eq!(exported.packages, 1);
         assert_eq!(exported.artifacts, 1);
@@ -726,11 +756,86 @@ mod tests {
             PackageName::parse("demo").unwrap(),
             PackageVersion::parse("1.2.3").unwrap(),
         );
-        assert!(index
-            .artifact_for(target.id(), &coordinate)
+        assert!(
+            index
+                .artifact_for(target.id(), &coordinate)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn import_rewrites_nuget_file_artifact_ids_and_repairs_a_second_push() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let source = forge("nuget-src", PackageEcosystem::Nuget);
+        let target = forge("nuget-dst", PackageEcosystem::Nuget);
+        repositories.save(&source).await.unwrap();
+        repositories.save(&target).await.unwrap();
+
+        let body = Bytes::from_static(b"nupkg-bytes");
+        let checksum = sha256_checksum(&body);
+        let artifact = Artifact::new(source.id(), checksum, body.len() as u64);
+        storage
+            .put(&storage_key_for(artifact.id()), body)
+            .await
+            .unwrap();
+        artifacts.save(&artifact).await.unwrap();
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Nuget,
+            PackageName::parse("demo").unwrap(),
+            PackageVersion::parse("1.0.0").unwrap(),
+        );
+        let entry = format!(
+            r#"{{"id":"Demo","version":"1.0.0","files":[{{"filename":"Demo.1.0.0.nupkg","artifact_id":"{}","yanked":false}}]}}"#,
+            artifact.id()
+        );
+        index
+            .upsert_entry(
+                source.id(),
+                &coordinate,
+                Some(artifact.id()),
+                Bytes::from(entry),
+            )
+            .await
+            .unwrap();
+
+        let bundles = service(repositories, artifacts.clone(), index.clone(), storage);
+        let exported = bundles.export(source.id()).await.unwrap();
+        let first = bundles
+            .import(target.id(), exported.bytes.clone())
+            .await
+            .unwrap();
+        assert_eq!(first.packages_imported, 1);
+        assert_eq!(first.artifacts_imported, 1);
+
+        let dest_artifact = artifacts
+            .find_by_repository_id(target.id())
             .await
             .unwrap()
-            .is_some());
+            .into_iter()
+            .next()
+            .expect("dest blob");
+        let dest_entry = index
+            .list_entries(target.id())
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("dest index");
+        let parsed: serde_json::Value = serde_json::from_slice(&dest_entry.entry).unwrap();
+        assert_eq!(
+            parsed["files"][0]["artifact_id"].as_str(),
+            Some(dest_artifact.id().to_string().as_str())
+        );
+        assert_ne!(dest_artifact.id(), artifact.id());
+
+        let second = bundles.import(target.id(), exported.bytes).await.unwrap();
+        assert_eq!(second.packages_imported, 0);
+        assert_eq!(second.skipped, 2);
     }
 
     #[tokio::test]

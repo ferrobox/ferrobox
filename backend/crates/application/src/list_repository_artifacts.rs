@@ -397,25 +397,43 @@ fn apply_index_item(
     }
 
     let mut mapped_file = false;
+    let mut filename = None;
     for file in &meta.files {
         if let Ok(uuid) = Uuid::parse_str(&file.artifact_id) {
-            let filename = file
+            let file_name = file
                 .filename
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(ToOwned::to_owned);
-            names_by_artifact.insert(ArtifactId::from(uuid), ArtifactIndexMeta {
-                name: name.clone(),
-                version: version.clone(),
-                yanked: meta.yanked || file.yanked,
-                filename,
-            });
+            if filename.is_none() {
+                filename.clone_from(&file_name);
+            }
+            names_by_artifact.insert(
+                ArtifactId::from(uuid),
+                ArtifactIndexMeta {
+                    name: name.clone(),
+                    version: version.clone(),
+                    yanked: meta.yanked || file.yanked,
+                    filename: file_name,
+                },
+            );
             mapped_file = true;
         }
     }
 
-    if !mapped_file {
+    // Tras un import, `files[].artifact_id` puede ser el UUID del origen.
+    // La columna del índice es el artefacto del destino.
+    if mapped_file {
+        names_by_artifact
+            .entry(item.artifact_id)
+            .or_insert(ArtifactIndexMeta {
+                name,
+                version,
+                yanked: meta.yanked,
+                filename,
+            });
+    } else {
         let incoming = ArtifactIndexMeta {
             name,
             version,
@@ -626,6 +644,48 @@ mod tests {
         .unwrap();
 
         assert!(result[0].yanked());
+    }
+
+    #[tokio::test]
+    async fn lists_nuget_when_files_still_point_at_the_source_id() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("nuget-dest").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Nuget,
+        )
+        .unwrap();
+        repository_store.save(&repository).await.unwrap();
+        let artifact = Artifact::new(repository.id(), checksum(), 810);
+        artifact_store.save(&artifact).await.unwrap();
+        let source_only = Uuid::now_v7();
+        let entry = format!(
+            r#"{{"id":"Demo","version":"1.0.0","files":[{{"filename":"Demo.1.0.0.nupkg","artifact_id":"{source_only}","yanked":false}}]}}"#
+        );
+        package_index_store
+            .upsert_entry(
+                repository.id(),
+                &PackageCoordinate::new(
+                    PackageEcosystem::Nuget,
+                    PackageName::parse("demo").unwrap(),
+                    PackageVersion::parse("1.0.0").unwrap(),
+                ),
+                Some(artifact.id()),
+                Bytes::from(entry),
+            )
+            .await
+            .unwrap();
+
+        let result = use_case(repository_store, artifact_store, package_index_store)
+            .execute(repository.id())
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].package_name(), Some("demo"));
+        assert_eq!(result[0].filename(), Some("Demo.1.0.0.nupkg"));
     }
 
     #[tokio::test]
