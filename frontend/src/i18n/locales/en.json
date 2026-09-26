@@ -634,7 +634,7 @@
     "description": "Push this catalog to a Forge on another FerroBox (or this one). The destination must already exist and use the same ecosystem. Pull and a schedule come later.",
     "loadFailed": "Could not load the replica target",
     "remoteUrl": "Remote FerroBox URL",
-    "remoteUrlHint": "Origin of the other instance, for example http://127.0.0.1:3000. Same host is fine for a first test between two Forges.",
+    "remoteUrlHint": "Backend origin of the other instance, for example http://127.0.0.1:3001. Use the FerroBox port, not the Vite port.",
     "destination": "Destination repository UUID",
     "destinationHint": "Forge on the remote instance. Same ecosystem. Import still rejects a Mirror or an Alloy.",
     "token": "API token",

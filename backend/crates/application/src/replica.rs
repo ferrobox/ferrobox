@@ -1,8 +1,9 @@
 //! Push de un repositorio hacia otra instancia FerroBox.
 //!
 //! Empaqueta el catálogo como `ferrobox.repository.v1` y lo envía al
-//! `POST /api/repositories/{id}/import` del destino. El pull y el cron
-//! no entran en este corte.
+//! import del destino (`/api/repositories/{id}/import` o, si no hay
+//! `/api`, `/repositories/{id}/import`). El pull y el cron no entran
+//! en este corte.
 
 use std::sync::Arc;
 
@@ -178,20 +179,8 @@ impl ReplicaService {
             .to_string();
         let bundle = self.bundles.export(repository_id).await?;
         let (body, content_type) = multipart_bundle(&bundle.bytes, &bundle.filename);
-        let url = target.import_url();
         let auth = format!("Bearer {token}");
-        let response = self
-            .http_client
-            .post_with_headers(
-                &url,
-                body,
-                &[
-                    ("content-type", content_type.as_str()),
-                    ("authorization", auth.as_str()),
-                ],
-            )
-            .await
-            .map_err(remote_error);
+        let response = self.post_import(&target, body, &content_type, &auth).await;
 
         let run = match response {
             Ok(response) if response.is_success() => match parse_import_body(&response.body) {
@@ -231,6 +220,37 @@ impl ReplicaService {
             return Err(ReplicaError::AlloyRepository);
         }
         Ok(())
+    }
+
+    async fn post_import(
+        &self,
+        target: &ReplicaTarget,
+        body: Bytes,
+        content_type: &str,
+        auth: &str,
+    ) -> Result<ferrobox_ports::http_client::HttpResponse, ReplicaError> {
+        let urls = target.import_urls();
+        let mut last_not_found = None;
+        for (index, url) in urls.iter().enumerate() {
+            let more = index + 1 < urls.len();
+            match self
+                .http_client
+                .post_with_headers(
+                    url,
+                    body.clone(),
+                    &[("content-type", content_type), ("authorization", auth)],
+                )
+                .await
+            {
+                Ok(response) if response.is_success() || response.status != 404 || !more => {
+                    return Ok(response);
+                }
+                Ok(not_found) => last_not_found = Some(not_found),
+                Err(HttpClientError::Status { status: 404, .. }) if more => {}
+                Err(err) => return Err(remote_error(err)),
+            }
+        }
+        Ok(last_not_found.expect("import_urls is not empty"))
     }
 
     async fn load_policy(
@@ -424,6 +444,61 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn push_falls_back_to_the_cargo_run_import_path() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let source = forge("src");
+        let destination = forge("dst");
+        repositories.save(&source).await.unwrap();
+        repositories.save(&destination).await.unwrap();
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub_response(
+            &format!(
+                "http://peer.example/api/repositories/{}/import",
+                destination.id()
+            ),
+            ferrobox_ports::http_client::HttpResponse::new(404, Bytes::new()),
+        );
+        http.stub(
+            &format!(
+                "http://peer.example/repositories/{}/import",
+                destination.id()
+            ),
+            200,
+            Bytes::from_static(
+                br#"{"packages_imported":0,"artifacts_imported":0,"skipped":0,"bytes_copied":0}"#,
+            ),
+        );
+        let (replica, _) = service(
+            repositories,
+            artifacts,
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+        );
+        replica
+            .save_policy(
+                source.id(),
+                Some("http://peer.example".into()),
+                Some(destination.id().into()),
+                Some("tok".into()),
+            )
+            .await
+            .unwrap();
+
+        replica.push_now(source.id()).await.unwrap();
+        let posts = http.take_posts();
+        assert_eq!(posts.len(), 2);
+        assert!(posts[0].url.contains("/api/repositories/"));
+        assert!(
+            posts[1]
+                .url
+                .ends_with(&format!("/repositories/{}/import", destination.id()))
+        );
+        assert!(!posts[1].url.contains("/api/"));
     }
 
     #[tokio::test]

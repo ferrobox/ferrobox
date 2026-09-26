@@ -634,7 +634,7 @@
     "description": "Empuja este catálogo a un Forge de otra FerroBox (o de esta). El destino tiene que existir y ser el mismo ecosistema. El pull y el cron vienen después.",
     "loadFailed": "No se pudo cargar el destino de réplica",
     "remoteUrl": "URL de la FerroBox remota",
-    "remoteUrlHint": "Origen de la otra instancia, por ejemplo http://127.0.0.1:3000. El mismo host vale para una primera prueba entre dos Forge.",
+    "remoteUrlHint": "Origen del backend de la otra instancia, por ejemplo http://127.0.0.1:3001. El puerto de FerroBox, no el de Vite.",
     "destination": "UUID del repositorio destino",
     "destinationHint": "Forge en la instancia remota. Mismo ecosistema. El import sigue rechazando un Mirror o un Alloy.",
     "token": "Token de API",
