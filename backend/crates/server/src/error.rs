@@ -34,6 +34,7 @@ use ferrobox_application::retention::RetentionError;
 use ferrobox_application::search_packages::SearchPackagesError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
 use ferrobox_application::webhooks::ManageWebhookError;
+use ferrobox_application::worm::WormError;
 use ferrobox_domain::quota::StorageQuotaError;
 use ferrobox_domain::retention::RetentionPolicyError;
 use ferrobox_ports::artifact_store::ArtifactStoreError;
@@ -436,6 +437,19 @@ impl From<QuotaError> for ApiError {
             QuotaError::Repositories(_) | QuotaError::Artifacts(_) | QuotaError::Policy(_) => {
                 Self::Internal(err.to_string())
             }
+        }
+    }
+}
+
+impl From<WormError> for ApiError {
+    fn from(err: WormError) -> Self {
+        match err {
+            WormError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            WormError::AlloyRepository | WormError::MissingSchema => {
+                Self::BadRequest(err.to_string())
+            }
+            WormError::Locked(_) => Self::Forbidden(err.to_string()),
+            WormError::Repositories(_) | WormError::Policy(_) => Self::Internal(err.to_string()),
         }
     }
 }

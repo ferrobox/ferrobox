@@ -101,6 +101,9 @@ pub mod audit;
 /// Cuota de almacenamiento por repositorio.
 pub mod quota;
 
+/// Write-once / read-many lock per repository.
+pub mod worm;
+
 /// Replica push, pull, and scheduled runs to another FerroBox instance.
 pub mod replica;
 

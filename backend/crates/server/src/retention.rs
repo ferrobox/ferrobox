@@ -78,6 +78,10 @@ pub(crate) async fn apply(
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
     require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    state
+        .worm
+        .ensure_mutable(RepositoryId::from(repository_id))
+        .await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -101,6 +105,10 @@ pub(crate) async fn collect_garbage(
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<CleanupReportResponse>, ApiError> {
     require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    state
+        .worm
+        .ensure_mutable(RepositoryId::from(repository_id))
+        .await?;
     let report = state
         .retention
         .collect_garbage_only(RepositoryId::from(repository_id))
@@ -293,6 +301,10 @@ mod tests {
                 retention_store,
             ),
             quota,
+            worm: ferrobox_application::worm::WormService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
+                repository_store.clone(),
+            ),
             search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),

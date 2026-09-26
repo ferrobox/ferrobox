@@ -29,6 +29,7 @@ mod search;
 mod settings;
 mod users;
 mod webhooks;
+mod worm;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -56,6 +57,7 @@ use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
+use ferrobox_adapter_postgres::worm_store::PostgresWormStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::admission::AdmissionService;
 use ferrobox_application::assay::AssayService;
@@ -96,6 +98,7 @@ use ferrobox_application::retention::RetentionService;
 use ferrobox_application::search_packages::SearchPackagesUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
 use ferrobox_application::webhooks::WebhookService;
+use ferrobox_application::worm::WormService;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
@@ -120,6 +123,7 @@ struct AppState {
     admission: AdmissionService,
     retention: RetentionService,
     quota: QuotaService,
+    worm: WormService,
     search_packages: SearchPackagesUseCase,
     public_base_url: String,
     login: LoginUseCase,
@@ -179,6 +183,7 @@ async fn main() {
     let admission_store = Arc::new(PostgresAdmissionStore::new(pool.clone()));
     let audit_store = Arc::new(PostgresAuditStore::new(pool.clone()));
     let quota_store = Arc::new(PostgresQuotaStore::new(pool.clone()));
+    let worm_store = Arc::new(PostgresWormStore::new(pool.clone()));
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
@@ -207,6 +212,7 @@ async fn main() {
         admission_store,
         audit_store,
         quota_store,
+        worm_store,
         user_store,
         group_store,
         api_token_store,
@@ -378,6 +384,10 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             get(quota::get_quota).put(quota::save_quota),
         )
         .route(
+            "/repositories/{repository_id}/worm",
+            get(worm::get_worm).put(worm::save_worm),
+        )
+        .route(
             "/repositories/{repository_id}/retention",
             get(retention::get_policy).put(retention::save_policy),
         )
@@ -505,6 +515,7 @@ fn build_app_state(
     admission_store: Arc<PostgresAdmissionStore>,
     audit_store: Arc<PostgresAuditStore>,
     quota_store: Arc<PostgresQuotaStore>,
+    worm_store: Arc<PostgresWormStore>,
     user_store: Arc<PostgresUserStore>,
     group_store: Arc<PostgresGroupStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
@@ -528,6 +539,7 @@ fn build_app_state(
         artifact_store.clone(),
         quota_store,
     );
+    let worm = WormService::new(worm_store, repository_store.clone());
     let list_repository_artifacts = ListRepositoryArtifactsUseCase::new(
         repository_store.clone(),
         artifact_store.clone(),
@@ -619,6 +631,7 @@ fn build_app_state(
         admission,
         retention,
         quota,
+        worm,
         search_packages,
         public_base_url: config.public_base_url.clone(),
         login: LoginUseCase::with_session_ttl(

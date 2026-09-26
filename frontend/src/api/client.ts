@@ -25,6 +25,8 @@ import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
+import type { WormRequest } from "@/api/generated/WormRequest";
+import type { WormResponse } from "@/api/generated/WormResponse";
 import type { SearchResponse } from "@/api/generated/SearchResponse";
 import type { AdmissionEventResponse } from "@/api/generated/AdmissionEventResponse";
 import type { AuditEventResponse } from "@/api/generated/AuditEventResponse";
@@ -619,6 +621,17 @@ export function getQuota(repositoryId: string): Promise<QuotaResponse> {
 
 export function saveQuota(repositoryId: string, payload: QuotaRequest): Promise<QuotaResponse> {
   return request<QuotaResponse>(`/repositories/${repositoryId}/quota`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getWorm(repositoryId: string): Promise<WormResponse> {
+  return request<WormResponse>(`/repositories/${repositoryId}/worm`);
+}
+
+export function saveWorm(repositoryId: string, payload: WormRequest): Promise<WormResponse> {
+  return request<WormResponse>(`/repositories/${repositoryId}/worm`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });

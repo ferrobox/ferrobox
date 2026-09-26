@@ -357,6 +357,10 @@ async fn set_yanked(
         RepositoryId::from(repository_id),
     )
     .await?;
+    state
+        .worm
+        .ensure_mutable(RepositoryId::from(repository_id))
+        .await?;
 
     let repository = state
         .get_repository
@@ -602,6 +606,10 @@ mod tests {
                 Arc::new(InMemoryRetentionStore::default()),
             ),
             quota,
+            worm: ferrobox_application::worm::WormService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
+                repository_store.clone(),
+            ),
             search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
@@ -937,6 +945,56 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn yank_is_forbidden_when_worm_is_enabled() {
+        let fx = fixture().await;
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball-bytes",
+        );
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", format!("Token {}", fx.developer_token))
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/repositories/{}/worm", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"enabled":true}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, body) = send(
+            fx.app,
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/cargo/{}/api/v1/crates/ferrobox-cli/0.1.0/yank",
+                    fx.repo_id
+                ))
+                .header("Authorization", format!("Token {}", fx.developer_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["error"].as_str().unwrap().contains("WORM-enabled"));
     }
 
     #[tokio::test]

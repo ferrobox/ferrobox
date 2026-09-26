@@ -91,6 +91,7 @@ pub(crate) async fn delete_artifact(
 ) -> Result<StatusCode, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_write(&state.groups, &user, &token, repository_id).await?;
+    state.worm.ensure_mutable(repository_id).await?;
 
     state
         .delete_artifact

@@ -24,6 +24,7 @@ use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::retention::RetentionPolicy;
 use ferrobox_domain::user::{Email, Role, User, Username};
 use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
+use ferrobox_domain::worm::WormPolicy;
 use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
@@ -41,6 +42,7 @@ use ferrobox_ports::retention_store::{RetentionStore, RetentionStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use ferrobox_ports::webhook_store::{WebhookStore, WebhookStoreError};
+use ferrobox_ports::worm_store::{WormStore, WormStoreError};
 
 #[derive(Default)]
 pub struct InMemoryRepositoryStore {
@@ -937,6 +939,36 @@ impl QuotaStore for InMemoryQuotaStore {
         quota: StorageQuota,
     ) -> Result<(), QuotaStoreError> {
         self.quotas.lock().unwrap().insert(repository_id, quota);
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryWormStore {
+    policies: Mutex<HashMap<RepositoryId, WormPolicy>>,
+}
+
+#[async_trait]
+impl WormStore for InMemoryWormStore {
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<WormPolicy, WormStoreError> {
+        Ok(self
+            .policies
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .copied()
+            .unwrap_or_else(WormPolicy::disabled))
+    }
+
+    async fn save(
+        &self,
+        repository_id: RepositoryId,
+        policy: WormPolicy,
+    ) -> Result<(), WormStoreError> {
+        self.policies.lock().unwrap().insert(repository_id, policy);
         Ok(())
     }
 }

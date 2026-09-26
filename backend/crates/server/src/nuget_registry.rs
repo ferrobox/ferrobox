@@ -310,6 +310,10 @@ async fn set_yanked(
     version: &str,
     yanked: bool,
 ) -> Result<(), ApiError> {
+    state
+        .worm
+        .ensure_mutable(RepositoryId::from(repository_id))
+        .await?;
     let repository = load_nuget_repository(state, repository_id).await?;
     let strategy = nuget_strategy(state)?;
     let coordinate = PackageCoordinate::new(
@@ -497,6 +501,10 @@ mod tests {
                 Arc::new(InMemoryRetentionStore::default()),
             ),
             quota,
+            worm: ferrobox_application::worm::WormService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
+                repository_store.clone(),
+            ),
             search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),

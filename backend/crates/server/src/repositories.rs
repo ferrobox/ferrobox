@@ -170,6 +170,7 @@ pub(crate) async fn delete_repository(
 ) -> Result<StatusCode, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_write(&state.groups, &user, &token, repository_id).await?;
+    state.worm.ensure_mutable(repository_id).await?;
     let repository = state.get_repository.execute(repository_id).await?;
 
     state.delete_repository.execute(repository_id).await?;

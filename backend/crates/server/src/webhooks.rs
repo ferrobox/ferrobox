@@ -311,6 +311,10 @@ mod tests {
                 retention_store,
             ),
             quota,
+            worm: ferrobox_application::worm::WormService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
+                repository_store.clone(),
+            ),
             search_packages: SearchPackagesUseCase::new(
                 repository_store.clone(),
                 package_index_store,

@@ -750,6 +750,30 @@ impl From<ferrobox_application::quota::QuotaSnapshot> for QuotaResponse {
     }
 }
 
+/// WORM lock sent when saving.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct WormRequest {
+    /// `true` rejects delete, yank, retention apply, and per-repository GC.
+    pub(crate) enabled: bool,
+}
+
+/// WORM lock of a repository.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct WormResponse {
+    /// `true` when the repository must stay immutable.
+    pub(crate) enabled: bool,
+}
+
+impl From<ferrobox_domain::worm::WormPolicy> for WormResponse {
+    fn from(policy: ferrobox_domain::worm::WormPolicy) -> Self {
+        Self {
+            enabled: policy.enabled(),
+        }
+    }
+}
+
 /// Resultado de aplicar retención o recolectar basura.
 #[derive(Serialize, TS)]
 #[ts(export)]

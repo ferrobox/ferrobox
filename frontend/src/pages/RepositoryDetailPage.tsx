@@ -23,6 +23,7 @@ import { PrefetchPackageDialog } from "@/components/repository/PrefetchPackageDi
 import { RepositoryBundleButtons } from "@/components/repository/RepositoryBundleButtons";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
+import { WormPanel } from "@/components/repository/WormPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
 import { AdmissionPanel } from "@/components/repository/AdmissionPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
@@ -214,6 +215,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             <TabsTrigger value="quota">{t("tabs.quota")}</TabsTrigger>
           ) : null}
           {repository.kind.type !== "alloy" ? (
+            <TabsTrigger value="worm">{t("tabs.worm")}</TabsTrigger>
+          ) : null}
+          {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="replica">{t("tabs.replica")}</TabsTrigger>
           ) : null}
           {repository.kind.type !== "alloy" ? (
@@ -273,6 +277,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="quota" className="mt-4">
             <QuotaPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+        {repository.kind.type !== "alloy" ? (
+          <TabsContent value="worm" className="mt-4">
+            <WormPanel repositoryId={repositoryId} canWrite={canWrite} />
           </TabsContent>
         ) : null}
         {repository.kind.type !== "alloy" ? (

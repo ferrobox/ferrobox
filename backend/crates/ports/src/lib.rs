@@ -47,5 +47,8 @@ pub mod audit_store;
 /// El puerto de persistencia de la cuota de almacenamiento.
 pub mod quota_store;
 
+/// Persistence port for a repository WORM lock.
+pub mod worm_store;
+
 /// El puerto de cliente HTTP saliente.
 pub mod http_client;
