@@ -65,12 +65,8 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Acceso</CardTitle>
-        <CardDescription>
-          Si asignas uno o más grupos, solo esos grupos (y los administradores) verán este
-          repositorio. Un miembro de grupo no ve el resto de repositorios. Sin grupos, quien no
-          pertenezca a ningún grupo sigue el rol de la instancia.
-        </CardDescription>
+        <CardTitle>{t("access.title")}</CardTitle>
+        <CardDescription>{t("access.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {groupsQuery.isPending || accessQuery.isPending ? (
@@ -78,7 +74,7 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
         ) : null}
         {groups.length === 0 && !groupsQuery.isPending ? (
           <p className="text-sm text-muted-foreground">
-            No hay grupos. Créalos en la sección Grupos para restringir este repositorio.
+            {t("access.empty")}
           </p>
         ) : (
           <ul className="max-h-64 space-y-2 overflow-y-auto rounded-md border border-border p-2">
@@ -97,13 +93,13 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
                     }}
                   >
                     <SelectTrigger
-                      aria-label={`Rol de ${group.name}`}
+                      aria-label={t("access.roleOf", { name: group.name })}
                       className="h-8 w-[150px]"
                     >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Sin acceso</SelectItem>
+                      <SelectItem value="none">{t("common.noAccess")}</SelectItem>
                       {GROUP_ROLES.map((option) => (
                         <SelectItem key={option} value={option}>
                           {roleLabel(option)}
@@ -118,7 +114,7 @@ export function RepositoryAccessPanel({ repositoryId }: { repositoryId: string }
         )}
         <Button onClick={() => void onSave()} disabled={saveAccess.isPending || groups.length === 0}>
           {saveAccess.isPending ? <Loader2 className="animate-spin" /> : null}
-          Guardar acceso
+          {t("access.save")}
         </Button>
       </CardContent>
     </Card>

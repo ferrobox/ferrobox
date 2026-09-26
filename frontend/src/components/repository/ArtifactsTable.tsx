@@ -382,16 +382,16 @@ export function ArtifactsTable({
                 </span>
                 <span className="block text-xs text-muted-foreground">
                   {group.versions.length === 1
-                    ? "1 versión"
-                    : `${group.versions.length} versiones`}
+                    ? t("artifacts.versionOne")
+                    : t("artifacts.versionMany", { count: group.versions.length })}
                   {yankedCount > 0
-                    ? ` · ${yankedCount === 1 ? "1 yanked" : `${yankedCount} yanked`}`
+                    ? ` · ${yankedCount === 1 ? t("artifacts.yankedOne") : t("artifacts.yankedMany", { count: yankedCount })}`
                     : null}
                   {signedCount > 0
-                    ? ` · ${signedCount === 1 ? "1 firmada" : `${signedCount} firmadas`}`
+                    ? ` · ${signedCount === 1 ? t("artifacts.signedOne") : t("artifacts.signedMany", { count: signedCount })}`
                     : null}
                   {verifiedCount > 0
-                    ? ` · ${verifiedCount === 1 ? "1 verificada" : `${verifiedCount} verificadas`}`
+                    ? ` · ${verifiedCount === 1 ? t("artifacts.verifiedOne") : t("artifacts.verifiedMany", { count: verifiedCount })}`
                     : null}
                 </span>
               </span>
