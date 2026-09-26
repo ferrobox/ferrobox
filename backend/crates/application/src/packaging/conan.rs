@@ -21,7 +21,7 @@ use ferrobox_domain::package_coordinate::{
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
-use ferrobox_ports::http_client::HttpClient;
+use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -464,6 +464,31 @@ impl ConanPackagingStrategy {
         Ok(self.storage.get(&storage_key_for(artifact_id)).await?)
     }
 
+    async fn get_upstream(&self, url: &str) -> Result<Option<Bytes>, PackagingError> {
+        let response = match self
+            .http_client
+            .get_with_headers(url, &[("accept", "application/json")])
+            .await
+        {
+            Ok(response) => response,
+            Err(HttpClientError::Status {
+                status: 404 | 410, ..
+            }) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if matches!(response.status, 404 | 410) {
+            return Ok(None);
+        }
+        if !response.is_success() {
+            return Err(HttpClientError::Status {
+                status: response.status,
+                url: url.to_string(),
+            }
+            .into());
+        }
+        Ok(Some(response.body))
+    }
+
     async fn pull_metadata_from_upstream(
         &self,
         repository: &Repository,
@@ -473,11 +498,9 @@ impl ConanPackagingStrategy {
             return Err(PackagingError::PackageNotFound(resource.path_hint()));
         };
         let url = join_conan_upstream(upstream, &resource.api_path());
-        let response = self.http_client.get(&url).await?;
-        if !response.is_success() {
-            return Err(PackagingError::PackageNotFound(resource.path_hint()));
-        }
-        Ok(response.body)
+        self.get_upstream(&url)
+            .await?
+            .ok_or_else(|| PackagingError::PackageNotFound(resource.path_hint()))
     }
 
     async fn pull_file_from_upstream(
@@ -489,11 +512,10 @@ impl ConanPackagingStrategy {
             return Err(PackagingError::FileNotFound(resource.path_hint()));
         };
         let url = join_conan_upstream(upstream, &resource.api_path());
-        let response = self.http_client.get(&url).await?;
-        if !response.is_success() {
-            return Err(PackagingError::FileNotFound(resource.path_hint()));
-        }
-        let body = response.body;
+        let body = self
+            .get_upstream(&url)
+            .await?
+            .ok_or_else(|| PackagingError::FileNotFound(resource.path_hint()))?;
         self.cache_upstream_file(repository, resource, body.clone())
             .await?;
         Ok(body)
@@ -694,6 +716,75 @@ impl ConanPackagingStrategy {
         }
         entry.rebuild_files();
         self.save_recipe(repository, &entry, saved_artifact).await
+    }
+
+    async fn merge_upstream_search(
+        &self,
+        hits: &mut Vec<PackageSearchHit>,
+        upstream: &Url,
+        query: &str,
+        limit: usize,
+    ) -> Result<(), PackagingError> {
+        let mut url = Url::parse(&join_conan_upstream(upstream, "search"))
+            .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+        if !query.trim().is_empty() {
+            url.query_pairs_mut().append_pair("q", query.trim());
+        }
+        let Some(body) = self.get_upstream(url.as_str()).await? else {
+            return Ok(());
+        };
+        let document: UpstreamSearchDocument = serde_json::from_slice(&body)
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+        for reference in document.results {
+            let Some(hit) = hit_from_conan_reference(&reference) else {
+                continue;
+            };
+            push_search_hit(hits, hit.name, hit.max_version, limit);
+            if hits.len() >= limit {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn search_latest_on_upstream(
+        &self,
+        repository: &Repository,
+        query: &str,
+        hits: &mut Vec<PackageSearchHit>,
+        limit: usize,
+    ) -> Result<(), PackagingError> {
+        let Some((name, version, user, channel)) = parse_search_recipe(query) else {
+            return Ok(());
+        };
+        let resource = ConanResource::RecipeLatest {
+            name: name.clone(),
+            version: version.clone(),
+            user: user.clone(),
+            channel: channel.clone(),
+        };
+        for target in self.resolve_read_targets(repository).await? {
+            if Self::mirror_upstream(&target).is_none() {
+                continue;
+            }
+            if self
+                .pull_metadata_from_upstream(&target, &resource)
+                .await
+                .is_err()
+            {
+                continue;
+            }
+            push_search_hit(
+                hits,
+                format!("{name}/{version}@{user}/{channel}"),
+                version.clone(),
+                limit,
+            );
+            if hits.len() >= limit {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -998,13 +1089,74 @@ impl ConanResource {
 }
 
 fn join_conan_upstream(upstream: &Url, rest: &str) -> String {
-    let base = upstream.as_str().trim_end_matches('/');
     let rest = rest.trim_matches('/');
-    if base.ends_with("/v2/conans") {
-        format!("{base}/{rest}")
-    } else {
-        format!("{base}/v2/conans/{rest}")
+    format!("{}/v2/conans/{rest}", conan_origin(upstream))
+}
+
+fn conan_origin(upstream: &Url) -> String {
+    let mut base = upstream.as_str().trim_end_matches('/').to_string();
+    for suffix in ["/v2/conans", "/v2"] {
+        if let Some(stripped) = base.strip_suffix(suffix) {
+            base = stripped.trim_end_matches('/').to_string();
+            break;
+        }
     }
+    base
+}
+
+#[derive(Deserialize)]
+struct UpstreamSearchDocument {
+    results: Vec<String>,
+}
+
+fn hit_from_conan_reference(reference: &str) -> Option<PackageSearchHit> {
+    let (name_version, _) = reference.split_once('@')?;
+    let (_, version) = name_version.split_once('/')?;
+    if version.is_empty() {
+        return None;
+    }
+    Some(PackageSearchHit {
+        name: reference.to_string(),
+        max_version: version.to_string(),
+    })
+}
+
+fn parse_search_recipe(query: &str) -> Option<(String, String, String, String)> {
+    let query = query.trim().trim_matches('*');
+    if query.is_empty() || query.contains('*') {
+        return None;
+    }
+    let (left, user_channel) = match query.split_once('@') {
+        Some((left, rest)) => (left, Some(rest)),
+        None => (query, None),
+    };
+    let (name, version) = left.split_once('/')?;
+    if name.is_empty() || version.is_empty() || version.contains('/') {
+        return None;
+    }
+    let (user, channel) = match user_channel {
+        None => ("_".to_string(), "_".to_string()),
+        Some(rest) => {
+            let (user, channel) = rest.split_once('/').or_else(|| rest.split_once(':'))?;
+            if user.is_empty() || channel.is_empty() {
+                return None;
+            }
+            (user.to_string(), channel.to_string())
+        }
+    };
+    Some((name.to_string(), version.to_string(), user, channel))
+}
+
+fn push_search_hit(
+    hits: &mut Vec<PackageSearchHit>,
+    name: String,
+    max_version: String,
+    limit: usize,
+) {
+    if hits.iter().any(|hit| hit.name == name) || hits.len() >= limit {
+        return;
+    }
+    hits.push(PackageSearchHit { name, max_version });
 }
 
 /// Receta o binario (`…/files/…`). Los listados JSON no disparan.
@@ -1583,20 +1735,22 @@ impl PackagingStrategy for ConanPackagingStrategy {
                 if !needle.is_empty() && !reference.to_ascii_lowercase().contains(&needle) {
                     continue;
                 }
-                if hits
-                    .iter()
-                    .any(|hit: &PackageSearchHit| hit.name == reference)
-                {
-                    continue;
-                }
-                hits.push(PackageSearchHit {
-                    name: reference,
-                    max_version: entry.version,
-                });
+                push_search_hit(&mut hits, reference, entry.version, limit);
                 if hits.len() >= limit {
                     return Ok(hits);
                 }
             }
+            if let Some(upstream) = Self::mirror_upstream(&target) {
+                self.merge_upstream_search(&mut hits, upstream, query, limit)
+                    .await?;
+                if hits.len() >= limit {
+                    return Ok(hits);
+                }
+            }
+        }
+        if hits.is_empty() {
+            self.search_latest_on_upstream(repository, query, &mut hits, limit)
+                .await?;
         }
         Ok(hits)
     }
@@ -1971,6 +2125,11 @@ mod tests {
             join_conan_upstream(&prefixed, "hello/0.1/_/_/latest"),
             "https://center.conan.io/v2/conans/hello/0.1/_/_/latest"
         );
+        let v2 = Url::parse("https://center2.conan.io/v2").unwrap();
+        assert_eq!(
+            join_conan_upstream(&v2, "zlib/1.3.1/_/_/latest"),
+            "https://center2.conan.io/v2/conans/zlib/1.3.1/_/_/latest"
+        );
     }
 
     #[tokio::test]
@@ -2028,5 +2187,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cached.as_ref(), b"from-upstream");
+    }
+
+    #[test]
+    fn parse_search_recipe_reads_name_version_and_optional_user() {
+        assert_eq!(
+            parse_search_recipe("zlib/1.3.1"),
+            Some(("zlib".into(), "1.3.1".into(), "_".into(), "_".into()))
+        );
+        assert_eq!(
+            parse_search_recipe("zlib/1.3.1@_/_"),
+            Some(("zlib".into(), "1.3.1".into(), "_".into(), "_".into()))
+        );
+        assert!(parse_search_recipe("zlib").is_none());
+        assert!(parse_search_recipe("zlib/*").is_none());
+    }
+
+    #[tokio::test]
+    async fn mirror_search_proxies_upstream_catalog() {
+        let http = InMemoryHttpClient::default();
+        let mut search_url = Url::parse("https://center2.conan.io/v2/conans/search").unwrap();
+        search_url.query_pairs_mut().append_pair("q", "zlib/1.3.1");
+        http.stub(
+            search_url.as_str(),
+            200,
+            Bytes::from_static(br#"{"results":["zlib/1.3.1@_/_"]}"#),
+        );
+        let strategy = ConanPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(http),
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
+        let repository = Repository::new(
+            RepositoryName::parse("conan-center").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: "https://center2.conan.io".parse().unwrap(),
+            },
+            PackageEcosystem::Conan,
+        )
+        .unwrap();
+
+        let hits = strategy.search(&repository, "zlib/1.3.1", 20).await.unwrap();
+        assert_eq!(hits[0].name, "zlib/1.3.1@_/_");
+        assert_eq!(hits[0].max_version, "1.3.1");
     }
 }
