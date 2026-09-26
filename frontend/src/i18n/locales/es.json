@@ -552,7 +552,7 @@
   },
   "worm": {
     "title": "WORM",
-    "description": "Bloqueo de escritura única de este repositorio. Con él activo, borrar, yank, unyank, aplicar retención y la recolección de basura del repositorio devuelven 403. Publicar no cambia. En este primer corte todavía se puede desactivar.",
+    "description": "Bloqueo de escritura única de este repositorio. Con él activo, borrar, yank, unyank, aplicar retención y la recolección de basura del repositorio devuelven 403. Publicar no cambia.",
     "saveFailed": "No se pudo guardar el bloqueo WORM",
     "loadFailed": "No se pudo cargar el bloqueo WORM",
     "enable": "Activar WORM",

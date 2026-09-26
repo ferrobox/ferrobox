@@ -3,8 +3,7 @@
 /// Per-repository WORM switch.
 ///
 /// When enabled, delete, yank/unyank, retention apply, and per-repository
-/// garbage collection are rejected. Turning the lock off is still allowed
-/// in this first cut.
+/// garbage collection are rejected. An administrator can turn the lock off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WormPolicy {
     enabled: bool,
