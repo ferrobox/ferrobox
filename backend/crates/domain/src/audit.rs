@@ -72,6 +72,8 @@ pub enum AuditAction {
     RetentionGarbageCollected,
     /// Se cambió la cuota de un repositorio.
     QuotaChanged,
+    /// Se activó o desactivó el bloqueo WORM de un repositorio.
+    WormPolicyChanged,
     /// Se creó un aviso HTTP.
     WebhookCreated,
     /// Se actualizó un aviso HTTP.
@@ -109,6 +111,8 @@ pub enum AuditTargetKind {
     Retention,
     /// La cuota de un repositorio.
     Quota,
+    /// El bloqueo WORM de un repositorio.
+    Worm,
 }
 
 /// Motivos por los que una etiqueta persistida no es válida.
@@ -246,6 +250,7 @@ impl AuditAction {
             Self::RetentionApplied => "retention.applied",
             Self::RetentionGarbageCollected => "retention.gc",
             Self::QuotaChanged => "quota.changed",
+            Self::WormPolicyChanged => "worm.policy_changed",
             Self::WebhookCreated => "webhook.created",
             Self::WebhookUpdated => "webhook.updated",
             Self::WebhookDeleted => "webhook.deleted",
@@ -292,6 +297,7 @@ impl AuditAction {
             "retention.applied" => Ok(Self::RetentionApplied),
             "retention.gc" => Ok(Self::RetentionGarbageCollected),
             "quota.changed" => Ok(Self::QuotaChanged),
+            "worm.policy_changed" => Ok(Self::WormPolicyChanged),
             "webhook.created" => Ok(Self::WebhookCreated),
             "webhook.updated" => Ok(Self::WebhookUpdated),
             "webhook.deleted" => Ok(Self::WebhookDeleted),
@@ -318,6 +324,7 @@ impl AuditTargetKind {
             Self::Admission => "admission",
             Self::Retention => "retention",
             Self::Quota => "quota",
+            Self::Worm => "worm",
         }
     }
 
@@ -338,6 +345,7 @@ impl AuditTargetKind {
             "admission" => Ok(Self::Admission),
             "retention" => Ok(Self::Retention),
             "quota" => Ok(Self::Quota),
+            "worm" => Ok(Self::Worm),
             other => Err(AuditParseError::UnknownTargetKind(other.to_string())),
         }
     }
@@ -380,6 +388,7 @@ mod tests {
             AuditAction::RetentionApplied,
             AuditAction::RetentionGarbageCollected,
             AuditAction::QuotaChanged,
+            AuditAction::WormPolicyChanged,
             AuditAction::WebhookCreated,
             AuditAction::WebhookUpdated,
             AuditAction::WebhookDeleted,
@@ -404,6 +413,7 @@ mod tests {
             AuditTargetKind::Admission,
             AuditTargetKind::Retention,
             AuditTargetKind::Quota,
+            AuditTargetKind::Worm,
         ] {
             assert_eq!(AuditTargetKind::parse(kind.as_str()).unwrap(), kind);
         }

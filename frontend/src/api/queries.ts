@@ -14,6 +14,7 @@ import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import type { RoleDto } from "@/api/generated/RoleDto";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
+import type { WormRequest } from "@/api/generated/WormRequest";
 import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { ReplicaPolicyRequest } from "@/api/generated/ReplicaPolicyRequest";
@@ -44,6 +45,7 @@ export const queryKeys = {
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
   repositoryReplica: (id: string) => ["repositories", id, "replica"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
+  repositoryWorm: (id: string) => ["repositories", id, "worm"] as const,
   repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
   webhookDeliveries: (repositoryId: string, webhookId: string) =>
     ["repositories", repositoryId, "webhooks", webhookId, "deliveries"] as const,
@@ -838,6 +840,27 @@ export function useSaveQuota(repositoryId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryQuota(repositoryId),
+      });
+    },
+  });
+}
+
+export function useWorm(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryWorm(repositoryId),
+    queryFn: () => api.getWorm(repositoryId),
+    enabled,
+  });
+}
+
+export function useSaveWorm(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: WormRequest) => api.saveWorm(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryWorm(repositoryId),
       });
     },
   });

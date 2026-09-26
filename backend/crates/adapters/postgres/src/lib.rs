@@ -37,6 +37,9 @@ pub mod audit_store;
 /// Adaptador de `QuotaStore`.
 pub mod quota_store;
 
+/// Adapter for `WormStore`.
+pub mod worm_store;
+
 /// Adaptador de `WebhookStore`.
 pub mod webhook_store;
 

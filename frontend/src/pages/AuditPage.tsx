@@ -49,6 +49,7 @@ const ACTION_KEYS = [
   "retention.applied",
   "retention.gc",
   "quota.changed",
+  "worm.policy_changed",
   "webhook.created",
   "webhook.updated",
   "webhook.deleted",

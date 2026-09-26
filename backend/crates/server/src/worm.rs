@@ -1,4 +1,4 @@
-//! Rutas HTTP de cuota de almacenamiento.
+//! HTTP routes for the repository WORM lock.
 
 use std::sync::Arc;
 
@@ -6,50 +6,60 @@ use axum::Json;
 use axum::extract::{Path, State};
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::quota::StorageQuota;
+use ferrobox_domain::worm::WormPolicy;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{QuotaRequest, QuotaResponse};
+use crate::dto::{WormRequest, WormResponse};
 use crate::error::ApiError;
 
-pub(crate) async fn get_quota(
+pub(crate) async fn get_worm(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
-) -> Result<Json<QuotaResponse>, ApiError> {
+) -> Result<Json<WormResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_read(&state.groups, &user, &token, repository_id).await?;
-    let snapshot = state.quota.get_snapshot(repository_id).await?;
-    Ok(Json(QuotaResponse::from(snapshot)))
+    let policy = state.worm.get(repository_id).await?;
+    Ok(Json(WormResponse::from(policy)))
 }
 
-pub(crate) async fn save_quota(
+pub(crate) async fn save_worm(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
-    Json(payload): Json<QuotaRequest>,
-) -> Result<Json<QuotaResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
-    let quota = StorageQuota::new(payload.limit_bytes)?;
-    let snapshot = state
-        .quota
-        .save(RepositoryId::from(repository_id), quota)
+    Json(payload): Json<WormRequest>,
+) -> Result<Json<WormResponse>, ApiError> {
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
+    let policy = state
+        .worm
+        .save(
+            RepositoryId::from(repository_id),
+            WormPolicy::new(payload.enabled),
+        )
         .await?;
     crate::audit::record(
         &state,
         &user,
-        AuditAction::QuotaChanged,
-        AuditTargetKind::Quota,
+        AuditAction::WormPolicyChanged,
+        AuditTargetKind::Worm,
         repository_id.to_string(),
-        snapshot
-            .limit_bytes
-            .map_or_else(|| "unlimited".to_string(), |bytes| bytes.to_string()),
+        if policy.enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        },
     )
     .await;
-    Ok(Json(QuotaResponse::from(snapshot)))
+    Ok(Json(WormResponse::from(policy)))
 }
 
 #[cfg(test)]
@@ -84,9 +94,10 @@ mod tests {
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
         InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryReplicaStore,
         InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
-        InMemoryWebhookStore,
+        InMemoryWebhookStore, InMemoryWormStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
+    use ferrobox_application::worm::WormService;
     use ferrobox_domain::api_token::ApiTokenName;
     use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::RepositoryName;
@@ -110,6 +121,10 @@ mod tests {
             repository_store.clone(),
             artifact_store.clone(),
             Arc::new(InMemoryQuotaStore::default()),
+        );
+        let worm = WormService::new(
+            Arc::new(InMemoryWormStore::default()),
+            repository_store.clone(),
         );
 
         let search_packages = ferrobox_application::search_packages::SearchPackagesUseCase::new(
@@ -201,10 +216,7 @@ mod tests {
                 retention_store,
             ),
             quota,
-            worm: ferrobox_application::worm::WormService::new(
-                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
-                repository_store.clone(),
-            ),
+            worm,
             search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
@@ -277,13 +289,30 @@ mod tests {
         )
     }
 
+    async fn enable_worm(app: &Router, token: &str, repo: &str) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{repo}/worm"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"enabled":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     #[tokio::test]
-    async fn get_quota_defaults_to_unlimited() {
+    async fn get_worm_defaults_to_disabled() {
         let (app, token, _, repo) = fixture().await;
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
+                    .uri(format!("/repositories/{repo}/worm"))
                     .header("Authorization", format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -295,12 +324,11 @@ mod tests {
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], Value::Null);
-        assert_eq!(json["used_bytes"], 0);
+        assert_eq!(json["enabled"], false);
     }
 
     #[tokio::test]
-    async fn save_requires_write_role_and_publish_conflicts_when_exceeded() {
+    async fn save_requires_write_and_blocks_delete_until_disabled() {
         let (app, token, reader_token, repo) = fixture().await;
 
         let response = app
@@ -308,10 +336,88 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
+                    .uri(format!("/repositories/{repo}/worm"))
                     .header("Authorization", format!("Bearer {reader_token}"))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
+                    .body(Body::from(r#"{"enabled":true}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/artifacts"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::from("keep-me"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        let artifact_id = json["id"].as_str().unwrap().to_string();
+
+        enable_worm(&app, &token, &repo).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/repositories/{repo}/artifacts/{artifact_id}"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/retention/apply"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"keep_last":1}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/gc"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/repositories/{repo}"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
                     .unwrap(),
             )
             .await
@@ -323,10 +429,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("PUT")
-                    .uri(format!("/repositories/{repo}/quota"))
+                    .uri(format!("/repositories/{repo}/worm"))
                     .header("Authorization", format!("Bearer {token}"))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"limit_bytes":4}"#))
+                    .body(Body::from(r#"{"enabled":false}"#))
                     .unwrap(),
             )
             .await
@@ -334,35 +440,16 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let response = app
-            .clone()
             .oneshot(
                 Request::builder()
-                    .method("POST")
-                    .uri(format!("/repositories/{repo}/artifacts"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .body(Body::from("too-big"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/repositories/{repo}/quota"))
+                    .method("DELETE")
+                    .uri(format!("/repositories/{repo}/artifacts/{artifact_id}"))
                     .header("Authorization", format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["limit_bytes"], 4);
-        assert_eq!(json["used_bytes"], 0);
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 }

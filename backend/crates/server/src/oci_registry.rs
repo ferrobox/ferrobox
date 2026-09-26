@@ -720,6 +720,10 @@ async fn set_yanked(
     reference: &str,
     yanked: bool,
 ) -> Result<(), ApiError> {
+    state
+        .worm
+        .ensure_mutable(RepositoryId::from(repository_id))
+        .await?;
     let repository = load_distribution_repository(state, repository_id).await?;
     let strategy = distribution_strategy(state, &repository)?;
     let name = PackageName::parse(name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
@@ -1193,6 +1197,10 @@ mod tests {
                 Arc::new(InMemoryRetentionStore::default()),
             ),
             quota,
+            worm: ferrobox_application::worm::WormService::new(
+                Arc::new(ferrobox_application::test_support::InMemoryWormStore::default()),
+                repository_store.clone(),
+            ),
             search_packages,
             public_base_url: "http://127.0.0.1:3000".to_string(),
             login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),

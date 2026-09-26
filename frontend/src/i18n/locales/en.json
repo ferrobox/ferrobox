@@ -151,6 +151,7 @@
     "admission": "Policies",
     "retention": "Retention",
     "quota": "Quota",
+    "worm": "WORM",
     "replica": "Replica",
     "webhooks": "Webhooks"
   },
@@ -549,6 +550,19 @@
     "migrationBody": "The quota table does not exist. From the backend/ directory run:",
     "migrationHint": "Then restart the backend. Usage works without migrating; save does not."
   },
+  "worm": {
+    "title": "WORM",
+    "description": "Write-once lock for this repository. When enabled, delete, yank, unyank, retention apply, and per-repository garbage collection return 403. Publish is unchanged. You can still turn the lock off in this first cut.",
+    "saveFailed": "Could not save the WORM lock",
+    "loadFailed": "Could not load the WORM lock",
+    "enable": "Enable WORM",
+    "enableHint": "Blocks deleting artifacts or the repository, yank and unyank, applying retention, and collecting garbage for this repository.",
+    "enabledSaved": "WORM enabled. Delete, yank, retention apply, and per-repository GC are blocked.",
+    "disabledSaved": "WORM disabled. Delete, yank, and retention apply are allowed again.",
+    "readOnly": "Read only: a Developer or Admin can change the lock.",
+    "migrationBody": "The WORM table does not exist. From the backend/ directory run:",
+    "migrationHint": "Then restart the backend. The lock reads as off without migrating; save does not."
+  },
   "gc": {
     "title": "Garbage collection",
     "description": "Deletes binaries from disk that are no longer in any catalog (versions dropped by retention, leftovers from Delete, OCI layers without a manifest). Dry run does not change anything. Install and publish stay available while it runs.",
@@ -577,7 +591,7 @@
     "tokens": "Manage own API tokens and change own password",
     "publish": "Publish and delete artifacts",
     "repos": "Create and delete repositories",
-    "configure": "Configure retention, quota, and HTTP notifications",
+    "configure": "Configure retention, quota, WORM, and HTTP notifications",
     "gc": "Garbage collection and re-run assays",
     "users": "Create users, change roles, and delete accounts",
     "groups": "Create groups and assign repositories",
@@ -628,6 +642,7 @@
     "retention.applied": "Applied retention",
     "retention.gc": "Ran garbage collection",
     "quota.changed": "Changed quota",
+    "worm.policy_changed": "Changed WORM lock",
     "webhook.created": "Created a webhook",
     "webhook.updated": "Updated a webhook",
     "webhook.deleted": "Deleted a webhook",

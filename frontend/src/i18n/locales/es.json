@@ -151,6 +151,7 @@
     "admission": "Políticas",
     "retention": "Retención",
     "quota": "Cuota",
+    "worm": "WORM",
     "replica": "Réplica",
     "webhooks": "Avisos"
   },
@@ -549,6 +550,19 @@
     "migrationBody": "La tabla de cuotas no existe. Desde el directorio backend/ ejecuta:",
     "migrationHint": "Luego reinicia el backend. Consultar el uso funciona sin migrar; guardar, no."
   },
+  "worm": {
+    "title": "WORM",
+    "description": "Bloqueo de escritura única de este repositorio. Con él activo, borrar, yank, unyank, aplicar retención y la recolección de basura del repositorio devuelven 403. Publicar no cambia. En este primer corte todavía se puede desactivar.",
+    "saveFailed": "No se pudo guardar el bloqueo WORM",
+    "loadFailed": "No se pudo cargar el bloqueo WORM",
+    "enable": "Activar WORM",
+    "enableHint": "Impide borrar artefactos o el repositorio, yank y unyank, aplicar retención y recolectar basura de este repositorio.",
+    "enabledSaved": "WORM activado. Borrar, yank, aplicar retención y el GC del repositorio quedan bloqueados.",
+    "disabledSaved": "WORM desactivado. Borrar, yank y aplicar retención vuelven a estar permitidos.",
+    "readOnly": "Solo lectura: un usuario Developer o Admin puede cambiar el bloqueo.",
+    "migrationBody": "La tabla WORM no existe. Desde el directorio backend/ ejecuta:",
+    "migrationHint": "Luego reinicia el backend. Sin migrar el bloqueo se lee como apagado; guardar, no."
+  },
   "gc": {
     "title": "Recolección de basura",
     "description": "Borra de disco los binarios que ya no están en ningún catálogo (versiones sacadas por retención, restos de un Eliminar, capas OCI sin manifiesto). Simular no toca nada. Install y publish siguen disponibles mientras corre.",
@@ -577,7 +591,7 @@
     "tokens": "Gestionar tokens de API propios y cambiar la propia contraseña",
     "publish": "Publicar y borrar artefactos",
     "repos": "Crear y borrar repositorios",
-    "configure": "Configurar retención, cuota y avisos HTTP",
+    "configure": "Configurar retención, cuota, WORM y avisos HTTP",
     "gc": "Recolección de basura y relanzar ensayes",
     "users": "Crear usuarios, cambiar roles y borrar cuentas",
     "groups": "Crear grupos y asignar repositorios",
@@ -628,6 +642,7 @@
     "retention.applied": "Aplicó la retención",
     "retention.gc": "Ejecutó la recolección de basura",
     "quota.changed": "Cambió la cuota",
+    "worm.policy_changed": "Cambió el bloqueo WORM",
     "webhook.created": "Creó un aviso",
     "webhook.updated": "Actualizó un aviso",
     "webhook.deleted": "Eliminó un aviso",

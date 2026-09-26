@@ -58,3 +58,6 @@ pub mod audit;
 
 /// Cuota de almacenamiento de un repositorio.
 pub mod quota;
+
+/// Write-once / read-many lock for a repository.
+pub mod worm;
