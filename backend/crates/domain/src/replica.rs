@@ -1,8 +1,9 @@
-//! Réplica push o pull de un repositorio hacia otra instancia FerroBox.
+//! Push or pull replica of a repository to another FerroBox instance.
 //!
-//! Una política por repositorio: dirección, URL remota, UUID del Forge
-//! remoto y un token de API. El cron queda para un corte posterior.
+//! One policy per repository: direction, remote URL, remote Forge UUID,
+//! API token, and an optional interval for the background cron.
 
+use chrono::{DateTime, TimeDelta, Utc};
 use thiserror::Error;
 use url::Url;
 
@@ -10,6 +11,10 @@ use crate::ids::RepositoryId;
 
 const MAX_URL_LENGTH: usize = 2048;
 const MAX_TOKEN_LENGTH: usize = 512;
+/// Minimum hours between scheduled replica runs.
+pub const MIN_INTERVAL_HOURS: u32 = 1;
+/// Maximum hours between scheduled replica runs (one week).
+pub const MAX_INTERVAL_HOURS: u32 = 168;
 
 /// Sentido de la réplica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,11 +44,12 @@ pub struct ReplicaRun {
     error: Option<String>,
 }
 
-/// Política persistida de un repositorio. Sin destino no hay réplica.
+/// Persisted policy for a repository. No target means no replica.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaPolicy {
     target: Option<ReplicaTarget>,
     last_run: Option<ReplicaRun>,
+    interval_hours: Option<u32>,
 }
 
 /// Motivos por los que una política de réplica no es válida.
@@ -71,9 +77,15 @@ pub enum ReplicaPolicyError {
     #[error("replica destination cannot be the source repository")]
     SameRepository,
 
-    /// La dirección no es `push` ni `pull`.
+    /// Direction is not `push` or `pull`.
     #[error("replica direction must be push or pull")]
     InvalidDirection,
+
+    /// Interval is outside 1..=168 (0 / missing disables the cron).
+    #[error(
+        "replica interval must be between {MIN_INTERVAL_HOURS} and {MAX_INTERVAL_HOURS} hours, or 0 to disable"
+    )]
+    InvalidInterval,
 }
 
 impl ReplicaTarget {
@@ -250,38 +262,98 @@ impl ReplicaRun {
 }
 
 impl ReplicaPolicy {
-    /// Sin destino: el repositorio no replica.
+    /// No target: this repository does not replicate.
     #[must_use]
     pub fn unconfigured() -> Self {
         Self {
             target: None,
             last_run: None,
+            interval_hours: None,
         }
     }
 
-    /// Política con destino y, opcionalmente, el último push.
+    /// Policy with a target and, optionally, the last run.
     #[must_use]
     pub fn new(target: Option<ReplicaTarget>, last_run: Option<ReplicaRun>) -> Self {
-        Self { target, last_run }
+        Self {
+            target,
+            last_run,
+            interval_hours: None,
+        }
     }
 
-    /// Destino, si está configurado.
+    /// Target, if configured.
     #[must_use]
     pub fn target(&self) -> Option<&ReplicaTarget> {
         self.target.as_ref()
     }
 
-    /// Último push, si se ejecutó alguna vez.
+    /// Last run, if one has executed.
     #[must_use]
     pub fn last_run(&self) -> Option<&ReplicaRun> {
         self.last_run.as_ref()
     }
 
-    /// Sustituye el recuento del último push.
+    /// Hours between scheduled runs. `None` disables the cron.
+    #[must_use]
+    pub fn interval_hours(&self) -> Option<u32> {
+        self.interval_hours
+    }
+
+    /// Replaces the last-run counts.
     #[must_use]
     pub fn with_last_run(mut self, last_run: ReplicaRun) -> Self {
         self.last_run = Some(last_run);
         self
+    }
+
+    /// Sets the cron interval. `None` or `0` disables it.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplicaPolicyError::InvalidInterval`] if the value is outside 1..=168.
+    pub fn with_interval(mut self, hours: Option<u32>) -> Result<Self, ReplicaPolicyError> {
+        self.interval_hours = normalize_interval(hours)?;
+        Ok(self)
+    }
+
+    /// `true` when a target, token, and interval are set and the interval elapsed.
+    ///
+    /// A policy that never ran is due immediately. A last-run timestamp that
+    /// cannot be parsed is treated as due so the cron can retry.
+    #[must_use]
+    pub fn is_due(&self, now: DateTime<Utc>) -> bool {
+        let Some(target) = self.target.as_ref() else {
+            return false;
+        };
+        if target.token().is_none() {
+            return false;
+        }
+        let Some(hours) = self.interval_hours.filter(|hours| *hours > 0) else {
+            return false;
+        };
+        match self.last_run.as_ref() {
+            None => true,
+            Some(run) => match DateTime::parse_from_rfc3339(run.occurred_at()) {
+                Ok(last) => now >= last.with_timezone(&Utc) + TimeDelta::hours(i64::from(hours)),
+                Err(_) => true,
+            },
+        }
+    }
+}
+
+/// `None` or `0` disables the cron; 1..=168 keeps it on.
+///
+/// # Errors
+///
+/// [`ReplicaPolicyError::InvalidInterval`] if the value is positive and out of range.
+pub fn normalize_interval(hours: Option<u32>) -> Result<Option<u32>, ReplicaPolicyError> {
+    match hours {
+        None | Some(0) => Ok(None),
+        Some(hours) if (MIN_INTERVAL_HOURS..=MAX_INTERVAL_HOURS).contains(&hours) => {
+            Ok(Some(hours))
+        }
+        Some(_) => Err(ReplicaPolicyError::InvalidInterval),
     }
 }
 
@@ -367,5 +439,34 @@ mod tests {
             ReplicaDirection::parse("pull").unwrap(),
             ReplicaDirection::Pull
         );
+    }
+
+    #[test]
+    fn scheduled_policy_is_due_until_the_interval_elapses() {
+        let target = ReplicaTarget::new(
+            "http://127.0.0.1:3000",
+            repo(2),
+            Some("tok".into()),
+            repo(1),
+        )
+        .unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-09-26T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let idle = ReplicaPolicy::new(Some(target.clone()), None)
+            .with_interval(Some(1))
+            .unwrap();
+        assert!(idle.is_due(now));
+
+        let just_ran = idle.with_last_run(ReplicaRun::new("2026-09-26T11:30:00Z", 0, 0, 0, None));
+        assert!(!just_ran.is_due(now));
+        assert!(just_ran.is_due(now + TimeDelta::hours(1)));
+
+        let no_cron = ReplicaPolicy::new(Some(target), None);
+        assert!(!no_cron.is_due(now));
+        assert!(matches!(
+            ReplicaPolicy::unconfigured().with_interval(Some(200)),
+            Err(ReplicaPolicyError::InvalidInterval)
+        ));
     }
 }

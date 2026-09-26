@@ -41,4 +41,11 @@ pub trait ReplicaStore: Send + Sync {
         repository_id: RepositoryId,
         policy: &ReplicaPolicy,
     ) -> Result<(), ReplicaStoreError>;
+
+    /// Every configured replica policy (used by the background cron).
+    ///
+    /// # Errors
+    ///
+    /// [`ReplicaStoreError::Backend`] if the backend fails.
+    async fn list_all(&self) -> Result<Vec<(RepositoryId, ReplicaPolicy)>, ReplicaStoreError>;
 }

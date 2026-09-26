@@ -1012,6 +1012,10 @@ pub(crate) struct ReplicaPolicyRequest {
     #[serde(default)]
     #[ts(optional)]
     pub(crate) direction: Option<String>,
+    /// Hours between scheduled runs. `0` disables. Omitted keeps the current value.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) interval_hours: Option<u32>,
 }
 
 /// Última ejecución de réplica.
@@ -1037,6 +1041,8 @@ pub(crate) struct ReplicaPolicyResponse {
     pub(crate) destination_id: Option<String>,
     pub(crate) direction: String,
     pub(crate) has_token: bool,
+    #[ts(type = "number | null")]
+    pub(crate) interval_hours: Option<u32>,
     pub(crate) last_run: Option<ReplicaRunResponse>,
 }
 
@@ -1056,6 +1062,7 @@ impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
                 destination_id: Some(target.destination_id().to_string()),
                 direction: target.direction().as_str().to_string(),
                 has_token: target.token().is_some(),
+                interval_hours: policy.interval_hours(),
                 last_run,
             },
             None => Self {
@@ -1064,6 +1071,7 @@ impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
                 destination_id: None,
                 direction: "push".to_string(),
                 has_token: false,
+                interval_hours: policy.interval_hours(),
                 last_run,
             },
         }

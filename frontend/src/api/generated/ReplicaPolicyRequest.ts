@@ -19,4 +19,8 @@ token?: string,
 /**
  * `push` (defecto) o `pull`.
  */
-direction?: string, };
+direction?: string, 
+/**
+ * Hours between scheduled runs. `0` disables. Omitted keeps the current value.
+ */
+interval_hours?: number, };

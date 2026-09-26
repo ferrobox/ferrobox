@@ -579,6 +579,7 @@ fn build_app_state(
         repository_bundle.clone(),
         http_client.clone(),
     );
+    spawn_replica_loop(replica.clone());
 
     AppState {
         create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
@@ -649,6 +650,20 @@ fn build_app_state(
             api_token_store,
         ),
     }
+}
+
+/// Wake every 30s and run replica policies whose interval is due.
+fn spawn_replica_loop(replica: ReplicaService) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(err) = replica.run_due(chrono::Utc::now()).await {
+                eprintln!("ferrobox: scheduled replica failed: {err}");
+            }
+        }
+    });
 }
 
 fn spawn_mirror_prefetch_loop(

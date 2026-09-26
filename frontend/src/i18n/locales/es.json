@@ -632,7 +632,7 @@
   },
   "replica": {
     "title": "Réplica entre instancias",
-    "description": "Empuja este catálogo a un Forge de otra FerroBox, o tira un Forge remoto a este. El repositorio remoto tiene que existir y ser el mismo ecosistema. El cron viene después.",
+    "description": "Empuja este catálogo a un Forge de otra FerroBox, o tira un Forge remoto a este. El repositorio remoto tiene que existir y ser el mismo ecosistema. Un intervalo opcional lanza ese push o pull en segundo plano.",
     "loadFailed": "No se pudo cargar el destino de réplica",
     "direction": "Dirección",
     "directionHint": "Push envía este catálogo al Forge remoto. Pull descarga el Forge remoto en este repositorio.",
@@ -651,6 +651,9 @@
     "tokenKept": "El token está guardado. Déjalo vacío para conservarlo.",
     "tokenHint": "Un token de robot o de usuario de la instancia destino. No se vuelve a mostrar.",
     "tokenHintPull": "Un token de robot o de usuario de la instancia origen. No se vuelve a mostrar.",
+    "interval": "Intervalo (horas)",
+    "intervalOff": "Apagado",
+    "intervalHint": "1–168 horas. Vacío o 0 apaga el cron. Una política que nunca ha corrido se lanza en el siguiente tick (~30 s).",
     "saved": "Destino de réplica guardado.",
     "cleared": "Destino de réplica borrado.",
     "saveFailed": "No se pudo guardar el destino de réplica",
