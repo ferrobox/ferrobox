@@ -913,6 +913,21 @@ struct UniqueSnapshot {
     value: String,
 }
 
+/// `groupId:artifactId` y versión de un jar/pom, no de metadatos ni checksums.
+#[must_use]
+pub fn admission_download_target(path: &str) -> Option<(String, String)> {
+    match parse_maven_path(path.trim_matches('/')).ok()? {
+        MavenResource::Artifact {
+            group_id,
+            artifact_id,
+            version,
+            checksum: None,
+            ..
+        } => Some((format!("{group_id}:{artifact_id}"), version)),
+        _ => None,
+    }
+}
+
 fn parse_maven_path(path: &str) -> Result<MavenResource, PackagingError> {
     let segments: Vec<&str> = path
         .split('/')
@@ -1384,6 +1399,22 @@ mod tests {
 
     fn artifact_path(file: &str) -> String {
         format!("org/example/hello/1.0.0/{file}")
+    }
+
+    #[test]
+    fn admission_download_target_skips_metadata_and_checksums() {
+        assert_eq!(
+            admission_download_target("org/example/hello/1.0.0/hello-1.0.0.jar"),
+            Some(("org.example:hello".into(), "1.0.0".into()))
+        );
+        assert_eq!(
+            admission_download_target("org/example/hello/1.0.0/hello-1.0.0.jar.sha1"),
+            None
+        );
+        assert_eq!(
+            admission_download_target("org/example/hello/maven-metadata.xml"),
+            None
+        );
     }
 
     #[test]

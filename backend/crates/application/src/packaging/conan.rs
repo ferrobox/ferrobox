@@ -766,6 +766,28 @@ impl ConanResource {
     }
 }
 
+/// Receta o binario (`…/files/…`). Los listados JSON no disparan.
+#[must_use]
+pub fn admission_download_target(path: &str) -> Option<(String, String)> {
+    match parse_conan_path(path).ok()? {
+        ConanResource::RecipeFile {
+            name,
+            version,
+            user,
+            channel,
+            ..
+        }
+        | ConanResource::PackageFile {
+            name,
+            version,
+            user,
+            channel,
+            ..
+        } => Some((name, format!("{version}@{user}:{channel}"))),
+        _ => None,
+    }
+}
+
 fn parse_conan_path(path: &str) -> Result<ConanResource, PackagingError> {
     let trimmed = path.trim_matches('/');
     let parts: Vec<&str> = trimmed.split('/').filter(|part| !part.is_empty()).collect();
@@ -1368,6 +1390,18 @@ mod tests {
             PackageEcosystem::Conan,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn admission_download_target_is_file_paths_only() {
+        assert_eq!(
+            admission_download_target("hello/0.1/_/_/revisions/abc/files/conanfile.py"),
+            Some(("hello".into(), "0.1@_:_".into()))
+        );
+        assert_eq!(
+            admission_download_target("hello/0.1/_/_/latest"),
+            None
+        );
     }
 
     #[test]

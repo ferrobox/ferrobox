@@ -184,6 +184,12 @@ async fn nuget_get(
     let repository = load_nuget_repository(&state, repository_id).await?;
     let strategy = nuget_strategy(&state)?;
     let path = protocol_path(&path, &uri);
+    crate::admission::enforce_download(
+        &state,
+        repository.id(),
+        ferrobox_application::packaging::nuget::admission_download_target(&path),
+    )
+    .await?;
     let body = strategy.get_protocol_file(&repository, &path).await?;
     Ok(bytes_response(&path, body))
 }
