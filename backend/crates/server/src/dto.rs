@@ -148,6 +148,11 @@ pub(crate) struct RepositoryResponse {
     /// `true` si hay grupos asignados; entonces solo esos grupos (y
     /// los administradores) pueden verlo.
     pub(crate) restricted: bool,
+    /// Horas entre refrescos programados del *upstream*. `null` = apagado.
+    #[ts(type = "number | null")]
+    pub(crate) prefetch_interval_hours: Option<u32>,
+    /// Último refresco programado, RFC 3339, o `null`.
+    pub(crate) last_prefetch_at: Option<String>,
 }
 
 impl RepositoryResponse {
@@ -163,8 +168,23 @@ impl RepositoryResponse {
             ecosystem: repository.ecosystem().into(),
             access: access.into(),
             restricted,
+            prefetch_interval_hours: repository.prefetch_interval_hours(),
+            last_prefetch_at: repository
+                .last_prefetch_at()
+                .map(|at| at.to_rfc3339()),
         }
     }
+}
+
+/// Cuerpo para el intervalo de refresco de un `Mirror`.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetMirrorScheduleRequest {
+    /// Horas entre refrescos. `null` o `0` apaga el cron.
+    #[serde(default)]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub(crate) prefetch_interval_hours: Option<u32>,
 }
 
 /// Cuerpo de la petición para crear un repositorio.

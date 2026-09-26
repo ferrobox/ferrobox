@@ -42,6 +42,17 @@ impl GetRepositoryUseCase {
             .await?
             .ok_or(GetRepositoryError::NotFound(id))
     }
+
+    /// Persiste un repositorio ya cargado (por ejemplo, tras cambiar el
+    /// intervalo de prefetch).
+    ///
+    /// # Errors
+    ///
+    /// [`GetRepositoryError::Persistence`] si el backend subyacente falla.
+    pub async fn save(&self, repository: &Repository) -> Result<(), GetRepositoryError> {
+        self.repository_store.save(repository).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +85,17 @@ mod tests {
         let result = use_case.execute(RepositoryId::new()).await;
 
         assert!(matches!(result, Err(GetRepositoryError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn save_persists_prefetch_schedule() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let repository = forge("cargo-releases").with_prefetch_schedule(Some(6), None);
+        let use_case = GetRepositoryUseCase::new(repository_store);
+
+        use_case.save(&repository).await.unwrap();
+        let found = use_case.execute(repository.id()).await.unwrap();
+
+        assert_eq!(found.prefetch_interval_hours(), Some(6));
     }
 }

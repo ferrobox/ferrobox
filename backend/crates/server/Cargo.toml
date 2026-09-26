@@ -12,7 +12,7 @@ ferrobox-adapter-postgres = { path = "../adapters/postgres" }
 ferrobox-adapter-s3-storage = { path = "../adapters/s3-storage" }
 ferrobox-adapter-http = { path = "../adapters/http" }
 axum.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal", "time"] }
 sqlx.workspace = true
 tower-http.workspace = true
 aws-sdk-s3.workspace = true

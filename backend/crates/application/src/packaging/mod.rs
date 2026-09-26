@@ -533,7 +533,7 @@ pub(crate) async fn copy_stored_artifact(
 /// nuevo consiste en implementar `PackagingStrategy` e invocar
 /// [`PackagingRegistry::register`], sin tocar ningún otro punto del
 /// sistema.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PackagingRegistry {
     strategies: HashMap<PackageEcosystem, Arc<dyn PackagingStrategy>>,
 }

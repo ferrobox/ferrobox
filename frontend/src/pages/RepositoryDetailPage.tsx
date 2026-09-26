@@ -18,6 +18,7 @@ import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
+import { MirrorSchedulePanel } from "@/components/repository/MirrorSchedulePanel";
 import { PrefetchPackageDialog } from "@/components/repository/PrefetchPackageDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
@@ -228,6 +229,14 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
               <RefreshPackagesButton repositoryId={repositoryId} />
             </div>
           </div>
+          {repository.kind.type === "mirror" ? (
+            <MirrorSchedulePanel
+              repositoryId={repositoryId}
+              intervalHours={repository.prefetch_interval_hours}
+              lastPrefetchAt={repository.last_prefetch_at}
+              canWrite={canWrite}
+            />
+          ) : null}
           <ArtifactsTable
             repositoryId={repositoryId}
             kind={repository.kind.type}
@@ -270,9 +279,10 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
 
 function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
   const { t } = useTranslation();
+  const repository = useRepository(repositoryId);
   const artifacts = useRepositoryArtifacts(repositoryId);
   const assays = useRepositoryAssays(repositoryId);
-  const fetching = artifacts.isFetching || assays.isFetching;
+  const fetching = repository.isFetching || artifacts.isFetching || assays.isFetching;
 
   return (
     <Button
@@ -281,6 +291,7 @@ function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
       variant="outline"
       title={t("artifacts.refreshHint")}
       onClick={() => {
+        void repository.refetch();
         void artifacts.refetch();
         void assays.refetch();
       }}

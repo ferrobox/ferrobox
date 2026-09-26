@@ -18,7 +18,7 @@ use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
 use crate::dto::{
     CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse,
-    UpdateAlloyMembersRequest,
+    SetMirrorScheduleRequest, UpdateAlloyMembersRequest,
 };
 use crate::error::ApiError;
 use ferrobox_application::create_repository::CreateRepositoryKind;
@@ -117,6 +117,41 @@ pub(crate) async fn update_alloy_members(
         AuditTargetKind::Repository,
         repository.name().to_string(),
         format!("{member_count} members"),
+    )
+    .await;
+
+    Ok(Json(
+        to_repository_response(&state, &user, &repository).await?,
+    ))
+}
+
+pub(crate) async fn set_mirror_schedule(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<SetMirrorScheduleRequest>,
+) -> Result<Json<RepositoryResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
+
+    let repository = ferrobox_application::mirror_schedule::SetMirrorScheduleUseCase::execute(
+        &state.get_repository,
+        repository_id,
+        payload.prefetch_interval_hours,
+    )
+    .await?;
+
+    let detail = match repository.prefetch_interval_hours() {
+        Some(hours) => format!("every {hours}h"),
+        None => "disabled".to_string(),
+    };
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::MirrorScheduleChanged,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        detail,
     )
     .await;
 

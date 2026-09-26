@@ -41,6 +41,7 @@ const ACTION_KEYS = [
   "package.unyanked",
   "package.promoted",
   "package.prefetched",
+  "mirror.schedule_changed",
   "admission.policy_changed",
   "retention.policy_changed",
   "retention.applied",

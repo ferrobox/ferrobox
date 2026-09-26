@@ -6,6 +6,7 @@ import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordReques
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
+import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
 import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
@@ -147,6 +148,22 @@ export function useDeleteArtifact(repositoryId: string) {
   return useMutation({
     mutationFn: (artifactId: string) => api.deleteArtifact(repositoryId, artifactId),
     onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function useSetMirrorSchedule(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: SetMirrorScheduleRequest) =>
+      api.setMirrorSchedule(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
