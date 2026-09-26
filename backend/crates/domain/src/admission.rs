@@ -1,12 +1,12 @@
 //! Política de admisión de un repositorio: reglas estructuradas que
 //! deciden si un artefacto puede bajarse (o, más adelante, publicarse).
 //!
-//! El primer predicado es «no está firmada» y el primer momento es el
-//! pull. El modelo deja sitio para más condiciones sin cambiar el
-//! contrato de evaluación.
+//! Varias cláusulas pueden estar armadas a la vez (firma, hallazgo OSV,
+//! licencia denegada). La primera que se cumple dispara el efecto.
 
 use thiserror::Error;
 
+use crate::assay::AssaySeverity;
 use crate::ids::{AdmissionEventId, RepositoryId};
 
 /// Momento en el que se evalúa la regla.
@@ -16,7 +16,7 @@ pub enum AdmissionWhen {
     Pull,
 }
 
-/// Condición que, si se cumple, dispara el efecto.
+/// Condición de firma persistida por compatibilidad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionPredicate {
     /// El artefacto no tiene una firma Cosign / Notation enlazada.
@@ -49,18 +49,266 @@ pub enum AdmissionPolicyError {
     /// El efecto no es uno de los soportados.
     #[error("unsupported admission effect '{0}'")]
     UnknownEffect(String),
+
+    /// El umbral de hallazgo no es válido.
+    #[error("unsupported admission finding threshold '{0}'")]
+    UnknownFinding(String),
+}
+
+/// Identificador de un perfil preconfigurado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionProfile {
+    /// ISO/IEC 18974: detectar y actuar ante hallazgos ≥ Medium.
+    OpenChainSecurity,
+    /// Política inbound habitual: copyleft fuerte denegado.
+    CopyleftRestrict,
+    /// Solo hallazgos Critical, denegar.
+    CriticalOnly,
+}
+
+impl AdmissionProfile {
+    /// Etiqueta persistida.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenChainSecurity => "openchain_security",
+            Self::CopyleftRestrict => "copyleft_restrict",
+            Self::CriticalOnly => "critical_only",
+        }
+    }
+
+    /// Parsea la etiqueta.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "openchain_security" => Some(Self::OpenChainSecurity),
+            "copyleft_restrict" => Some(Self::CopyleftRestrict),
+            "critical_only" => Some(Self::CriticalOnly),
+            _ => None,
+        }
+    }
+}
+
+/// Licencias SPDX del perfil de copyleft restrictivo.
+#[must_use]
+pub fn copyleft_restricted_licenses() -> &'static [&'static str] {
+    &[
+        "GPL-2.0",
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "AGPL-3.0",
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later",
+        "SSPL-1.0",
+    ]
+}
+
+/// Cláusulas opcionales que, si se cumplen, disparan el efecto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionClauses {
+    require_signed: bool,
+    require_verified: bool,
+    min_finding: Option<AssaySeverity>,
+    forbidden_licenses: Vec<String>,
+    profile: Option<AdmissionProfile>,
+}
+
+impl AdmissionClauses {
+    /// Ninguna cláusula extra: solo el predicado de firma legado.
+    #[must_use]
+    pub fn from_predicate(predicate: AdmissionPredicate) -> Self {
+        Self {
+            require_signed: matches!(predicate, AdmissionPredicate::NotSigned),
+            require_verified: matches!(predicate, AdmissionPredicate::NotVerified),
+            min_finding: None,
+            forbidden_licenses: Vec::new(),
+            profile: None,
+        }
+    }
+
+    /// Construye las cláusulas a partir de campos sueltos.
+    #[must_use]
+    pub fn new(
+        require_signed: bool,
+        require_verified: bool,
+        min_finding: Option<AssaySeverity>,
+        forbidden_licenses: Vec<String>,
+        profile: Option<AdmissionProfile>,
+    ) -> Self {
+        Self {
+            require_signed,
+            require_verified,
+            min_finding,
+            forbidden_licenses: normalize_licenses(forbidden_licenses),
+            profile,
+        }
+    }
+
+    /// `true` si hay que firmar (Cosign / Notation).
+    #[must_use]
+    pub fn require_signed(&self) -> bool {
+        self.require_signed
+    }
+
+    /// `true` si hay que verificar la firma contra las claves PEM.
+    #[must_use]
+    pub fn require_verified(&self) -> bool {
+        self.require_verified
+    }
+
+    /// Umbral de hallazgo OSV, si la cláusula está armada.
+    #[must_use]
+    pub fn min_finding(&self) -> Option<AssaySeverity> {
+        self.min_finding
+    }
+
+    /// Licencias denegadas (ids SPDX).
+    #[must_use]
+    pub fn forbidden_licenses(&self) -> &[String] {
+        &self.forbidden_licenses
+    }
+
+    /// Perfil que rellenó estas cláusulas, si se eligió uno.
+    #[must_use]
+    pub fn profile(&self) -> Option<AdmissionProfile> {
+        self.profile
+    }
+
+    /// Predicado legado para la columna `predicate`.
+    #[must_use]
+    pub fn legacy_predicate(&self) -> AdmissionPredicate {
+        if self.require_verified && !self.require_signed {
+            AdmissionPredicate::NotVerified
+        } else {
+            AdmissionPredicate::NotSigned
+        }
+    }
+
+    /// Codifica las cláusulas para persistirlas.
+    #[must_use]
+    pub fn encode(&self) -> String {
+        let mut parts = vec![
+            format!("signed={}", u8::from(self.require_signed)),
+            format!("verified={}", u8::from(self.require_verified)),
+        ];
+        if let Some(severity) = self.min_finding {
+            parts.push(format!("finding={}", severity.as_str()));
+        }
+        if !self.forbidden_licenses.is_empty() {
+            parts.push(format!("licenses={}", self.forbidden_licenses.join(",")));
+        }
+        if let Some(profile) = self.profile {
+            parts.push(format!("profile={}", profile.as_str()));
+        }
+        parts.join("|")
+    }
+
+    /// Restaura las cláusulas persistidas. Vacío = `None` (usar el predicado).
+    #[must_use]
+    pub fn decode(value: &str) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut require_signed = false;
+        let mut require_verified = false;
+        let mut min_finding = None;
+        let mut forbidden_licenses = Vec::new();
+        let mut profile = None;
+        for part in trimmed.split('|') {
+            let Some((key, raw)) = part.split_once('=') else {
+                continue;
+            };
+            match key {
+                "signed" => require_signed = raw == "1" || raw == "true",
+                "verified" => require_verified = raw == "1" || raw == "true",
+                "finding" => {
+                    min_finding = match raw {
+                        "critical" => Some(AssaySeverity::Critical),
+                        "high" => Some(AssaySeverity::High),
+                        "medium" => Some(AssaySeverity::Medium),
+                        "low" => Some(AssaySeverity::Low),
+                        _ => None,
+                    };
+                }
+                "licenses" => {
+                    forbidden_licenses = raw
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(ToOwned::to_owned)
+                        .collect();
+                }
+                "profile" => profile = AdmissionProfile::parse(raw),
+                _ => {}
+            }
+        }
+        Some(Self::new(
+            require_signed,
+            require_verified,
+            min_finding,
+            forbidden_licenses,
+            profile,
+        ))
+    }
+}
+
+/// Hechos de un pull para evaluar la política.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionFacts {
+    /// Hay firma enlazada.
+    pub signed: bool,
+    /// La firma verifica contra las claves del repositorio.
+    pub verified: bool,
+    /// `false` en ecosistemas sin Cosign (Cargo, npm…): se ignoran las
+    /// cláusulas de firma.
+    pub consider_signature: bool,
+    /// Hallazgo más grave del ensaye listo. `None` = no hay ensaye o
+    /// no aplica: las cláusulas de CVE y licencia no disparan.
+    pub max_finding: Option<AssaySeverity>,
+    /// Licencias declaradas en el inventario del ensaye listo.
+    pub licenses: Vec<String>,
+}
+
+/// Motivo por el que una política dispararía.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmissionHit {
+    /// Falta la firma.
+    Unsigned,
+    /// La firma no verifica.
+    Unverified,
+    /// Un hallazgo alcanza el umbral.
+    Finding(AssaySeverity),
+    /// Una licencia está en la lista denegada.
+    ForbiddenLicense(String),
+}
+
+impl AdmissionHit {
+    /// Etiqueta corta para el registro de eventos.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unsigned => "unsigned",
+            Self::Unverified => "unverified",
+            Self::Finding(_) => "finding",
+            Self::ForbiddenLicense(_) => "license",
+        }
+    }
 }
 
 /// Una regla de admisión de un repositorio.
 ///
 /// Sin activar, no se aplica en el pull: sirve para guardarla y
 /// previsualizar el impacto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionPolicy {
     enabled: bool,
     when: AdmissionWhen,
-    predicate: AdmissionPredicate,
     effect: AdmissionEffect,
+    clauses: AdmissionClauses,
 }
 
 impl AdmissionPolicy {
@@ -70,8 +318,64 @@ impl AdmissionPolicy {
         Self {
             enabled: false,
             when: AdmissionWhen::Pull,
-            predicate: AdmissionPredicate::NotSigned,
             effect: AdmissionEffect::Deny,
+            clauses: AdmissionClauses::from_predicate(AdmissionPredicate::NotSigned),
+        }
+    }
+
+    /// Perfil `OpenChain` seguridad (ISO/IEC 18974): hallazgo ≥ Medium, avisar.
+    ///
+    /// Queda desactivada: hay que simular y activar a propósito.
+    #[must_use]
+    pub fn profile_openchain_security() -> Self {
+        Self {
+            enabled: false,
+            when: AdmissionWhen::Pull,
+            effect: AdmissionEffect::Warn,
+            clauses: AdmissionClauses::new(
+                false,
+                false,
+                Some(AssaySeverity::Medium),
+                Vec::new(),
+                Some(AdmissionProfile::OpenChainSecurity),
+            ),
+        }
+    }
+
+    /// Perfil de copyleft restrictivo: deniega GPL/AGPL/SSPL.
+    #[must_use]
+    pub fn profile_copyleft_restrict() -> Self {
+        Self {
+            enabled: false,
+            when: AdmissionWhen::Pull,
+            effect: AdmissionEffect::Deny,
+            clauses: AdmissionClauses::new(
+                false,
+                false,
+                None,
+                copyleft_restricted_licenses()
+                    .iter()
+                    .map(|item| (*item).to_string())
+                    .collect(),
+                Some(AdmissionProfile::CopyleftRestrict),
+            ),
+        }
+    }
+
+    /// Perfil conservador: solo Critical, denegar.
+    #[must_use]
+    pub fn profile_critical_only() -> Self {
+        Self {
+            enabled: false,
+            when: AdmissionWhen::Pull,
+            effect: AdmissionEffect::Deny,
+            clauses: AdmissionClauses::new(
+                false,
+                false,
+                Some(AssaySeverity::Critical),
+                Vec::new(),
+                Some(AdmissionProfile::CriticalOnly),
+            ),
         }
     }
 
@@ -86,71 +390,176 @@ impl AdmissionPolicy {
         predicate: &str,
         effect: &str,
     ) -> Result<Self, AdmissionPolicyError> {
+        let predicate = AdmissionPredicate::parse(predicate)?;
         Ok(Self {
             enabled,
             when: AdmissionWhen::parse(when)?,
-            predicate: AdmissionPredicate::parse(predicate)?,
             effect: AdmissionEffect::parse(effect)?,
+            clauses: AdmissionClauses::from_predicate(predicate),
         })
+    }
+
+    /// Construye una política con cláusulas explícitas.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AdmissionPolicyError`] si `when` o `effect` no son válidos.
+    pub fn compose(
+        enabled: bool,
+        when: &str,
+        effect: &str,
+        clauses: AdmissionClauses,
+    ) -> Result<Self, AdmissionPolicyError> {
+        Ok(Self {
+            enabled,
+            when: AdmissionWhen::parse(when)?,
+            effect: AdmissionEffect::parse(effect)?,
+            clauses,
+        })
+    }
+
+    /// Restaura una fila persistida, usando `clauses` si no está vacío.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve [`AdmissionPolicyError`] si alguna etiqueta no es válida.
+    pub fn parse_stored(
+        enabled: bool,
+        when: &str,
+        predicate: &str,
+        effect: &str,
+        clauses: &str,
+    ) -> Result<Self, AdmissionPolicyError> {
+        let mut policy = Self::parse(enabled, when, predicate, effect)?;
+        if let Some(decoded) = AdmissionClauses::decode(clauses) {
+            policy.clauses = decoded;
+        }
+        Ok(policy)
     }
 
     /// `true` si la regla está armada.
     #[must_use]
-    pub fn enabled(self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.enabled
     }
 
     /// Momento de evaluación.
     #[must_use]
-    pub fn when(self) -> AdmissionWhen {
+    pub fn when(&self) -> AdmissionWhen {
         self.when
     }
 
-    /// Condición que dispara el efecto.
+    /// Predicado legado (firma).
     #[must_use]
-    pub fn predicate(self) -> AdmissionPredicate {
-        self.predicate
+    pub fn predicate(&self) -> AdmissionPredicate {
+        self.clauses.legacy_predicate()
     }
 
     /// Efecto si la condición se cumple.
     #[must_use]
-    pub fn effect(self) -> AdmissionEffect {
+    pub fn effect(&self) -> AdmissionEffect {
         self.effect
+    }
+
+    /// Cláusulas armadas.
+    #[must_use]
+    pub fn clauses(&self) -> &AdmissionClauses {
+        &self.clauses
     }
 
     /// Efecto que se aplicaría en un pull de un artefacto con `signed`
     /// y `verified`.
     ///
     /// Ignora `enabled`: sirve para el dry-run («si activo esto…»).
+    /// Solo mira la firma; usa [`Self::preview_facts`] para CVE/licencia.
     #[must_use]
-    pub fn preview_pull(self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
+    pub fn preview_pull(&self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
+        self.preview_facts(&AdmissionFacts {
+            signed,
+            verified,
+            consider_signature: true,
+            max_finding: None,
+            licenses: Vec::new(),
+        })
+        .map(|_| self.effect)
+    }
+
+    /// Primera cláusula que dispara, ignorando `enabled`.
+    #[must_use]
+    pub fn preview_facts(&self, facts: &AdmissionFacts) -> Option<AdmissionHit> {
         if !matches!(self.when, AdmissionWhen::Pull) {
             return None;
         }
-        match self.predicate {
-            AdmissionPredicate::NotSigned if !signed => Some(self.effect),
-            AdmissionPredicate::NotVerified if !verified => Some(self.effect),
-            AdmissionPredicate::NotSigned | AdmissionPredicate::NotVerified => None,
+        if facts.consider_signature {
+            if self.clauses.require_signed && !facts.signed {
+                return Some(AdmissionHit::Unsigned);
+            }
+            if self.clauses.require_verified && !facts.verified {
+                return Some(AdmissionHit::Unverified);
+            }
         }
+        if let Some(threshold) = self.clauses.min_finding
+            && let Some(severity) = facts.max_finding
+            && severity.meets_threshold(threshold)
+        {
+            return Some(AdmissionHit::Finding(severity));
+        }
+        for denied in &self.clauses.forbidden_licenses {
+            if facts
+                .licenses
+                .iter()
+                .any(|license| license_matches(license, denied))
+            {
+                return Some(AdmissionHit::ForbiddenLicense(denied.clone()));
+            }
+        }
+        None
     }
 
     /// Efecto que **bloquea** un pull ahora mismo (regla activa + deny).
     #[must_use]
-    pub fn deny_pull(self, signed: bool, verified: bool) -> bool {
-        matches!(
-            self.apply_pull(signed, verified),
-            Some(AdmissionEffect::Deny)
-        )
+    pub fn deny_pull(&self, signed: bool, verified: bool) -> bool {
+        matches!(self.apply_pull(signed, verified), Some(AdmissionEffect::Deny))
     }
 
     /// Efecto que se aplica ahora mismo (regla activa).
     #[must_use]
-    pub fn apply_pull(self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
+    pub fn apply_pull(&self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
         if !self.enabled {
             return None;
         }
         self.preview_pull(signed, verified)
     }
+
+    /// Efecto y motivo si la regla está activa.
+    #[must_use]
+    pub fn apply_facts(&self, facts: &AdmissionFacts) -> Option<(AdmissionEffect, AdmissionHit)> {
+        if !self.enabled {
+            return None;
+        }
+        self.preview_facts(facts).map(|hit| (self.effect, hit))
+    }
+}
+
+fn normalize_licenses(licenses: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for license in licenses {
+        let license = license.trim();
+        if license.is_empty() {
+            continue;
+        }
+        if !out
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(license))
+        {
+            out.push(license.to_string());
+        }
+    }
+    out
+}
+
+fn license_matches(declared: &str, denied: &str) -> bool {
+    declared.trim().eq_ignore_ascii_case(denied.trim())
 }
 
 /// Un aviso o una denegación registrados en un pull.
@@ -342,5 +751,73 @@ mod tests {
             AdmissionPolicy::parse(true, "pull", "not_signed", "quarantine"),
             Err(AdmissionPolicyError::UnknownEffect(_))
         ));
+    }
+
+    #[test]
+    fn finding_clause_uses_threshold_and_fail_open() {
+        let policy = AdmissionPolicy::profile_openchain_security();
+        let missing = AdmissionFacts {
+            signed: true,
+            verified: true,
+            consider_signature: false,
+            max_finding: None,
+            licenses: Vec::new(),
+        };
+        assert_eq!(policy.preview_facts(&missing), None);
+        let medium = AdmissionFacts {
+            max_finding: Some(AssaySeverity::Medium),
+            ..missing.clone()
+        };
+        assert_eq!(
+            policy.preview_facts(&medium),
+            Some(AdmissionHit::Finding(AssaySeverity::Medium))
+        );
+        let low = AdmissionFacts {
+            max_finding: Some(AssaySeverity::Low),
+            ..missing
+        };
+        assert_eq!(policy.preview_facts(&low), None);
+    }
+
+    #[test]
+    fn copyleft_profile_matches_declared_license() {
+        let policy = AdmissionPolicy::profile_copyleft_restrict();
+        let facts = AdmissionFacts {
+            signed: true,
+            verified: true,
+            consider_signature: false,
+            max_finding: None,
+            licenses: vec!["AGPL-3.0-only".to_string()],
+        };
+        assert!(matches!(
+            policy.preview_facts(&facts),
+            Some(AdmissionHit::ForbiddenLicense(_))
+        ));
+    }
+
+    #[test]
+    fn cargo_ignores_signature_clauses() {
+        let policy = AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap();
+        let facts = AdmissionFacts {
+            signed: false,
+            verified: false,
+            consider_signature: false,
+            max_finding: None,
+            licenses: Vec::new(),
+        };
+        assert_eq!(policy.preview_facts(&facts), None);
+    }
+
+    #[test]
+    fn clauses_roundtrip() {
+        let clauses = AdmissionClauses::new(
+            false,
+            true,
+            Some(AssaySeverity::High),
+            vec!["GPL-3.0-only".to_string()],
+            Some(AdmissionProfile::CriticalOnly),
+        );
+        let decoded = AdmissionClauses::decode(&clauses.encode()).unwrap();
+        assert_eq!(decoded, clauses);
     }
 }

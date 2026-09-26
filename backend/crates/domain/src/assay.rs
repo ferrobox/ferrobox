@@ -83,6 +83,14 @@ impl AssaySeverity {
         }
     }
 
+    /// `true` si esta severidad alcanza el umbral (Critical es la más grave).
+    ///
+    /// `Unknown` no dispara ningún umbral: sin puntuación no se bloquea.
+    #[must_use]
+    pub fn meets_threshold(self, threshold: Self) -> bool {
+        !matches!(self, Self::Unknown) && self <= threshold
+    }
+
     /// Traduce una puntuación CVSS 3.x (0–10) a severidad.
     #[must_use]
     pub fn from_cvss_score(score: f64) -> Self {
@@ -548,5 +556,12 @@ mod tests {
         assert_eq!(AssaySeverity::from_cvss_score(7.5), AssaySeverity::High);
         assert_eq!(AssaySeverity::from_cvss_score(5.0), AssaySeverity::Medium);
         assert_eq!(AssaySeverity::from_cvss_score(2.0), AssaySeverity::Low);
+    }
+
+    #[test]
+    fn unknown_never_meets_a_threshold() {
+        assert!(!AssaySeverity::Unknown.meets_threshold(AssaySeverity::Low));
+        assert!(AssaySeverity::Critical.meets_threshold(AssaySeverity::High));
+        assert!(!AssaySeverity::Low.meets_threshold(AssaySeverity::High));
     }
 }

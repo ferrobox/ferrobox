@@ -11,6 +11,7 @@ import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequ
 import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyResponse";
 import type { AdmissionPredicateDto } from "@/api/generated/AdmissionPredicateDto";
 import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
+import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import {
   useAdmissionEvents,
   useAdmissionPolicy,
@@ -45,33 +46,66 @@ const EMPTY_POLICY: AdmissionPolicyResponse = {
   predicate: "not_signed",
   effect: "deny",
   public_keys_pem: "",
+  require_signed: false,
+  require_verified: false,
+  min_finding: null,
+  forbidden_licenses: [],
+  profile: null,
 };
 
-function isMissingMigration(message: string): boolean {
-  return message.includes("sqlx migrate run");
-}
+const COPYLEFT_LICENSES = [
+  "GPL-2.0",
+  "GPL-2.0-only",
+  "GPL-2.0-or-later",
+  "GPL-3.0",
+  "GPL-3.0-only",
+  "GPL-3.0-or-later",
+  "AGPL-3.0",
+  "AGPL-3.0-only",
+  "AGPL-3.0-or-later",
+  "SSPL-1.0",
+];
+
+type FindingLevel = "" | "medium" | "high" | "critical";
 
 function payloadFromFields(
   enabled: boolean,
   effect: AdmissionEffectDto,
-  predicate: AdmissionPredicateDto,
+  requireSigned: boolean,
+  requireVerified: boolean,
+  minFinding: FindingLevel,
+  forbiddenLicenses: string[],
   publicKeysPem: string,
+  profile: string | null,
 ): AdmissionPolicyRequest {
+  const predicate: AdmissionPredicateDto =
+    requireVerified && !requireSigned ? "not_verified" : "not_signed";
   return {
     enabled,
     when: "pull",
     predicate,
     effect,
     public_keys_pem: publicKeysPem,
+    require_signed: requireSigned,
+    require_verified: requireVerified,
+    min_finding: minFinding.length > 0 ? minFinding : null,
+    forbidden_licenses: forbiddenLicenses,
+    profile,
   };
+}
+
+function isMissingMigration(message: string): boolean {
+  return message.includes("sqlx migrate run");
 }
 
 export function AdmissionPanel({
   repositoryId,
   canWrite,
+  ecosystem,
 }: {
   repositoryId: string;
   canWrite: boolean;
+  ecosystem: PackageEcosystemDto;
 }) {
   const { t } = useTranslation();
   const { data, isPending, isError, error } = useAdmissionPolicy(repositoryId, true);
@@ -101,6 +135,7 @@ export function AdmissionPanel({
           <AdmissionForm
             repositoryId={repositoryId}
             canWrite={canWrite}
+            ecosystem={ecosystem}
             policy={data ?? EMPTY_POLICY}
           />
         )}
@@ -130,22 +165,55 @@ function MigrationAlert() {
 function AdmissionForm({
   repositoryId,
   canWrite,
+  ecosystem,
   policy,
 }: {
   repositoryId: string;
   canWrite: boolean;
+  ecosystem: PackageEcosystemDto;
   policy: AdmissionPolicyResponse;
 }) {
   const { t } = useTranslation();
   const savePolicy = useSaveAdmissionPolicy(repositoryId);
   const dryRun = useDryRunAdmission(repositoryId);
+  const showSignature = ecosystem === "oci" || ecosystem === "helm";
   const [enabled, setEnabled] = useState(policy.enabled);
   const [effect, setEffect] = useState<AdmissionEffectDto>(policy.effect);
-  const [predicate, setPredicate] = useState<AdmissionPredicateDto>(policy.predicate);
+  const [requireSigned, setRequireSigned] = useState(policy.require_signed);
+  const [requireVerified, setRequireVerified] = useState(policy.require_verified);
+  const [minFinding, setMinFinding] = useState<FindingLevel>(
+    policy.min_finding === "medium" ||
+      policy.min_finding === "high" ||
+      policy.min_finding === "critical"
+      ? policy.min_finding
+      : "",
+  );
+  const [licensesText, setLicensesText] = useState(policy.forbidden_licenses.join("\n"));
+  const [profile, setProfile] = useState(policy.profile ?? "");
   const [publicKeysPem, setPublicKeysPem] = useState(policy.public_keys_pem);
   const [preview, setPreview] = useState<AdmissionPreviewResponse | null>(null);
   const [schemaError, setSchemaError] = useState(false);
-  const missingKeys = predicate === "not_verified" && publicKeysPem.trim() === "";
+  const missingKeys = requireVerified && publicKeysPem.trim() === "";
+
+  function licenses(): string[] {
+    return licensesText
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  function currentPayload(): AdmissionPolicyRequest {
+    return payloadFromFields(
+      enabled,
+      effect,
+      showSignature && requireSigned,
+      showSignature && requireVerified,
+      minFinding,
+      licenses(),
+      publicKeysPem,
+      profile.length > 0 ? profile : null,
+    );
+  }
 
   function rememberSchemaError(err: unknown) {
     const message = err instanceof ApiError ? err.message : "";
@@ -154,33 +222,41 @@ function AdmissionForm({
     }
   }
 
-  function onFieldsChange(
-    nextEnabled: boolean,
-    nextEffect: AdmissionEffectDto,
-    nextPredicate: AdmissionPredicateDto,
-    nextKeys: string,
-  ) {
-    setEnabled(nextEnabled);
-    setEffect(nextEffect);
-    setPredicate(nextPredicate);
-    setPublicKeysPem(nextKeys);
+  function touch() {
     setPreview(null);
+    setProfile("");
+  }
+
+  function applyProfile(next: string) {
+    setProfile(next);
+    setPreview(null);
+    if (next === "openchain_security") {
+      setEffect("warn");
+      setRequireSigned(false);
+      setRequireVerified(false);
+      setMinFinding("medium");
+      setLicensesText("");
+    } else if (next === "copyleft_restrict") {
+      setEffect("deny");
+      setRequireSigned(false);
+      setRequireVerified(false);
+      setMinFinding("");
+      setLicensesText(COPYLEFT_LICENSES.join("\n"));
+    } else if (next === "critical_only") {
+      setEffect("deny");
+      setRequireSigned(false);
+      setRequireVerified(false);
+      setMinFinding("critical");
+      setLicensesText("");
+    }
   }
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      await savePolicy.mutateAsync(
-        payloadFromFields(enabled, effect, predicate, publicKeysPem),
-      );
+      await savePolicy.mutateAsync(currentPayload());
       setSchemaError(false);
-      toast.success(
-        enabled
-          ? predicate === "not_verified"
-            ? t("admission.savedUnsigned")
-            : t("admission.savedUnsignedSig")
-          : t("admission.savedOff"),
-      );
+      toast.success(enabled ? t("admission.savedOn") : t("admission.savedOff"));
     } catch (err) {
       rememberSchemaError(err);
       toast.error(err instanceof ApiError ? err.message : t("admission.saveFailed"));
@@ -189,9 +265,7 @@ function AdmissionForm({
 
   async function onSimulate() {
     try {
-      const result = await dryRun.mutateAsync(
-        payloadFromFields(enabled, effect, predicate, publicKeysPem),
-      );
+      const result = await dryRun.mutateAsync(currentPayload());
       setPreview(result);
       setSchemaError(false);
       toast.success(previewMessage(result, t));
@@ -213,9 +287,10 @@ function AdmissionForm({
               type="checkbox"
               className="mt-1 size-4 accent-primary"
               checked={enabled}
-              onChange={(event) =>
-                onFieldsChange(event.target.checked, effect, predicate, publicKeysPem)
-              }
+              onChange={(event) => {
+                setEnabled(event.target.checked);
+                setPreview(null);
+              }}
               disabled={!canWrite}
             />
             <span>
@@ -225,6 +300,33 @@ function AdmissionForm({
               </span>
             </span>
           </label>
+          <div className="space-y-2">
+            <Label htmlFor="admission-profile">{t("admission.profile")}</Label>
+            <Select
+              value={profile.length > 0 ? profile : "none"}
+              onValueChange={(value) => applyProfile(value === "none" ? "" : value)}
+              disabled={!canWrite}
+            >
+              <SelectTrigger id="admission-profile">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t("admission.profileNone")}</SelectItem>
+                <SelectItem value="openchain_security">{t("admission.profileOpenchain")}</SelectItem>
+                <SelectItem value="copyleft_restrict">{t("admission.profileCopyleft")}</SelectItem>
+                <SelectItem value="critical_only">{t("admission.profileCritical")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {profile === "openchain_security"
+                ? t("admission.profileOpenchainHint")
+                : profile === "copyleft_restrict"
+                  ? t("admission.profileCopyleftHint")
+                  : profile === "critical_only"
+                    ? t("admission.profileCriticalHint")
+                    : t("admission.findingHint")}
+            </p>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>{t("admission.when")}</Label>
@@ -233,68 +335,118 @@ function AdmissionForm({
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="admission-predicate">{t("admission.if")}</Label>
+              <Label htmlFor="admission-effect">{t("admission.then")}</Label>
               <Select
-                value={predicate}
-                onValueChange={(value) =>
-                  onFieldsChange(
-                    enabled,
-                    effect,
-                    value as AdmissionPredicateDto,
-                    publicKeysPem,
-                  )
-                }
+                value={effect}
+                onValueChange={(value) => {
+                  setEffect(value as AdmissionEffectDto);
+                  touch();
+                }}
                 disabled={!canWrite}
               >
-                <SelectTrigger id="admission-predicate">
+                <SelectTrigger id="admission-effect">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="not_signed">{t("admission.notSigned")}</SelectItem>
-                  <SelectItem value="not_verified">{t("admission.notVerified")}</SelectItem>
+                  <SelectItem value="deny">{t("admission.denyPull")}</SelectItem>
+                  <SelectItem value="warn">{t("admission.warnAllow")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
+          {showSignature ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">{t("admission.if")}</p>
+              <label className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-primary"
+                  checked={requireSigned}
+                  onChange={(event) => {
+                    setRequireSigned(event.target.checked);
+                    touch();
+                  }}
+                  disabled={!canWrite}
+                />
+                <span>{t("admission.notSigned")}</span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-primary"
+                  checked={requireVerified}
+                  onChange={(event) => {
+                    setRequireVerified(event.target.checked);
+                    touch();
+                  }}
+                  disabled={!canWrite}
+                />
+                <span>{t("admission.notVerified")}</span>
+              </label>
+            </div>
+          ) : null}
+          {showSignature && requireVerified ? (
+            <div className="space-y-2">
+              <Label htmlFor="admission-keys">{t("admission.keys")}</Label>
+              <textarea
+                id="admission-keys"
+                className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                value={publicKeysPem}
+                onChange={(event) => {
+                  setPublicKeysPem(event.target.value);
+                  setPreview(null);
+                }}
+                disabled={!canWrite}
+                placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
+                spellCheck={false}
+              />
+              <p className="text-xs text-muted-foreground">{t("admission.keysHint")}</p>
+              {missingKeys ? (
+                <Alert>
+                  <AlertCircle />
+                  <AlertTitle>{t("admission.noKeysTitle")}</AlertTitle>
+                  <AlertDescription>{t("admission.noKeysBody")}</AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-2">
-            <Label htmlFor="admission-keys">{t("admission.keys")}</Label>
-            <textarea
-              id="admission-keys"
-              className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-              value={publicKeysPem}
-              onChange={(event) =>
-                onFieldsChange(enabled, effect, predicate, event.target.value)
-              }
-              disabled={!canWrite}
-              placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
-              spellCheck={false}
-            />
-            <p className="text-xs text-muted-foreground">{t("admission.keysHint")}</p>
-            {missingKeys ? (
-              <Alert>
-                <AlertCircle />
-                <AlertTitle>{t("admission.noKeysTitle")}</AlertTitle>
-                <AlertDescription>{t("admission.noKeysBody")}</AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="admission-effect">{t("admission.then")}</Label>
+            <Label htmlFor="admission-finding">{t("admission.findings")}</Label>
             <Select
-              value={effect}
-              onValueChange={(value) =>
-                onFieldsChange(enabled, value as AdmissionEffectDto, predicate, publicKeysPem)
-              }
+              value={minFinding.length > 0 ? minFinding : "off"}
+              onValueChange={(value) => {
+                setMinFinding(value === "off" ? "" : (value as FindingLevel));
+                touch();
+              }}
               disabled={!canWrite}
             >
-              <SelectTrigger id="admission-effect">
+              <SelectTrigger id="admission-finding">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="deny">{t("admission.denyPull")}</SelectItem>
-                <SelectItem value="warn">{t("admission.warnAllow")}</SelectItem>
+                <SelectItem value="off">{t("admission.findingOff")}</SelectItem>
+                <SelectItem value="medium">{t("admission.findingMedium")}</SelectItem>
+                <SelectItem value="high">{t("admission.findingHigh")}</SelectItem>
+                <SelectItem value="critical">{t("admission.findingCritical")}</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">{t("admission.findingHint")}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="admission-licenses">{t("admission.licenses")}</Label>
+            <textarea
+              id="admission-licenses"
+              className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              value={licensesText}
+              onChange={(event) => {
+                setLicensesText(event.target.value);
+                touch();
+              }}
+              disabled={!canWrite}
+              placeholder={t("admission.licensesPlaceholder")}
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted-foreground">{t("admission.licensesHint")}</p>
           </div>
         </li>
         {canWrite ? (

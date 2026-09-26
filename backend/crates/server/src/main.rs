@@ -518,7 +518,8 @@ fn build_app_state(
         admission_store,
         repository_store.clone(),
         list_repository_artifacts.clone(),
-    );
+    )
+    .with_assays(assay_store.clone());
     let packaging = packaging_registry(
         &config.public_base_url,
         &repository_store,

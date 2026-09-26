@@ -756,7 +756,7 @@ impl AdmissionStore for InMemoryAdmissionStore {
             .lock()
             .unwrap()
             .get(&repository_id)
-            .copied()
+            .cloned()
             .unwrap_or_else(AdmissionPolicy::inactive);
         let public_keys_pem = self
             .keys
