@@ -110,31 +110,24 @@ impl Config {
 ///
 /// Si `FERROBOX_ENV_FILE` apunta a un fichero (`.env_a`, `.env_b`),
 /// solo se carga ese: dos `cargo run` no se pisan el `.env` compartido.
-/// Si no, el último candidato gana. `backend/.env` (junto al crate del
-/// servidor) se aplica al final para que un `S3_BUCKET` exportado en
-/// la terminal no gane. El bucket no se lee de la base de datos.
+/// Un path relativo, o un absoluto que no existe, se busca subiendo
+/// desde el cwd por el nombre del fichero. Si no hay variable, el
+/// último candidato gana. `backend/.env` se aplica al final para que
+/// un `S3_BUCKET` exportado en la terminal no gane.
 pub fn load_dotenv() -> Vec<PathBuf> {
     let explicit = optional_env("FERROBOX_ENV_FILE");
     let mut loaded = Vec::new();
     for path in dotenv_candidates() {
-        let Some(canonical) = load_env_file(&path) else {
-            continue;
-        };
-        if loaded.iter().any(|seen| seen == &canonical) {
-            continue;
+        if let Probe::Loaded(canonical) = probe_env_file(&path) {
+            if loaded.iter().any(|seen| seen == &canonical) {
+                continue;
+            }
+            loaded.push(canonical);
         }
-        loaded.push(canonical);
     }
     if let Some(path) = explicit {
         if loaded.is_empty() {
-            let tried = dotenv_candidates_from(Some(&path))
-                .into_iter()
-                .map(|candidate| candidate.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            panic!(
-                "ferrobox: FERROBOX_ENV_FILE={path} was not found or could not be read (tried {tried})"
-            );
+            panic!("{}", env_file_not_found(&path));
         }
     }
     loaded
@@ -158,32 +151,76 @@ fn dotenv_candidates_from(explicit: Option<&str>) -> Vec<PathBuf> {
 }
 
 fn explicit_env_paths(path: &str) -> Vec<PathBuf> {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        return vec![path];
-    }
-    let crate_backend = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let given = PathBuf::from(path);
+    let name = given
+        .file_name()
+        .map_or_else(|| given.clone(), PathBuf::from);
     let mut paths = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        paths.push(cwd.join(&path));
-        paths.push(cwd.join("backend").join(&path));
-        paths.push(cwd.join("..").join(&path));
+    if given.is_absolute() {
+        paths.push(given);
     }
-    paths.push(crate_backend.join(&path));
-    paths.push(crate_backend.join("..").join(&path));
+    paths.extend(walk_named(&name));
+    let crate_backend = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    paths.push(crate_backend.join(&name));
+    paths.push(crate_backend.join("..").join(&name));
     paths
 }
 
-fn load_env_file(path: &std::path::Path) -> Option<PathBuf> {
-    if let Ok(canonical) = path.canonicalize() {
-        if dotenvy::from_path_override(&canonical).is_ok() {
-            return Some(canonical);
+fn walk_named(name: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let mut dir = cwd;
+    let mut paths = Vec::new();
+    for _ in 0..8 {
+        paths.push(dir.join(name));
+        if !dir.pop() {
+            break;
         }
     }
-    if path.is_file() && dotenvy::from_path_override(path).is_ok() {
-        return Some(path.to_path_buf());
+    paths
+}
+
+enum Probe {
+    Loaded(PathBuf),
+    Missing,
+    NotFile,
+    Error(String),
+}
+
+fn probe_env_file(path: &std::path::Path) -> Probe {
+    match path.metadata() {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Probe::Missing,
+        Err(err) => Probe::Error(err.to_string()),
+        Ok(meta) if !meta.is_file() => Probe::NotFile,
+        Ok(_) => match dotenvy::from_path_override(path) {
+            Ok(()) => Probe::Loaded(path.canonicalize().unwrap_or_else(|_| path.to_path_buf())),
+            Err(err) => Probe::Error(err.to_string()),
+        },
     }
-    None
+}
+
+fn env_file_not_found(requested: &str) -> String {
+    let mut lines = vec![format!("ferrobox: FERROBOX_ENV_FILE={requested}")];
+    let mut seen = Vec::new();
+    for path in dotenv_candidates_from(Some(requested)) {
+        let display = path.display().to_string();
+        if seen.iter().any(|previous: &String| previous == &display) {
+            continue;
+        }
+        seen.push(display.clone());
+        let detail = match probe_env_file(&path) {
+            Probe::Loaded(_) => continue,
+            Probe::Missing => "missing".to_string(),
+            Probe::NotFile => "not a file".to_string(),
+            Probe::Error(err) => err,
+        };
+        lines.push(format!("  {display}: {detail}"));
+    }
+    lines.push(
+        "Save .env_a and .env_b to disk, then from backend/: FERROBOX_ENV_FILE=.env_a cargo run -p ferrobox-server".to_string(),
+    );
+    lines.join("\n")
 }
 
 fn require_env(key: &'static str) -> Result<String, ConfigError> {
@@ -261,9 +298,25 @@ mod tests {
     }
 
     #[test]
-    fn absolute_env_file_is_used_as_is() {
+    fn absolute_env_file_is_tried_first_then_the_basename() {
         let paths = dotenv_candidates_from(Some("/tmp/.env_a"));
-        assert_eq!(paths, vec![PathBuf::from("/tmp/.env_a")]);
+        assert_eq!(paths.first(), Some(&PathBuf::from("/tmp/.env_a")));
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.file_name().and_then(|name| name.to_str()) == Some(".env_a")),
+            "expected to also search for the basename .env_a, got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn missing_env_file_lists_each_probe() {
+        let message = env_file_not_found("/tmp/ferrobox-no-such-env-file");
+        assert!(message.contains("missing"), "{message}");
+        assert!(
+            message.contains("/tmp/ferrobox-no-such-env-file"),
+            "{message}"
+        );
     }
 
     #[test]
