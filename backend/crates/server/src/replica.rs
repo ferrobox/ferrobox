@@ -1,4 +1,4 @@
-//! Rutas HTTP de réplica push hacia otra instancia.
+//! Rutas HTTP de réplica push o pull hacia otra instancia.
 
 use std::sync::Arc;
 
@@ -49,6 +49,7 @@ pub(crate) async fn save_policy(
             payload.remote_url,
             destination_id,
             payload.token,
+            payload.direction,
         )
         .await?;
     crate::audit::record(
@@ -78,6 +79,33 @@ pub(crate) async fn push_now(
         &state,
         &user,
         AuditAction::ReplicaPushed,
+        AuditTargetKind::Repository,
+        repository_id.to_string(),
+        format!(
+            "{} packages, {} artifacts, {} skipped",
+            outcome.packages_imported, outcome.artifacts_imported, outcome.skipped
+        ),
+    )
+    .await;
+    Ok(Json(ReplicaPushResponse {
+        packages_imported: outcome.packages_imported,
+        artifacts_imported: outcome.artifacts_imported,
+        skipped: outcome.skipped,
+    }))
+}
+
+pub(crate) async fn pull_now(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Json<ReplicaPushResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
+    let outcome = state.replica.pull_now(repository_id).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::ReplicaPulled,
         AuditTargetKind::Repository,
         repository_id.to_string(),
         format!(
@@ -328,6 +356,7 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["configured"], false);
         assert_eq!(json["has_token"], false);
+        assert_eq!(json["direction"], "push");
     }
 
     #[tokio::test]
@@ -373,5 +402,32 @@ mod tests {
         assert_eq!(json["configured"], true);
         assert_eq!(json["has_token"], true);
         assert_eq!(json["remote_url"], "http://peer.example/");
+        assert_eq!(json["direction"], "push");
+    }
+
+    #[tokio::test]
+    async fn save_stores_pull_direction() {
+        let (app, token, _, repo) = fixture().await;
+        let dest = uuid::Uuid::now_v7();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{repo}/replica"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"remote_url":"http://peer.example","destination_id":"{dest}","token":"t","direction":"pull"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["direction"], "pull");
     }
 }

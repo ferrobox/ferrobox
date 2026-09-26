@@ -337,6 +337,10 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             post(replica::push_now).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
         .route(
+            "/repositories/{repository_id}/replica/pull",
+            post(replica::pull_now).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
+        .route(
             "/repositories/{repository_id}/schedule",
             put(repositories::set_mirror_schedule),
         )

@@ -1,7 +1,7 @@
-//! Réplica push de un repositorio hacia otra instancia FerroBox.
+//! Réplica push o pull de un repositorio hacia otra instancia FerroBox.
 //!
-//! Una política por repositorio: URL remota, UUID del Forge destino y
-//! un token de API. El pull y el cron quedan para un corte posterior.
+//! Una política por repositorio: dirección, URL remota, UUID del Forge
+//! remoto y un token de API. El cron queda para un corte posterior.
 
 use thiserror::Error;
 use url::Url;
@@ -11,15 +11,25 @@ use crate::ids::RepositoryId;
 const MAX_URL_LENGTH: usize = 2048;
 const MAX_TOKEN_LENGTH: usize = 512;
 
-/// Destino de un push de réplica.
+/// Sentido de la réplica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplicaDirection {
+    /// Esta instancia exporta y hace `POST` al import remoto.
+    Push,
+    /// Esta instancia pide el export remoto y lo importa aquí.
+    Pull,
+}
+
+/// Destino de un push o pull de réplica.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaTarget {
     remote_url: Url,
     destination_id: RepositoryId,
     token: Option<String>,
+    direction: ReplicaDirection,
 }
 
-/// Resultado del último push.
+/// Resultado de la última réplica.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaRun {
     occurred_at: String,
@@ -60,6 +70,10 @@ pub enum ReplicaPolicyError {
     /// El destino es el mismo repositorio.
     #[error("replica destination cannot be the source repository")]
     SameRepository,
+
+    /// La dirección no es `push` ni `pull`.
+    #[error("replica direction must be push or pull")]
+    InvalidDirection,
 }
 
 impl ReplicaTarget {
@@ -84,6 +98,7 @@ impl ReplicaTarget {
             remote_url,
             destination_id,
             token,
+            direction: ReplicaDirection::Push,
         })
     }
 
@@ -115,6 +130,19 @@ impl ReplicaTarget {
         self
     }
 
+    /// Sentido guardado. Por defecto, push.
+    #[must_use]
+    pub fn direction(&self) -> ReplicaDirection {
+        self.direction
+    }
+
+    /// Sustituye el sentido.
+    #[must_use]
+    pub fn with_direction(mut self, direction: ReplicaDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
     /// URLs del `POST` de import en la instancia remota.
     ///
     /// Primero `{origen}/api/repositories/{id}/import` (compose / `FRONTEND_DIR`).
@@ -127,6 +155,41 @@ impl ReplicaTarget {
             format!("{origin}/api/repositories/{dest}/import"),
             format!("{origin}/repositories/{dest}/import"),
         ]
+    }
+
+    /// URLs del `GET` de export en la instancia remota.
+    #[must_use]
+    pub fn export_urls(&self) -> [String; 2] {
+        let origin = replica_origin(&self.remote_url);
+        let dest = self.destination_id;
+        [
+            format!("{origin}/api/repositories/{dest}/export"),
+            format!("{origin}/repositories/{dest}/export"),
+        ]
+    }
+}
+
+impl ReplicaDirection {
+    /// Etiqueta persistida (`push` / `pull`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Push => "push",
+            Self::Pull => "pull",
+        }
+    }
+
+    /// Interpreta la etiqueta. Vacío = push.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplicaPolicyError::InvalidDirection`] si no es `push` ni `pull`.
+    pub fn parse(raw: impl AsRef<str>) -> Result<Self, ReplicaPolicyError> {
+        match raw.as_ref().trim().to_ascii_lowercase().as_str() {
+            "" | "push" => Ok(Self::Push),
+            "pull" => Ok(Self::Pull),
+            _ => Err(ReplicaPolicyError::InvalidDirection),
+        }
     }
 }
 
@@ -173,13 +236,13 @@ impl ReplicaRun {
         self.skipped
     }
 
-    /// Error del remoto, si el push falló.
+    /// Error del remoto, si la réplica falló.
     #[must_use]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
-    /// `true` si el remoto aceptó el bundle.
+    /// `true` si el remoto o el import local aceptaron el bundle.
     #[must_use]
     pub fn succeeded(&self) -> bool {
         self.error.is_none()
@@ -292,12 +355,17 @@ mod tests {
             repo(1),
         )
         .unwrap();
+        assert_eq!(target.import_urls(), [
+            format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2)),
+            format!("http://127.0.0.1:3000/repositories/{}/import", repo(2)),
+        ]);
+        assert_eq!(target.export_urls(), [
+            format!("http://127.0.0.1:3000/api/repositories/{}/export", repo(2)),
+            format!("http://127.0.0.1:3000/repositories/{}/export", repo(2)),
+        ]);
         assert_eq!(
-            target.import_urls(),
-            [
-                format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2)),
-                format!("http://127.0.0.1:3000/repositories/{}/import", repo(2)),
-            ]
+            ReplicaDirection::parse("pull").unwrap(),
+            ReplicaDirection::Pull
         );
     }
 }

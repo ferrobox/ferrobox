@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::replica::{ReplicaPolicy, ReplicaRun, ReplicaTarget};
+use ferrobox_domain::replica::{ReplicaDirection, ReplicaPolicy, ReplicaRun, ReplicaTarget};
 use ferrobox_ports::replica_store::{ReplicaStore, ReplicaStoreError};
 use sqlx::PgPool;
 use thiserror::Error;
@@ -47,7 +47,7 @@ impl ReplicaStore for PostgresReplicaStore {
         let repository_id: Uuid = repository_id.into();
         let row = sqlx::query(
             r"
-            SELECT remote_url, destination_id, token, last_run_at,
+            SELECT remote_url, destination_id, token, direction, last_run_at,
                    last_packages_imported, last_artifacts_imported,
                    last_skipped, last_error
             FROM repository_replica
@@ -94,15 +94,16 @@ impl ReplicaStore for PostgresReplicaStore {
         sqlx::query(
             r"
             INSERT INTO repository_replica (
-                repository_id, remote_url, destination_id, token,
+                repository_id, remote_url, destination_id, token, direction,
                 last_run_at, last_packages_imported, last_artifacts_imported,
                 last_skipped, last_error
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (repository_id) DO UPDATE
             SET remote_url = EXCLUDED.remote_url,
                 destination_id = EXCLUDED.destination_id,
                 token = EXCLUDED.token,
+                direction = EXCLUDED.direction,
                 last_run_at = EXCLUDED.last_run_at,
                 last_packages_imported = EXCLUDED.last_packages_imported,
                 last_artifacts_imported = EXCLUDED.last_artifacts_imported,
@@ -115,6 +116,7 @@ impl ReplicaStore for PostgresReplicaStore {
         .bind(target.remote_url().as_str())
         .bind(Uuid::from(target.destination_id()))
         .bind(target.token())
+        .bind(target.direction().as_str())
         .bind(last_run_at)
         .bind(last.map(|run| i32::try_from(run.packages_imported()).unwrap_or(i32::MAX)))
         .bind(last.map(|run| i32::try_from(run.artifacts_imported()).unwrap_or(i32::MAX)))
@@ -142,13 +144,22 @@ fn policy_from_row(
     let token: Option<String> = row
         .try_get("token")
         .map_err(|err| backend_error(err.to_string()))?;
+    let direction = row
+        .try_get::<Option<String>, _>("direction")
+        .unwrap_or(None)
+        .as_deref()
+        .map(ReplicaDirection::parse)
+        .transpose()
+        .map_err(|err| backend_error(err.to_string()))?
+        .unwrap_or(ReplicaDirection::Push);
     let target = ReplicaTarget::new(
         remote_url,
         RepositoryId::from(destination_id),
         token,
         RepositoryId::from(source_id),
     )
-    .map_err(|err| backend_error(err.to_string()))?;
+    .map_err(|err| backend_error(err.to_string()))?
+    .with_direction(direction);
 
     let last_run_at: Option<chrono::DateTime<chrono::Utc>> = row
         .try_get("last_run_at")

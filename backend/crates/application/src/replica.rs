@@ -1,8 +1,7 @@
-//! Push de un repositorio hacia otra instancia FerroBox.
+//! Push o pull de un repositorio hacia otra instancia FerroBox.
 //!
-//! Empaqueta el catálogo como `ferrobox.repository.v1` y lo envía al
-//! import del destino (`/api/repositories/{id}/import` o, si no hay
-//! `/api`, `/repositories/{id}/import`). El pull y el cron no entran
+//! Push: empaqueta el catálogo y lo `POST` al import remoto.
+//! Pull: `GET` el export remoto y lo importa aquí. El cron no entra
 //! en este corte.
 
 use std::sync::Arc;
@@ -10,7 +9,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::Utc;
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::replica::{ReplicaPolicy, ReplicaPolicyError, ReplicaRun, ReplicaTarget};
+use ferrobox_domain::replica::{
+    ReplicaDirection, ReplicaPolicy, ReplicaPolicyError, ReplicaRun, ReplicaTarget,
+};
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use ferrobox_ports::replica_store::{ReplicaStore, ReplicaStoreError};
@@ -64,7 +65,7 @@ pub enum ReplicaError {
     Invalid(#[from] ReplicaPolicyError),
 
     /// El remoto rechazó el bundle o no respondió.
-    #[error("replica push failed: {0}")]
+    #[error("replica failed: {0}")]
     Remote(String),
 
     /// Fallo al consultar el repositorio.
@@ -133,13 +134,22 @@ impl ReplicaService {
         remote_url: Option<String>,
         destination_id: Option<Uuid>,
         token: Option<String>,
+        direction: Option<String>,
     ) -> Result<ReplicaPolicy, ReplicaError> {
         self.require_pushable(repository_id).await?;
         let existing = self.load_policy(repository_id).await?;
+        let direction = match direction.as_deref() {
+            Some(raw) if !raw.trim().is_empty() => ReplicaDirection::parse(raw)?,
+            _ => existing
+                .target()
+                .map(ReplicaTarget::direction)
+                .unwrap_or(ReplicaDirection::Push),
+        };
         let target = match (remote_url, destination_id) {
             (Some(url), Some(destination)) if !url.trim().is_empty() => {
                 let incoming =
-                    ReplicaTarget::new(url, RepositoryId::from(destination), token, repository_id)?;
+                    ReplicaTarget::new(url, RepositoryId::from(destination), token, repository_id)?
+                        .with_direction(direction);
                 Some(if incoming.token().is_some() {
                     incoming
                 } else {
@@ -214,6 +224,65 @@ impl ReplicaService {
         })
     }
 
+    /// Pide el export remoto y lo importa en este repositorio.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplicaError::NotConfigured`], [`ReplicaError::MissingToken`]
+    /// o el remoto / el import local fallan.
+    pub async fn pull_now(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<ReplicaPushOutcome, ReplicaError> {
+        self.require_pushable(repository_id).await?;
+        let policy = self.load_policy(repository_id).await?;
+        let target = policy
+            .target()
+            .cloned()
+            .ok_or(ReplicaError::NotConfigured)?;
+        let token = target
+            .token()
+            .ok_or(ReplicaError::MissingToken)?
+            .to_string();
+        let auth = format!("Bearer {token}");
+        let response = self.get_export(&target, &auth).await;
+
+        let run = match response {
+            Ok(response) if response.is_success() => {
+                match self.bundles.import(repository_id, response.body).await {
+                    Ok(outcome) => ReplicaRun::new(
+                        Utc::now().to_rfc3339(),
+                        outcome.packages_imported,
+                        outcome.artifacts_imported,
+                        outcome.skipped,
+                        None,
+                    ),
+                    Err(err) => {
+                        ReplicaRun::new(Utc::now().to_rfc3339(), 0, 0, 0, Some(err.to_string()))
+                    }
+                }
+            }
+            Ok(response) => ReplicaRun::new(
+                Utc::now().to_rfc3339(),
+                0,
+                0,
+                0,
+                Some(remote_status_message(response.status, &response.body)),
+            ),
+            Err(err) => ReplicaRun::new(Utc::now().to_rfc3339(), 0, 0, 0, Some(err.to_string())),
+        };
+        let saved = policy.with_last_run(run.clone());
+        self.store.save(repository_id, &saved).await?;
+        if let Some(error) = run.error() {
+            return Err(ReplicaError::Remote(error.to_string()));
+        }
+        Ok(ReplicaPushOutcome {
+            packages_imported: run.packages_imported(),
+            artifacts_imported: run.artifacts_imported(),
+            skipped: run.skipped(),
+        })
+    }
+
     async fn require_pushable(&self, repository_id: RepositoryId) -> Result<(), ReplicaError> {
         let repository = self.repositories.execute(repository_id).await?;
         if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
@@ -235,11 +304,10 @@ impl ReplicaService {
             let more = index + 1 < urls.len();
             match self
                 .http_client
-                .post_with_headers(
-                    url,
-                    body.clone(),
-                    &[("content-type", content_type), ("authorization", auth)],
-                )
+                .post_with_headers(url, body.clone(), &[
+                    ("content-type", content_type),
+                    ("authorization", auth),
+                ])
                 .await
             {
                 Ok(response) if response.is_success() || response.status != 404 || !more => {
@@ -251,6 +319,31 @@ impl ReplicaService {
             }
         }
         Ok(last_not_found.expect("import_urls is not empty"))
+    }
+
+    async fn get_export(
+        &self,
+        target: &ReplicaTarget,
+        auth: &str,
+    ) -> Result<ferrobox_ports::http_client::HttpResponse, ReplicaError> {
+        let urls = target.export_urls();
+        let mut last_not_found = None;
+        for (index, url) in urls.iter().enumerate() {
+            let more = index + 1 < urls.len();
+            match self
+                .http_client
+                .get_with_headers(url, &[("authorization", auth)])
+                .await
+            {
+                Ok(response) if response.is_success() || response.status != 404 || !more => {
+                    return Ok(response);
+                }
+                Ok(not_found) => last_not_found = Some(not_found),
+                Err(HttpClientError::Status { status: 404, .. }) if more => {}
+                Err(err) => return Err(remote_error(err)),
+            }
+        }
+        Ok(last_not_found.expect("export_urls is not empty"))
     }
 
     async fn load_policy(
@@ -412,6 +505,7 @@ mod tests {
                 Some("http://peer.example".into()),
                 Some(destination.id().into()),
                 Some("peer-token".into()),
+                None,
             )
             .await
             .unwrap();
@@ -485,6 +579,7 @@ mod tests {
                 Some("http://peer.example".into()),
                 Some(destination.id().into()),
                 Some("tok".into()),
+                None,
             )
             .await
             .unwrap();
@@ -533,6 +628,7 @@ mod tests {
                 Some("http://peer.example".into()),
                 Some(member.id().into()),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -569,6 +665,7 @@ mod tests {
                 Some("http://peer.example".into()),
                 Some(destination.id().into()),
                 Some("tok".into()),
+                None,
             )
             .await
             .unwrap();
@@ -576,5 +673,133 @@ mod tests {
         assert!(matches!(err, ReplicaError::Remote(_)));
         let saved = store.find_by_repository(source.id()).await.unwrap();
         assert!(saved.last_run().unwrap().error().unwrap().contains("403"));
+    }
+
+    #[tokio::test]
+    async fn pull_imports_the_remote_export_into_this_repository() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let source = forge("src");
+        let destination = forge("dst");
+        repositories.save(&source).await.unwrap();
+        repositories.save(&destination).await.unwrap();
+        let quota = QuotaService::new(
+            repositories.clone(),
+            artifacts.clone(),
+            Arc::new(InMemoryQuotaStore::default()),
+        );
+        PublishArtifactUseCase::new(
+            repositories.clone(),
+            artifacts.clone(),
+            storage.clone(),
+            quota.clone(),
+        )
+        .execute(source.id(), Bytes::from_static(b"pulled-bytes"))
+        .await
+        .unwrap();
+        let bundles = RepositoryBundleService::new(
+            repositories.clone(),
+            artifacts.clone(),
+            index.clone(),
+            storage.clone(),
+            quota,
+        );
+        let exported = bundles.export(source.id()).await.unwrap();
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub(
+            &format!(
+                "http://peer.example/api/repositories/{}/export",
+                source.id()
+            ),
+            200,
+            exported.bytes,
+        );
+
+        let (replica, _) = service(repositories, artifacts.clone(), index, storage, http);
+        replica
+            .save_policy(
+                destination.id(),
+                Some("http://peer.example".into()),
+                Some(source.id().into()),
+                Some("tok".into()),
+                Some("pull".into()),
+            )
+            .await
+            .unwrap();
+
+        let outcome = replica.pull_now(destination.id()).await.unwrap();
+        assert_eq!(outcome.artifacts_imported, 1);
+        assert_eq!(
+            artifacts
+                .find_by_repository_id(destination.id())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_falls_back_to_the_cargo_run_export_path() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let source = forge("src");
+        let destination = forge("dst");
+        repositories.save(&source).await.unwrap();
+        repositories.save(&destination).await.unwrap();
+        let quota = QuotaService::new(
+            repositories.clone(),
+            artifacts.clone(),
+            Arc::new(InMemoryQuotaStore::default()),
+        );
+        PublishArtifactUseCase::new(
+            repositories.clone(),
+            artifacts.clone(),
+            storage.clone(),
+            quota.clone(),
+        )
+        .execute(source.id(), Bytes::from_static(b"pulled-bytes"))
+        .await
+        .unwrap();
+        let bundles = RepositoryBundleService::new(
+            repositories.clone(),
+            artifacts.clone(),
+            index.clone(),
+            storage.clone(),
+            quota,
+        );
+        let exported = bundles.export(source.id()).await.unwrap();
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub_response(
+            &format!(
+                "http://peer.example/api/repositories/{}/export",
+                source.id()
+            ),
+            HttpResponse::new(404, Bytes::new()),
+        );
+        http.stub(
+            &format!("http://peer.example/repositories/{}/export", source.id()),
+            200,
+            exported.bytes,
+        );
+
+        let (replica, _) = service(repositories, artifacts.clone(), index, storage, http);
+        replica
+            .save_policy(
+                destination.id(),
+                Some("http://peer.example".into()),
+                Some(source.id().into()),
+                Some("tok".into()),
+                Some("pull".into()),
+            )
+            .await
+            .unwrap();
+
+        let outcome = replica.pull_now(destination.id()).await.unwrap();
+        assert_eq!(outcome.artifacts_imported, 1);
     }
 }

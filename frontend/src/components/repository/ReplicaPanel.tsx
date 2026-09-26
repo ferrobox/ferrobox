@@ -1,23 +1,36 @@
 import { type FormEvent, useState } from "react";
-import { AlertCircle, Save, Upload } from "lucide-react";
+import { AlertCircle, Download, Save, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import type { ReplicaPolicyRequest } from "@/api/generated/ReplicaPolicyRequest";
 import type { ReplicaPolicyResponse } from "@/api/generated/ReplicaPolicyResponse";
-import { usePushReplica, useReplicaPolicy, useSaveReplicaPolicy } from "@/api/queries";
+import {
+  usePullReplica,
+  usePushReplica,
+  useReplicaPolicy,
+  useSaveReplicaPolicy,
+} from "@/api/queries";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const EMPTY: ReplicaPolicyResponse = {
   configured: false,
   remote_url: null,
   destination_id: null,
+  direction: "push",
   has_token: false,
   last_run: null,
 };
@@ -71,9 +84,13 @@ function ReplicaForm({
   const { t } = useTranslation();
   const savePolicy = useSaveReplicaPolicy(repositoryId);
   const pushReplica = usePushReplica(repositoryId);
+  const pullReplica = usePullReplica(repositoryId);
   const [remoteUrl, setRemoteUrl] = useState(policy.remote_url ?? "");
   const [destinationId, setDestinationId] = useState(policy.destination_id ?? "");
+  const [direction, setDirection] = useState(policy.direction === "pull" ? "pull" : "push");
   const [token, setToken] = useState("");
+  const pulling = direction === "pull";
+  const running = pushReplica.isPending || pullReplica.isPending;
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -81,6 +98,7 @@ function ReplicaForm({
       remote_url: remoteUrl.trim() || undefined,
       destination_id: destinationId.trim() || undefined,
       token: token.trim() || undefined,
+      direction,
     };
     try {
       await savePolicy.mutateAsync(payload);
@@ -95,23 +113,46 @@ function ReplicaForm({
     }
   }
 
-  async function onPush() {
+  async function onReplicate() {
     try {
-      const outcome = await pushReplica.mutateAsync();
+      const outcome = pulling
+        ? await pullReplica.mutateAsync()
+        : await pushReplica.mutateAsync();
       toast.success(
-        t("replica.pushed", {
+        t(pulling ? "replica.pulled" : "replica.pushed", {
           packages: outcome.packages_imported,
           artifacts: outcome.artifacts_imported,
           skipped: outcome.skipped,
         }),
       );
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : t("replica.pushFailed"));
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : t(pulling ? "replica.pullFailed" : "replica.pushFailed"),
+      );
     }
   }
 
   return (
     <form onSubmit={(event) => void onSave(event)} className="space-y-5">
+      <div className="space-y-2">
+        <Label htmlFor="replica-direction">{t("replica.direction")}</Label>
+        <Select
+          value={direction}
+          onValueChange={(value) => setDirection(value === "pull" ? "pull" : "push")}
+          disabled={!canWrite}
+        >
+          <SelectTrigger id="replica-direction" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="push">{t("replica.directionPush")}</SelectItem>
+            <SelectItem value="pull">{t("replica.directionPull")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-sm text-muted-foreground">{t("replica.directionHint")}</p>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="replica-url">{t("replica.remoteUrl")}</Label>
         <Input
@@ -122,10 +163,14 @@ function ReplicaForm({
           disabled={!canWrite}
           autoComplete="off"
         />
-        <p className="text-sm text-muted-foreground">{t("replica.remoteUrlHint")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(pulling ? "replica.remoteUrlHintPull" : "replica.remoteUrlHintPush")}
+        </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="replica-destination">{t("replica.destination")}</Label>
+        <Label htmlFor="replica-destination">
+          {t(pulling ? "replica.destinationPull" : "replica.destination")}
+        </Label>
         <Input
           id="replica-destination"
           value={destinationId}
@@ -135,7 +180,9 @@ function ReplicaForm({
           className="font-mono"
           autoComplete="off"
         />
-        <p className="text-sm text-muted-foreground">{t("replica.destinationHint")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(pulling ? "replica.destinationHintPull" : "replica.destinationHint")}
+        </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor="replica-token">{t("replica.token")}</Label>
@@ -144,11 +191,17 @@ function ReplicaForm({
           type="password"
           value={token}
           onChange={(event) => setToken(event.target.value)}
-          placeholder={policy.has_token ? t("replica.tokenKept") : t("replica.tokenPlaceholder")}
+          placeholder={
+            policy.has_token
+              ? t("replica.tokenKept")
+              : t(pulling ? "replica.tokenPlaceholderPull" : "replica.tokenPlaceholder")
+          }
           disabled={!canWrite}
           autoComplete="off"
         />
-        <p className="text-sm text-muted-foreground">{t("replica.tokenHint")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(pulling ? "replica.tokenHintPull" : "replica.tokenHint")}
+        </p>
       </div>
 
       {policy.last_run ? (
@@ -177,11 +230,11 @@ function ReplicaForm({
           </Button>
           <Button
             type="button"
-            disabled={pushReplica.isPending || !policy.configured}
-            onClick={() => void onPush()}
+            disabled={running || !policy.configured}
+            onClick={() => void onReplicate()}
           >
-            <Upload />
-            {pushReplica.isPending ? t("replica.pushing") : t("replica.pushNow")}
+            {pulling ? <Download /> : <Upload />}
+            {running ? t("replica.pushing") : t("replica.pushNow")}
           </Button>
         </div>
       ) : (

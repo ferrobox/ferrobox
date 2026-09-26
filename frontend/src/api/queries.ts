@@ -707,15 +707,33 @@ export function useSaveReplicaPolicy(repositoryId: string) {
   });
 }
 
+function invalidateReplica(queryClient: ReturnType<typeof useQueryClient>, repositoryId: string) {
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.repositoryReplica(repositoryId),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.repositoryArtifacts(repositoryId),
+  });
+}
+
 export function usePushReplica(repositoryId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () => api.pushReplica(repositoryId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.repositoryReplica(repositoryId),
-      });
+      invalidateReplica(queryClient, repositoryId);
+    },
+  });
+}
+
+export function usePullReplica(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.pullReplica(repositoryId),
+    onSuccess: () => {
+      invalidateReplica(queryClient, repositoryId);
     },
   });
 }
