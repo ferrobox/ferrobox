@@ -306,6 +306,14 @@ async fn download(
     let version =
         PackageVersion::parse(version).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let coordinate = PackageCoordinate::new(PackageEcosystem::Cargo, name, version);
+    state
+        .admission
+        .enforce_package_pull(
+            repository.id(),
+            coordinate.name().as_str(),
+            coordinate.version().as_str(),
+        )
+        .await?;
 
     let content = strategy.download(&repository, &coordinate).await?;
     Ok(content)

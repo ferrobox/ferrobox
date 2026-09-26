@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use ferrobox_domain::admission::AdmissionPolicy;
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::RepositoryId;
 use uuid::Uuid;
@@ -36,18 +35,13 @@ pub(crate) async fn save_policy(
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
-    let policy = AdmissionPolicy::parse(
-        payload.enabled,
-        payload.when.as_str(),
-        payload.predicate.as_str(),
-        payload.effect.as_str(),
-    )?;
+    let (policy, public_keys_pem) = payload.into_policy()?;
     let saved = state
         .admission
         .save_policy(
             RepositoryId::from(repository_id),
             policy,
-            payload.public_keys_pem,
+            public_keys_pem,
         )
         .await?;
     crate::audit::record(
@@ -59,7 +53,7 @@ pub(crate) async fn save_policy(
         format!(
             "{} {} {}",
             saved.policy.when().as_str(),
-            saved.policy.predicate().as_str(),
+            saved.policy.clauses().encode(),
             saved.policy.effect().as_str()
         ),
     )
@@ -74,18 +68,13 @@ pub(crate) async fn dry_run(
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPreviewResponse>, ApiError> {
     require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
-    let policy = AdmissionPolicy::parse(
-        payload.enabled,
-        payload.when.as_str(),
-        payload.predicate.as_str(),
-        payload.effect.as_str(),
-    )?;
+    let (policy, public_keys_pem) = payload.into_policy()?;
     let preview = state
         .admission
         .dry_run(
             RepositoryId::from(repository_id),
             policy,
-            payload.public_keys_pem,
+            public_keys_pem,
         )
         .await?;
     Ok(Json(AdmissionPreviewResponse::from(preview)))
@@ -242,7 +231,8 @@ mod tests {
                 Arc::new(InMemoryAdmissionStore::default()),
                 repository_store.clone(),
                 list_repository_artifacts,
-            ),
+            )
+            .with_assays(assay_store.clone()),
             retention: RetentionService::new(
                 repository_store.clone(),
                 artifact_store,
@@ -486,7 +476,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_alloy_and_non_oci_targets() {
+    async fn rejects_alloy_and_accepts_cargo() {
         let fixture = fixture().await;
 
         let response = fixture
@@ -514,7 +504,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -573,5 +563,65 @@ mod tests {
                 .unwrap()
                 .contains("BEGIN PUBLIC KEY")
         );
+    }
+
+    #[tokio::test]
+    async fn save_and_get_roundtrip_finding_and_license_clauses() {
+        let fixture = fixture().await;
+        let body = r#"{
+            "enabled":false,
+            "when":"pull",
+            "predicate":"not_signed",
+            "effect":"warn",
+            "require_signed":false,
+            "require_verified":false,
+            "min_finding":"medium",
+            "forbidden_licenses":[],
+            "profile":"openchain_security"
+        }"#;
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{}/admission", fixture.cargo))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(json["enabled"], false);
+        assert_eq!(json["effect"], "warn");
+        assert_eq!(json["require_signed"], false);
+        assert_eq!(json["min_finding"], "medium");
+        assert_eq!(json["profile"], "openchain_security");
+
+        let response = fixture
+            .app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repositories/{}/admission", fixture.cargo))
+                    .header("Authorization", format!("Bearer {}", fixture.token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["min_finding"], "medium");
+        assert_eq!(json["profile"], "openchain_security");
+        assert_eq!(json["require_signed"], false);
     }
 }

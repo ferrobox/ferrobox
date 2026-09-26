@@ -1177,6 +1177,7 @@ pub(crate) enum AdmissionPredicateDto {
 }
 
 impl AdmissionPredicateDto {
+    #[allow(dead_code)]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::NotSigned => "not_signed",
@@ -1231,13 +1232,28 @@ pub(crate) struct AdmissionPolicyRequest {
     pub(crate) enabled: bool,
     /// Momento de evaluación.
     pub(crate) when: AdmissionWhenDto,
-    /// Condición que dispara el efecto.
+    /// Condición de firma (compatibilidad).
     pub(crate) predicate: AdmissionPredicateDto,
     /// Efecto si la condición se cumple.
     pub(crate) effect: AdmissionEffectDto,
     /// PEM de claves públicas Cosign (`cosign generate-key-pair`).
     #[serde(default)]
     pub(crate) public_keys_pem: String,
+    /// Exigir firma Cosign / Notation.
+    #[serde(default)]
+    pub(crate) require_signed: Option<bool>,
+    /// Exigir verificación contra las claves PEM.
+    #[serde(default)]
+    pub(crate) require_verified: Option<bool>,
+    /// Umbral de hallazgo (`medium`, `high`, `critical`). Vacío = apagado.
+    #[serde(default)]
+    pub(crate) min_finding: Option<String>,
+    /// Licencias SPDX denegadas.
+    #[serde(default)]
+    pub(crate) forbidden_licenses: Vec<String>,
+    /// Perfil que rellenó la regla, si se eligió uno.
+    #[serde(default)]
+    pub(crate) profile: Option<String>,
 }
 
 /// Política de admisión de un repositorio.
@@ -1248,22 +1264,89 @@ pub(crate) struct AdmissionPolicyResponse {
     pub(crate) enabled: bool,
     /// Momento de evaluación.
     pub(crate) when: AdmissionWhenDto,
-    /// Condición que dispara el efecto.
+    /// Condición de firma (compatibilidad).
     pub(crate) predicate: AdmissionPredicateDto,
     /// Efecto si la condición se cumple.
     pub(crate) effect: AdmissionEffectDto,
     /// PEM de claves públicas Cosign del repositorio.
     pub(crate) public_keys_pem: String,
+    /// Exigir firma Cosign / Notation.
+    pub(crate) require_signed: bool,
+    /// Exigir verificación contra las claves PEM.
+    pub(crate) require_verified: bool,
+    /// Umbral de hallazgo, si la cláusula está armada.
+    pub(crate) min_finding: Option<String>,
+    /// Licencias SPDX denegadas.
+    pub(crate) forbidden_licenses: Vec<String>,
+    /// Perfil que rellenó la regla, si se eligió uno.
+    pub(crate) profile: Option<String>,
+}
+
+impl AdmissionPolicyRequest {
+    pub(crate) fn into_policy(
+        self,
+    ) -> Result<
+        (ferrobox_domain::admission::AdmissionPolicy, String),
+        ferrobox_domain::admission::AdmissionPolicyError,
+    > {
+        let require_signed = self.require_signed.unwrap_or(matches!(
+            self.predicate,
+            AdmissionPredicateDto::NotSigned
+        ));
+        let require_verified = self.require_verified.unwrap_or(matches!(
+            self.predicate,
+            AdmissionPredicateDto::NotVerified
+        ));
+        let min_finding = match self.min_finding.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        {
+            None => None,
+            Some("critical") => Some(ferrobox_domain::assay::AssaySeverity::Critical),
+            Some("high") => Some(ferrobox_domain::assay::AssaySeverity::High),
+            Some("medium") => Some(ferrobox_domain::assay::AssaySeverity::Medium),
+            Some("low") => Some(ferrobox_domain::assay::AssaySeverity::Low),
+            Some(other) => {
+                return Err(
+                    ferrobox_domain::admission::AdmissionPolicyError::UnknownFinding(
+                        other.to_string(),
+                    ),
+                );
+            }
+        };
+        let profile = self
+            .profile
+            .as_deref()
+            .and_then(ferrobox_domain::admission::AdmissionProfile::parse);
+        let clauses = ferrobox_domain::admission::AdmissionClauses::new(
+            require_signed,
+            require_verified,
+            min_finding,
+            self.forbidden_licenses,
+            profile,
+        );
+        let policy = ferrobox_domain::admission::AdmissionPolicy::compose(
+            self.enabled,
+            self.when.as_str(),
+            self.effect.as_str(),
+            clauses,
+        )?;
+        Ok((policy, self.public_keys_pem))
+    }
 }
 
 impl From<ferrobox_ports::admission_store::AdmissionRecord> for AdmissionPolicyResponse {
     fn from(record: ferrobox_ports::admission_store::AdmissionRecord) -> Self {
+        let clauses = record.policy.clauses();
         Self {
             enabled: record.policy.enabled(),
             when: record.policy.when().into(),
             predicate: record.policy.predicate().into(),
             effect: record.policy.effect().into(),
             public_keys_pem: record.public_keys_pem,
+            require_signed: clauses.require_signed(),
+            require_verified: clauses.require_verified(),
+            min_finding: clauses.min_finding().map(|severity| severity.as_str().to_string()),
+            forbidden_licenses: clauses.forbidden_licenses().to_vec(),
+            profile: clauses.profile().map(|profile| profile.as_str().to_string()),
         }
     }
 }

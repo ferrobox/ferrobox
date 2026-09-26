@@ -49,7 +49,7 @@ impl AdmissionStore for PostgresAdmissionStore {
         let repository_id: Uuid = repository_id.into();
         let row = sqlx::query(
             r"
-            SELECT enabled, moment, predicate, effect, public_keys_pem
+            SELECT enabled, moment, predicate, effect, public_keys_pem, clauses
             FROM repository_admission
             WHERE repository_id = $1
             ",
@@ -76,9 +76,16 @@ impl AdmissionStore for PostgresAdmissionStore {
                     .map_err(|err| backend_error(err.to_string()))?;
                 let public_keys_pem: String = sqlx::Row::try_get(&row, "public_keys_pem")
                     .map_err(|err| backend_error(err.to_string()))?;
+                let clauses: String = sqlx::Row::try_get(&row, "clauses").unwrap_or_default();
                 Ok(AdmissionRecord {
-                    policy: AdmissionPolicy::parse(enabled, &moment, &predicate, &effect)
-                        .map_err(|err| backend_error(err.to_string()))?,
+                    policy: AdmissionPolicy::parse_stored(
+                        enabled,
+                        &moment,
+                        &predicate,
+                        &effect,
+                        &clauses,
+                    )
+                    .map_err(|err| backend_error(err.to_string()))?,
                     public_keys_pem,
                 })
             }
@@ -95,14 +102,15 @@ impl AdmissionStore for PostgresAdmissionStore {
         sqlx::query(
             r"
             INSERT INTO repository_admission
-                (repository_id, enabled, moment, predicate, effect, public_keys_pem)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (repository_id, enabled, moment, predicate, effect, public_keys_pem, clauses)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (repository_id) DO UPDATE
             SET enabled = EXCLUDED.enabled,
                 moment = EXCLUDED.moment,
                 predicate = EXCLUDED.predicate,
                 effect = EXCLUDED.effect,
                 public_keys_pem = EXCLUDED.public_keys_pem,
+                clauses = EXCLUDED.clauses,
                 updated_at = now()
             ",
         )
@@ -112,6 +120,7 @@ impl AdmissionStore for PostgresAdmissionStore {
         .bind(policy.predicate().as_str())
         .bind(policy.effect().as_str())
         .bind(public_keys_pem)
+        .bind(policy.clauses().encode())
         .execute(&self.pool)
         .await
         .map_err(|err| map_sqlx(&err))?;

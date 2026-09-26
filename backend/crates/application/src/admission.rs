@@ -4,12 +4,15 @@ use std::sync::Arc;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use ferrobox_domain::admission::{
-    AdmissionEffect, AdmissionEvent, AdmissionPolicy, AdmissionPolicyError,
+    AdmissionEffect, AdmissionEvent, AdmissionFacts, AdmissionHit, AdmissionPolicy,
+    AdmissionPolicyError,
 };
+use ferrobox_domain::assay::{Assay, AssaySeverity, AssayStatus};
 use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
-use ferrobox_domain::package_coordinate::PackageEcosystem;
+use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName, PackageVersion};
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
+use ferrobox_ports::assay_store::AssayStore;
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
@@ -30,8 +33,8 @@ pub enum AdmissionError {
     #[error("alloy repositories do not have their own admission policy")]
     AlloyRepository,
 
-    /// Solo Forge o Mirror OCI/Helm admiten política de firma.
-    #[error("admission policies apply to Forge and Mirror OCI and Helm repositories")]
+    /// El repositorio no admite política de admisión.
+    #[error("admission policies apply to Forge and Mirror repositories")]
     UnsupportedRepository,
 
     /// La política enviada no es válida.
@@ -79,6 +82,7 @@ pub struct AdmissionService {
     store: Arc<dyn AdmissionStore>,
     repositories: Arc<dyn RepositoryStore>,
     list_artifacts: ListRepositoryArtifactsUseCase,
+    assays: Option<Arc<dyn AssayStore>>,
 }
 
 impl AdmissionService {
@@ -93,7 +97,16 @@ impl AdmissionService {
             store,
             repositories,
             list_artifacts,
+            assays: None,
         }
+    }
+
+    /// Ensayes para evaluar CVE y licencia. Sin ellos, esas cláusulas
+    /// no disparan (fail-open).
+    #[must_use]
+    pub fn with_assays(mut self, assays: Arc<dyn AssayStore>) -> Self {
+        self.assays = Some(assays);
+        self
     }
 
     /// Devuelve la política guardada, o la inactiva por defecto.
@@ -139,7 +152,7 @@ impl AdmissionService {
         self.require_target(repository_id).await?;
         let public_keys_pem = public_keys_pem.into();
         self.store
-            .save(repository_id, policy, &public_keys_pem)
+            .save(repository_id, policy.clone(), &public_keys_pem)
             .await?;
         Ok(AdmissionRecord {
             policy,
@@ -163,7 +176,14 @@ impl AdmissionService {
             .list_artifacts
             .execute_with_keys(repository_id, &public_keys_pem.into())
             .await?;
-        Ok(preview_against(&listed, policy))
+        let assays = self.load_assays(repository_id).await;
+        let consider_signature = self.considers_signature(repository_id).await;
+        Ok(preview_against(
+            &listed,
+            &policy,
+            &assays,
+            consider_signature,
+        ))
     }
 
     /// Últimos avisos y denegaciones del repositorio.
@@ -201,21 +221,13 @@ impl AdmissionService {
             return Ok(());
         };
         let policy = record.policy;
-        let Some(effect) = policy.apply_pull(signed, verified) else {
+        let facts = self
+            .facts_for(repository_id, name, reference, signed, verified)
+            .await;
+        let Some((effect, hit)) = policy.apply_facts(&facts) else {
             return Ok(());
         };
-        let reason = match (policy.predicate(), effect) {
-            (
-                ferrobox_domain::admission::AdmissionPredicate::NotVerified,
-                AdmissionEffect::Deny,
-            ) => "no está verificada: se denegó el pull".to_string(),
-            (
-                ferrobox_domain::admission::AdmissionPredicate::NotVerified,
-                AdmissionEffect::Warn,
-            ) => "no está verificada: solo aviso, el pull siguió".to_string(),
-            (_, AdmissionEffect::Deny) => "no está firmada: se denegó el pull".to_string(),
-            (_, AdmissionEffect::Warn) => "no está firmada: solo aviso, el pull siguió".to_string(),
-        };
+        let reason = hit_reason(&hit, effect, true);
         let now = Utc::now();
         let recent = self
             .store
@@ -236,14 +248,26 @@ impl AdmissionService {
         }
         if matches!(effect, AdmissionEffect::Deny) {
             return Err(PackagingError::PolicyDenied(format!(
-                "admission policy denies pull of {name}:{reference}: artifact is not {}",
-                match policy.predicate() {
-                    ferrobox_domain::admission::AdmissionPredicate::NotVerified => "verified",
-                    ferrobox_domain::admission::AdmissionPredicate::NotSigned => "signed",
-                }
+                "admission policy denies pull of {name}:{reference}: {}",
+                hit_reason(&hit, effect, true)
             )));
         }
         Ok(())
+    }
+
+    /// Como [`Self::enforce_pull`], para un paquete sin firma Cosign.
+    ///
+    /// # Errors
+    ///
+    /// [`PackagingError::PolicyDenied`] si hay que bloquear.
+    pub async fn enforce_package_pull(
+        &self,
+        repository_id: RepositoryId,
+        name: &str,
+        version: &str,
+    ) -> Result<(), PackagingError> {
+        self.enforce_pull(repository_id, name, version, true, true)
+            .await
     }
 
     async fn require_target(&self, repository_id: RepositoryId) -> Result<(), AdmissionError> {
@@ -253,19 +277,71 @@ impl AdmissionService {
         if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
             return Err(AdmissionError::AlloyRepository);
         }
-        let supported_kind = matches!(
+        if !matches!(
             repository.kind(),
             RepositoryKind::Forge | RepositoryKind::Mirror { .. }
-        );
-        if !supported_kind
-            || !matches!(
-                repository.ecosystem(),
-                PackageEcosystem::Oci | PackageEcosystem::Helm
-            )
-        {
+        ) {
             return Err(AdmissionError::UnsupportedRepository);
         }
         Ok(())
+    }
+
+    async fn considers_signature(&self, repository_id: RepositoryId) -> bool {
+        let Ok(Some(repository)) = self.repositories.find_by_id(repository_id).await else {
+            return false;
+        };
+        matches!(
+            repository.ecosystem(),
+            PackageEcosystem::Oci | PackageEcosystem::Helm
+        )
+    }
+
+    async fn load_assays(&self, repository_id: RepositoryId) -> Vec<Assay> {
+        let Some(assays) = &self.assays else {
+            return Vec::new();
+        };
+        assays
+            .find_by_repository(repository_id)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn facts_for(
+        &self,
+        repository_id: RepositoryId,
+        name: &str,
+        reference: &str,
+        signed: bool,
+        verified: bool,
+    ) -> AdmissionFacts {
+        let consider_signature = self.considers_signature(repository_id).await;
+        let assay = self.find_assay(repository_id, name, reference).await;
+        facts_from_assay(
+            assay.as_ref(),
+            signed,
+            verified,
+            consider_signature,
+        )
+    }
+
+    async fn find_assay(
+        &self,
+        repository_id: RepositoryId,
+        name: &str,
+        reference: &str,
+    ) -> Option<Assay> {
+        let assays = self.assays.as_ref()?;
+        let repository = self.repositories.find_by_id(repository_id).await.ok()??;
+        let coordinate = PackageCoordinate::new(
+            repository.ecosystem(),
+            PackageName::parse(name).ok()?,
+            PackageVersion::parse(reference).ok()?,
+        );
+        assays
+            .find_by_coordinate(repository_id, &coordinate)
+            .await
+            .ok()
+            .flatten()
     }
 }
 
@@ -301,9 +377,15 @@ fn is_duplicate_pull_event(
     })
 }
 
-fn preview_against(listed: &[ListedArtifact], policy: AdmissionPolicy) -> AdmissionPreview {
+fn preview_against(
+    listed: &[ListedArtifact],
+    policy: &AdmissionPolicy,
+    assays: &[Assay],
+    consider_signature: bool,
+) -> AdmissionPreview {
     let mut matches = Vec::new();
     let mut allowed = 0_usize;
+    let mut seen = std::collections::HashSet::<(String, String)>::new();
     for item in listed {
         let Some(name) = item.package_name() else {
             continue;
@@ -311,34 +393,76 @@ fn preview_against(listed: &[ListedArtifact], policy: AdmissionPolicy) -> Admiss
         let Some(version) = item.package_version() else {
             continue;
         };
-        match policy.preview_pull(item.signed(), item.verified()) {
+        if !seen.insert((name.to_string(), version.to_string())) {
+            continue;
+        }
+        let assay = assays.iter().find(|assay| {
+            assay.coordinate().name().as_str() == name
+                && assay.coordinate().version().as_str() == version
+        });
+        let facts = facts_from_assay(assay, item.signed(), item.verified(), consider_signature);
+        match policy.preview_facts(&facts) {
             None => allowed += 1,
-            Some(effect) => matches.push(AdmissionPreviewItem {
+            Some(hit) => matches.push(AdmissionPreviewItem {
                 name: name.to_string(),
                 version: version.to_string(),
-                effect,
-                reason: match policy.predicate() {
-                    ferrobox_domain::admission::AdmissionPredicate::NotVerified => match effect {
-                        AdmissionEffect::Deny => {
-                            "no está verificada: se denegaría el pull".to_string()
-                        }
-                        AdmissionEffect::Warn => {
-                            "no está verificada: solo aviso, el pull seguiría".to_string()
-                        }
-                    },
-                    ferrobox_domain::admission::AdmissionPredicate::NotSigned => match effect {
-                        AdmissionEffect::Deny => {
-                            "no está firmada: se denegaría el pull".to_string()
-                        }
-                        AdmissionEffect::Warn => {
-                            "no está firmada: solo aviso, el pull seguiría".to_string()
-                        }
-                    },
-                },
+                effect: policy.effect(),
+                reason: hit_reason(&hit, policy.effect(), false),
             }),
         }
     }
     AdmissionPreview { matches, allowed }
+}
+
+fn facts_from_assay(
+    assay: Option<&Assay>,
+    signed: bool,
+    verified: bool,
+    consider_signature: bool,
+) -> AdmissionFacts {
+    let (max_finding, licenses) = match assay {
+        Some(assay) if assay.status() == AssayStatus::Ready => {
+            let max_finding = assay
+                .findings()
+                .iter()
+                .map(ferrobox_domain::assay::AssayFinding::severity)
+                .filter(|severity| !matches!(severity, AssaySeverity::Unknown))
+                .min();
+            let licenses = assay
+                .components()
+                .iter()
+                .flat_map(|component| component.licenses().iter().cloned())
+                .collect();
+            (max_finding, licenses)
+        }
+        _ => (None, Vec::new()),
+    };
+    AdmissionFacts {
+        signed,
+        verified,
+        consider_signature,
+        max_finding,
+        licenses,
+    }
+}
+
+fn hit_reason(hit: &AdmissionHit, effect: AdmissionEffect, applied: bool) -> String {
+    let outcome = match (effect, applied) {
+        (AdmissionEffect::Deny, true) => "se denegó el pull",
+        (AdmissionEffect::Deny, false) => "se denegaría el pull",
+        (AdmissionEffect::Warn, true) => "solo aviso, el pull siguió",
+        (AdmissionEffect::Warn, false) => "solo aviso, el pull seguiría",
+    };
+    match hit {
+        AdmissionHit::Unsigned => format!("no está firmada: {outcome}"),
+        AdmissionHit::Unverified => format!("no está verificada: {outcome}"),
+        AdmissionHit::Finding(severity) => {
+            format!("hallazgo {}: {outcome}", severity.as_str())
+        }
+        AdmissionHit::ForbiddenLicense(license) => {
+            format!("licencia {license}: {outcome}")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -354,13 +478,14 @@ mod tests {
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
     use ferrobox_ports::admission_store::AdmissionStore;
     use ferrobox_ports::artifact_store::ArtifactStore;
+    use ferrobox_ports::assay_store::AssayStore;
     use ferrobox_ports::package_index_store::PackageIndexStore;
     use ferrobox_ports::repository_store::RepositoryStore;
 
     use super::*;
     use crate::test_support::{
-        InMemoryAdmissionStore, InMemoryArtifactStore, InMemoryPackageIndexStore,
-        InMemoryRepositoryStore,
+        InMemoryAdmissionStore, InMemoryArtifactStore, InMemoryAssayStore,
+        InMemoryPackageIndexStore, InMemoryRepositoryStore,
     };
 
     fn checksum(hex: &str) -> Sha256Checksum {
@@ -388,6 +513,95 @@ mod tests {
             store,
             repositories.clone(),
             ListRepositoryArtifactsUseCase::new(repositories, artifacts, index),
+        )
+    }
+
+    fn service_with_assays(
+        store: Arc<InMemoryAdmissionStore>,
+        repositories: Arc<InMemoryRepositoryStore>,
+        artifacts: Arc<InMemoryArtifactStore>,
+        index: Arc<InMemoryPackageIndexStore>,
+        assays: Arc<InMemoryAssayStore>,
+    ) -> AdmissionService {
+        service(store, repositories, artifacts, index).with_assays(assays)
+    }
+
+    async fn forge_cargo(repositories: &InMemoryRepositoryStore) -> Repository {
+        let repository = Repository::new(
+            RepositoryName::parse("crates-local").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repositories.save(&repository).await.unwrap();
+        repository
+    }
+
+    async fn index_crate(
+        repository_id: ferrobox_domain::ids::RepositoryId,
+        artifacts: &InMemoryArtifactStore,
+        index: &InMemoryPackageIndexStore,
+        name: &str,
+        version: &str,
+    ) {
+        let hex = "cd".repeat(32);
+        let crate_file = Artifact::new(repository_id, checksum(&hex), 64);
+        artifacts.save(&crate_file).await.unwrap();
+        index
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Cargo,
+                    PackageName::parse(name).unwrap(),
+                    PackageVersion::parse(version).unwrap(),
+                ),
+                Some(crate_file.id()),
+                Bytes::from("{}"),
+            )
+            .await
+            .unwrap();
+    }
+
+    fn ready_assay(
+        repository_id: ferrobox_domain::ids::RepositoryId,
+        name: &str,
+        version: &str,
+        status: AssayStatus,
+        finding: Option<AssaySeverity>,
+        licenses: &[&str],
+    ) -> Assay {
+        use ferrobox_domain::assay::{AssayComponent, AssayComponentKind, AssayFinding};
+        use ferrobox_domain::ids::AssayId;
+
+        let mut root = AssayComponent::new(name, version, None, AssayComponentKind::Root);
+        root.add_licenses(licenses.iter().map(|item| (*item).to_string()));
+        let findings = finding
+            .map(|severity| {
+                vec![AssayFinding::new(
+                    "RUSTSEC-0000-0001",
+                    Vec::new(),
+                    "test finding",
+                    severity,
+                    name,
+                    version,
+                    None,
+                    None,
+                )]
+            })
+            .unwrap_or_default();
+        Assay::from_parts(
+            AssayId::new(),
+            repository_id,
+            PackageCoordinate::new(
+                PackageEcosystem::Cargo,
+                PackageName::parse(name).unwrap(),
+                PackageVersion::parse(version).unwrap(),
+            ),
+            status,
+            Some("2026-09-26T00:00:00Z".to_string()),
+            None,
+            vec![root],
+            findings,
         )
     }
 
@@ -618,7 +832,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_non_oci_forges() {
+    async fn accepts_cargo_forges() {
         let repositories = Arc::new(InMemoryRepositoryStore::default());
         let cargo = Repository::new(
             RepositoryName::parse("crates-local").unwrap(),
@@ -627,7 +841,7 @@ mod tests {
         )
         .unwrap();
         repositories.save(&cargo).await.unwrap();
-        let error = service(
+        let record = service(
             Arc::new(InMemoryAdmissionStore::default()),
             repositories,
             Arc::new(InMemoryArtifactStore::default()),
@@ -635,8 +849,8 @@ mod tests {
         )
         .get_policy(cargo.id())
         .await
-        .unwrap_err();
-        assert!(matches!(error, AdmissionError::UnsupportedRepository));
+        .unwrap();
+        assert!(!record.policy.enabled());
     }
 
     #[tokio::test]
@@ -665,5 +879,140 @@ mod tests {
         .await
         .unwrap();
         assert!(policy.policy.enabled());
+    }
+
+    #[tokio::test]
+    async fn cargo_signature_policy_does_not_block_downloads() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let repository = forge_cargo(&repositories).await;
+        store
+            .save(
+                repository.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
+            )
+            .await
+            .unwrap();
+        service(store, repositories, artifacts, index)
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dry_run_lists_ready_assay_findings() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        index_crate(repository.id(), &artifacts, &index, "libc", "0.2.177").await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Ready,
+                Some(AssaySeverity::High),
+                &["MIT"],
+            ))
+            .await
+            .unwrap();
+
+        let preview = service_with_assays(
+            Arc::new(InMemoryAdmissionStore::default()),
+            repositories,
+            artifacts,
+            index,
+            assays,
+        )
+        .dry_run(
+            repository.id(),
+            AdmissionPolicy::profile_openchain_security(),
+            "",
+        )
+        .await
+        .unwrap();
+        assert_eq!(preview.matches.len(), 1);
+        assert_eq!(preview.matches[0].name, "libc");
+        assert_eq!(preview.matches[0].effect, AdmissionEffect::Warn);
+        assert!(preview.matches[0].reason.contains("hallazgo high"));
+        assert_eq!(preview.allowed, 0);
+    }
+
+    #[tokio::test]
+    async fn dry_run_fails_open_without_a_ready_assay() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        index_crate(repository.id(), &artifacts, &index, "libc", "0.2.177").await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Running,
+                Some(AssaySeverity::Critical),
+                &["GPL-3.0-only"],
+            ))
+            .await
+            .unwrap();
+
+        let preview = service_with_assays(
+            Arc::new(InMemoryAdmissionStore::default()),
+            repositories,
+            artifacts,
+            index,
+            assays,
+        )
+        .dry_run(
+            repository.id(),
+            AdmissionPolicy::profile_openchain_security(),
+            "",
+        )
+        .await
+        .unwrap();
+        assert!(preview.matches.is_empty());
+        assert_eq!(preview.allowed, 1);
+    }
+
+    #[tokio::test]
+    async fn enforce_denies_forbidden_license_on_cargo() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Ready,
+                None,
+                &["AGPL-3.0-only"],
+            ))
+            .await
+            .unwrap();
+        let mut policy = AdmissionPolicy::profile_copyleft_restrict();
+        policy = AdmissionPolicy::compose(
+            true,
+            policy.when().as_str(),
+            policy.effect().as_str(),
+            policy.clauses().clone(),
+        )
+        .unwrap();
+        store.save(repository.id(), policy, "").await.unwrap();
+        let error = service_with_assays(store, repositories, artifacts, index, assays)
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
     }
 }

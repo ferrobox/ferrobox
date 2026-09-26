@@ -238,6 +238,14 @@ async fn download_tarball(
     let version =
         PackageVersion::parse(version).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let coordinate = PackageCoordinate::new(PackageEcosystem::Npm, package_name, version);
+    state
+        .admission
+        .enforce_package_pull(
+            repository.id(),
+            coordinate.name().as_str(),
+            coordinate.version().as_str(),
+        )
+        .await?;
     let body = strategy.download(&repository, &coordinate).await?;
 
     let mut headers = HeaderMap::new();

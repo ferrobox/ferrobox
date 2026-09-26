@@ -105,8 +105,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
   const isReadOnly =
     repository.kind.type === "mirror" || repository.kind.type === "alloy";
   const showAdmission =
-    (repository.kind.type === "forge" || repository.kind.type === "mirror") &&
-    (repository.ecosystem === "oci" || repository.ecosystem === "helm");
+    repository.kind.type === "forge" || repository.kind.type === "mirror";
   const alloyMembers =
     repository.kind.type === "alloy"
       ? repository.kind.members.map((memberId) => {
@@ -255,7 +254,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         </TabsContent>
         {showAdmission ? (
           <TabsContent value="admission" className="mt-4">
-            <AdmissionPanel repositoryId={repositoryId} canWrite={canWrite} />
+            <AdmissionPanel
+              repositoryId={repositoryId}
+              canWrite={canWrite}
+              ecosystem={repository.ecosystem}
+            />
           </TabsContent>
         ) : null}
         {repository.kind.type !== "alloy" ? (

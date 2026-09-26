@@ -16,7 +16,7 @@ enabled: boolean,
  */
 when: AdmissionWhenDto, 
 /**
- * Condición que dispara el efecto.
+ * Condición de firma (compatibilidad).
  */
 predicate: AdmissionPredicateDto, 
 /**
@@ -26,4 +26,24 @@ effect: AdmissionEffectDto,
 /**
  * PEM de claves públicas Cosign del repositorio.
  */
-public_keys_pem: string, };
+public_keys_pem: string, 
+/**
+ * Exigir firma Cosign / Notation.
+ */
+require_signed: boolean, 
+/**
+ * Exigir verificación contra las claves PEM.
+ */
+require_verified: boolean, 
+/**
+ * Umbral de hallazgo, si la cláusula está armada.
+ */
+min_finding: string | null, 
+/**
+ * Licencias SPDX denegadas.
+ */
+forbidden_licenses: Array<string>, 
+/**
+ * Perfil que rellenó la regla, si se eligió uno.
+ */
+profile: string | null, };
