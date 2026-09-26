@@ -26,6 +26,7 @@ import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
 import { AdmissionPanel } from "@/components/repository/AdmissionPanel";
 import { RetentionPanel } from "@/components/repository/RetentionPanel";
+import { ReplicaPanel } from "@/components/repository/ReplicaPanel";
 import { WebhooksPanel } from "@/components/repository/WebhooksPanel";
 import { SetMeUpDialog } from "@/components/repository/SetMeUpDialog";
 import { UploadArtifactButton } from "@/components/repository/UploadArtifactButton";
@@ -213,6 +214,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             <TabsTrigger value="quota">{t("tabs.quota")}</TabsTrigger>
           ) : null}
           {repository.kind.type !== "alloy" ? (
+            <TabsTrigger value="replica">{t("tabs.replica")}</TabsTrigger>
+          ) : null}
+          {repository.kind.type !== "alloy" ? (
             <TabsTrigger value="webhooks">{t("tabs.webhooks")}</TabsTrigger>
           ) : null}
           {isAdmin ? <TabsTrigger value="access">{t("tabs.access")}</TabsTrigger> : null}
@@ -269,6 +273,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
         {repository.kind.type !== "alloy" ? (
           <TabsContent value="quota" className="mt-4">
             <QuotaPanel repositoryId={repositoryId} canWrite={canWrite} />
+          </TabsContent>
+        ) : null}
+        {repository.kind.type !== "alloy" ? (
+          <TabsContent value="replica" className="mt-4">
+            <ReplicaPanel repositoryId={repositoryId} canWrite={canWrite} />
           </TabsContent>
         ) : null}
         {repository.kind.type !== "alloy" ? (

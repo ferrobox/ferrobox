@@ -14,7 +14,6 @@ use ferrobox_application::download_artifact::DownloadArtifactError;
 use ferrobox_application::get_repository::GetRepositoryError;
 use ferrobox_application::list_repository_artifacts::ListRepositoryArtifactsError;
 use ferrobox_application::login::LoginError;
-use ferrobox_application::oidc::OidcError;
 use ferrobox_application::manage_api_tokens::{
     CreateApiTokenError, ListApiTokensError, RevokeApiTokenError,
 };
@@ -22,13 +21,15 @@ use ferrobox_application::manage_groups::GroupError;
 use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
-use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::mirror_schedule::SetMirrorScheduleError;
+use ferrobox_application::oidc::OidcError;
+use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::prefetch_package::PrefetchError;
-use ferrobox_application::repository_bundle::BundleError;
 use ferrobox_application::promote_package::PromoteError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
+use ferrobox_application::replica::ReplicaError;
+use ferrobox_application::repository_bundle::BundleError;
 use ferrobox_application::retention::RetentionError;
 use ferrobox_application::search_packages::SearchPackagesError;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersError;
@@ -377,8 +378,9 @@ impl From<ChangePasswordError> for ApiError {
 impl From<ResetUserPasswordError> for ApiError {
     fn from(err: ResetUserPasswordError) -> Self {
         match err {
-            ResetUserPasswordError::InvalidPassword(_)
-            | ResetUserPasswordError::RobotAccount => Self::BadRequest(err.to_string()),
+            ResetUserPasswordError::InvalidPassword(_) | ResetUserPasswordError::RobotAccount => {
+                Self::BadRequest(err.to_string())
+            }
             ResetUserPasswordError::CannotResetSelf => Self::Conflict(err.to_string()),
             ResetUserPasswordError::NotFound => Self::NotFound(err.to_string()),
             ResetUserPasswordError::PasswordHashing(_) | ResetUserPasswordError::Persistence(_) => {
@@ -434,6 +436,25 @@ impl From<QuotaError> for ApiError {
             QuotaError::Repositories(_) | QuotaError::Artifacts(_) | QuotaError::Policy(_) => {
                 Self::Internal(err.to_string())
             }
+        }
+    }
+}
+
+impl From<ReplicaError> for ApiError {
+    fn from(err: ReplicaError) -> Self {
+        match err {
+            ReplicaError::RepositoryNotFound(_) => Self::NotFound(err.to_string()),
+            ReplicaError::AlloyRepository
+            | ReplicaError::NotConfigured
+            | ReplicaError::MissingToken
+            | ReplicaError::Invalid(_)
+            | ReplicaError::Remote(_)
+            | ReplicaError::MissingSchema => Self::BadRequest(err.to_string()),
+            ReplicaError::Repository(inner) => inner.into(),
+            ReplicaError::Persistence(_) | ReplicaError::Store(_) => {
+                Self::Internal(err.to_string())
+            }
+            ReplicaError::Bundle(inner) => inner.into(),
         }
     }
 }

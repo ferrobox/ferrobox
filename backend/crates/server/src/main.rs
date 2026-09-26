@@ -13,15 +13,16 @@ mod conan_registry;
 mod config;
 mod dto;
 mod error;
+mod go_registry;
 mod groups;
 mod maven_registry;
-mod nuget_registry;
-mod go_registry;
-mod oidc;
 mod npm_registry;
+mod nuget_registry;
 mod oci_registry;
+mod oidc;
 mod pypi_registry;
 mod quota;
+mod replica;
 mod repositories;
 mod retention;
 mod search;
@@ -50,6 +51,7 @@ use ferrobox_adapter_postgres::audit_store::PostgresAuditStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
+use ferrobox_adapter_postgres::replica_store::PostgresReplicaStore;
 use ferrobox_adapter_postgres::repository_store::PostgresRepositoryStore;
 use ferrobox_adapter_postgres::retention_store::PostgresRetentionStore;
 use ferrobox_adapter_postgres::user_store::PostgresUserStore;
@@ -80,15 +82,16 @@ use ferrobox_application::manage_users::{
 use ferrobox_application::packaging::PackagingRegistry;
 use ferrobox_application::packaging::cargo::CargoPackagingStrategy;
 use ferrobox_application::packaging::conan::ConanPackagingStrategy;
-use ferrobox_application::packaging::maven::MavenPackagingStrategy;
 use ferrobox_application::packaging::golang::GoPackagingStrategy;
-use ferrobox_application::packaging::nuget::NugetPackagingStrategy;
+use ferrobox_application::packaging::maven::MavenPackagingStrategy;
 use ferrobox_application::packaging::npm::NpmPackagingStrategy;
+use ferrobox_application::packaging::nuget::NugetPackagingStrategy;
 use ferrobox_application::packaging::oci::OciPackagingStrategy;
 use ferrobox_application::packaging::pypi::PypiPackagingStrategy;
 use ferrobox_application::promote_package::PromotePackageUseCase;
 use ferrobox_application::publish_artifact::PublishArtifactUseCase;
 use ferrobox_application::quota::QuotaService;
+use ferrobox_application::replica::ReplicaService;
 use ferrobox_application::retention::RetentionService;
 use ferrobox_application::search_packages::SearchPackagesUseCase;
 use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
@@ -111,6 +114,7 @@ struct AppState {
     delete_artifact: DeleteArtifactUseCase,
     promote_package: PromotePackageUseCase,
     repository_bundle: ferrobox_application::repository_bundle::RepositoryBundleService,
+    replica: ReplicaService,
     packaging: PackagingRegistry,
     assays: AssayService,
     admission: AdmissionService,
@@ -178,7 +182,8 @@ async fn main() {
     let user_store = Arc::new(PostgresUserStore::new(pool.clone()));
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
-    let webhook_store = Arc::new(PostgresWebhookStore::new(pool));
+    let webhook_store = Arc::new(PostgresWebhookStore::new(pool.clone()));
+    let replica_store = Arc::new(PostgresReplicaStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
     storage.ensure_reachable().await.unwrap_or_else(|err| {
         panic!(
@@ -206,6 +211,7 @@ async fn main() {
         group_store,
         api_token_store,
         webhook_store,
+        replica_store,
         storage,
         http_client,
     ));
@@ -318,8 +324,15 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         )
         .route(
             "/repositories/{repository_id}/import",
-            post(artifacts::import_repository)
-                .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+            post(artifacts::import_repository).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
+        .route(
+            "/repositories/{repository_id}/replica",
+            get(replica::get_policy).put(replica::save_policy),
+        )
+        .route(
+            "/repositories/{repository_id}/replica/push",
+            post(replica::push_now).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
         .route(
             "/repositories/{repository_id}/schedule",
@@ -490,6 +503,7 @@ fn build_app_state(
     group_store: Arc<PostgresGroupStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     webhook_store: Arc<PostgresWebhookStore>,
+    replica_store: Arc<PostgresReplicaStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
@@ -546,6 +560,19 @@ fn build_app_state(
         assay_store,
         retention_store,
     );
+    let repository_bundle = ferrobox_application::repository_bundle::RepositoryBundleService::new(
+        repository_store.clone(),
+        artifact_store.clone(),
+        package_index_store.clone(),
+        storage.clone(),
+        quota.clone(),
+    );
+    let replica = ReplicaService::new(
+        replica_store,
+        repository_store.clone(),
+        repository_bundle.clone(),
+        http_client.clone(),
+    );
 
     AppState {
         create_repository: CreateRepositoryUseCase::new(repository_store.clone()),
@@ -572,14 +599,8 @@ fn build_app_state(
             storage.clone(),
             quota.clone(),
         ),
-        repository_bundle:
-            ferrobox_application::repository_bundle::RepositoryBundleService::new(
-                repository_store.clone(),
-                artifact_store.clone(),
-                package_index_store.clone(),
-                storage.clone(),
-                quota.clone(),
-            ),
+        repository_bundle,
+        replica,
         delete_artifact: DeleteArtifactUseCase::new(
             repository_store.clone(),
             artifact_store,

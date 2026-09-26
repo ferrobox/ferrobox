@@ -169,9 +169,7 @@ impl RepositoryResponse {
             access: access.into(),
             restricted,
             prefetch_interval_hours: repository.prefetch_interval_hours(),
-            last_prefetch_at: repository
-                .last_prefetch_at()
-                .map(|at| at.to_rfc3339()),
+            last_prefetch_at: repository.last_prefetch_at().map(|at| at.to_rfc3339()),
         }
     }
 }
@@ -994,6 +992,89 @@ pub(crate) struct PrefetchPackageRequest {
     pub(crate) version: Option<String>,
 }
 
+/// Destino de réplica enviado al guardar.
+#[derive(Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ReplicaPolicyRequest {
+    /// URL de la instancia remota (`http://host:3000`). Vacío = borrar.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) remote_url: Option<String>,
+    /// UUID del Forge destino en esa instancia.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) destination_id: Option<String>,
+    /// Token de API con escritura en el destino. Ausente: conserva el anterior.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) token: Option<String>,
+}
+
+/// Último push de réplica.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ReplicaRunResponse {
+    pub(crate) occurred_at: String,
+    #[ts(type = "number")]
+    pub(crate) packages_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) artifacts_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) skipped: u32,
+    pub(crate) error: Option<String>,
+}
+
+/// Política de réplica de un repositorio.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ReplicaPolicyResponse {
+    pub(crate) configured: bool,
+    pub(crate) remote_url: Option<String>,
+    pub(crate) destination_id: Option<String>,
+    pub(crate) has_token: bool,
+    pub(crate) last_run: Option<ReplicaRunResponse>,
+}
+
+impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
+    fn from(policy: ferrobox_domain::replica::ReplicaPolicy) -> Self {
+        let last_run = policy.last_run().map(|run| ReplicaRunResponse {
+            occurred_at: run.occurred_at().to_string(),
+            packages_imported: run.packages_imported(),
+            artifacts_imported: run.artifacts_imported(),
+            skipped: run.skipped(),
+            error: run.error().map(str::to_string),
+        });
+        match policy.target() {
+            Some(target) => Self {
+                configured: true,
+                remote_url: Some(target.remote_url().as_str().to_string()),
+                destination_id: Some(target.destination_id().to_string()),
+                has_token: target.token().is_some(),
+                last_run,
+            },
+            None => Self {
+                configured: false,
+                remote_url: None,
+                destination_id: None,
+                has_token: false,
+                last_run,
+            },
+        }
+    }
+}
+
+/// Resultado de un push de réplica.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ReplicaPushResponse {
+    #[ts(type = "number")]
+    pub(crate) packages_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) artifacts_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) skipped: u32,
+}
+
 /// Resultado de importar un archivo portable.
 #[derive(Serialize, TS)]
 #[ts(export)]
@@ -1289,15 +1370,17 @@ impl AdmissionPolicyRequest {
         (ferrobox_domain::admission::AdmissionPolicy, String),
         ferrobox_domain::admission::AdmissionPolicyError,
     > {
-        let require_signed = self.require_signed.unwrap_or(matches!(
-            self.predicate,
-            AdmissionPredicateDto::NotSigned
-        ));
-        let require_verified = self.require_verified.unwrap_or(matches!(
-            self.predicate,
-            AdmissionPredicateDto::NotVerified
-        ));
-        let min_finding = match self.min_finding.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        let require_signed = self
+            .require_signed
+            .unwrap_or(matches!(self.predicate, AdmissionPredicateDto::NotSigned));
+        let require_verified = self
+            .require_verified
+            .unwrap_or(matches!(self.predicate, AdmissionPredicateDto::NotVerified));
+        let min_finding = match self
+            .min_finding
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
         {
             None => None,
             Some("critical") => Some(ferrobox_domain::assay::AssaySeverity::Critical),
@@ -1344,9 +1427,13 @@ impl From<ferrobox_ports::admission_store::AdmissionRecord> for AdmissionPolicyR
             public_keys_pem: record.public_keys_pem,
             require_signed: clauses.require_signed(),
             require_verified: clauses.require_verified(),
-            min_finding: clauses.min_finding().map(|severity| severity.as_str().to_string()),
+            min_finding: clauses
+                .min_finding()
+                .map(|severity| severity.as_str().to_string()),
             forbidden_licenses: clauses.forbidden_licenses().to_vec(),
-            profile: clauses.profile().map(|profile| profile.as_str().to_string()),
+            profile: clauses
+                .profile()
+                .map(|profile| profile.as_str().to_string()),
         }
     }
 }

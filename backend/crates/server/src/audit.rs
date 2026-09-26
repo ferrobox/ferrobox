@@ -72,8 +72,8 @@ mod tests {
     use ferrobox_application::test_support::{
         InMemoryAdmissionStore, InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore,
         InMemoryAuditStore, InMemoryGroupStore, InMemoryHttpClient, InMemoryPackageIndexStore,
-        InMemoryQuotaStore, InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage,
-        InMemoryUserStore, InMemoryWebhookStore,
+        InMemoryQuotaStore, InMemoryReplicaStore, InMemoryRepositoryStore, InMemoryRetentionStore,
+        InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -141,6 +141,18 @@ mod tests {
                     storage.clone(),
                     quota.clone(),
                 ),
+            replica: ferrobox_application::replica::ReplicaService::new(
+                Arc::new(InMemoryReplicaStore::default()),
+                repository_store.clone(),
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
+                http_client.clone(),
+            ),
             promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),

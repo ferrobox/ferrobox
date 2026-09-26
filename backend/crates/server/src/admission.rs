@@ -38,11 +38,7 @@ pub(crate) async fn save_policy(
     let (policy, public_keys_pem) = payload.into_policy()?;
     let saved = state
         .admission
-        .save_policy(
-            RepositoryId::from(repository_id),
-            policy,
-            public_keys_pem,
-        )
+        .save_policy(RepositoryId::from(repository_id), policy, public_keys_pem)
         .await?;
     crate::audit::record(
         &state,
@@ -71,11 +67,7 @@ pub(crate) async fn dry_run(
     let (policy, public_keys_pem) = payload.into_policy()?;
     let preview = state
         .admission
-        .dry_run(
-            RepositoryId::from(repository_id),
-            policy,
-            public_keys_pem,
-        )
+        .dry_run(RepositoryId::from(repository_id), policy, public_keys_pem)
         .await?;
     Ok(Json(AdmissionPreviewResponse::from(preview)))
 }
@@ -142,8 +134,8 @@ mod tests {
     use ferrobox_application::test_support::{
         InMemoryAdmissionStore, InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore,
         InMemoryGroupStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore,
-        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
-        InMemoryWebhookStore,
+        InMemoryReplicaStore, InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage,
+        InMemoryUserStore, InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -235,6 +227,18 @@ mod tests {
                     storage.clone(),
                     quota.clone(),
                 ),
+            replica: ferrobox_application::replica::ReplicaService::new(
+                Arc::new(InMemoryReplicaStore::default()),
+                repository_store.clone(),
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
+                http_client.clone(),
+            ),
             packaging: PackagingRegistry::new(),
             assays: ferrobox_application::assay::AssayService::new(
                 assay_store.clone(),
