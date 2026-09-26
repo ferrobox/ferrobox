@@ -153,8 +153,8 @@ fn prefetch_targets(
     entries: &[ferrobox_ports::package_index_store::PackageIndexRecord],
 ) -> Vec<(PackageName, Option<PackageVersion>)> {
     match ecosystem {
-        PackageEcosystem::Generic | PackageEcosystem::Conan => Vec::new(),
-        PackageEcosystem::Oci | PackageEcosystem::Helm => entries
+        PackageEcosystem::Generic => Vec::new(),
+        PackageEcosystem::Oci | PackageEcosystem::Helm | PackageEcosystem::Conan => entries
             .iter()
             .map(|entry| {
                 (

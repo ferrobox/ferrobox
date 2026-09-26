@@ -1,13 +1,16 @@
-//! Trae un paquete desde el *upstream* de un `Mirror` sin esperar a
-//! que un cliente lo pida (pull-through a demanda).
+//! Pull a package from a Mirror's upstream without waiting for a client
+//! (on-demand pull-through).
+
+use std::collections::BTreeMap;
 
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
+use serde::Deserialize;
 use thiserror::Error;
 
-use crate::packaging::{PackagingError, PackagingRegistry};
+use crate::packaging::{PackagingError, PackagingRegistry, PackagingStrategy};
 
 /// Resultado de un prefetch: se indexó el metadato y, si había
 /// versión, se cacheó el binario.
@@ -30,12 +33,12 @@ pub enum PrefetchError {
     #[error("cannot prefetch into a {0} repository")]
     NotAMirror(&'static str),
 
-    /// El ecosistema no soporta prefetch (genérico, Conan).
+    /// The ecosystem does not support prefetch (generic only).
     #[error("prefetch is not supported for the '{0}' ecosystem")]
     UnsupportedEcosystem(&'static str),
 
-    /// OCI/Helm necesitan etiqueta o digest.
-    #[error("version (tag or digest) is required to prefetch an OCI image")]
+    /// OCI/Helm need a tag or digest; Conan needs a recipe version.
+    #[error("version is required to prefetch an OCI image or a Conan recipe")]
     MissingVersion,
 
     /// No hay estrategia registrada.
@@ -72,7 +75,7 @@ impl PrefetchPackageUseCase {
         }
 
         let ecosystem = repository.ecosystem();
-        if matches!(ecosystem, PackageEcosystem::Generic | PackageEcosystem::Conan) {
+        if matches!(ecosystem, PackageEcosystem::Generic) {
             return Err(PrefetchError::UnsupportedEcosystem(ecosystem.label()));
         }
 
@@ -89,6 +92,23 @@ impl PrefetchPackageUseCase {
                 name: name.to_string(),
                 version: Some(reference.to_string()),
                 indexed: false,
+                downloaded: true,
+            });
+        }
+
+        if matches!(ecosystem, PackageEcosystem::Conan) {
+            let version = version.ok_or(PrefetchError::MissingVersion)?;
+            prefetch_conan_recipe(
+                strategy.as_ref(),
+                repository,
+                name.as_str(),
+                version.as_str(),
+            )
+            .await?;
+            return Ok(PrefetchOutcome {
+                name: name.to_string(),
+                version: Some(version.to_string()),
+                indexed: true,
                 downloaded: true,
             });
         }
@@ -110,6 +130,54 @@ impl PrefetchPackageUseCase {
     }
 }
 
+#[derive(Deserialize)]
+struct ConanRevisionStamp {
+    revision: String,
+}
+
+#[derive(Deserialize)]
+struct ConanFilesDocument {
+    files: BTreeMap<String, serde_json::Value>,
+}
+
+/// Cache the latest Conan recipe revision and its files from upstream.
+///
+/// Does not pull package binaries (those are profile-specific).
+async fn prefetch_conan_recipe(
+    strategy: &dyn PackagingStrategy,
+    repository: &Repository,
+    name: &str,
+    version_field: &str,
+) -> Result<(), PrefetchError> {
+    let (version, user, channel) = split_conan_prefetch_version(version_field);
+    let latest_path = format!("{name}/{version}/{user}/{channel}/latest");
+    let latest = strategy.protocol_metadata(repository, &latest_path).await?;
+    let stamp: ConanRevisionStamp = serde_json::from_slice(&latest)
+        .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+    let files_path = format!(
+        "{name}/{version}/{user}/{channel}/revisions/{}/files",
+        stamp.revision
+    );
+    let files_body = strategy.protocol_metadata(repository, &files_path).await?;
+    let files: ConanFilesDocument = serde_json::from_slice(&files_body)
+        .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+    for filename in files.files.keys() {
+        let file_path = format!("{files_path}/{filename}");
+        strategy.get_protocol_file(repository, &file_path).await?;
+    }
+    Ok(())
+}
+
+fn split_conan_prefetch_version(value: &str) -> (String, String, String) {
+    match value.split_once('@') {
+        Some((version, rest)) => match rest.split_once(':').or_else(|| rest.split_once('/')) {
+            Some((user, channel)) => (version.to_string(), user.to_string(), channel.to_string()),
+            None => (version.to_string(), rest.to_string(), "_".to_string()),
+        },
+        None => (value.to_string(), "_".to_string(), "_".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -121,6 +189,7 @@ mod tests {
     use super::*;
     use crate::content_hash::sha256_checksum;
     use crate::packaging::cargo::CargoPackagingStrategy;
+    use crate::packaging::conan::ConanPackagingStrategy;
     use crate::test_support::{
         InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
         InMemoryRepositoryStore, InMemoryStorage,
@@ -235,5 +304,77 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, PrefetchError::NotAMirror("forge")));
+    }
+
+    fn conan_mirror(http: Arc<InMemoryHttpClient>) -> (PackagingRegistry, Repository) {
+        let strategy = ConanPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http,
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
+        let repository = Repository::new(
+            RepositoryName::parse("conan-center").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://center.conan.io").unwrap(),
+            },
+            PackageEcosystem::Conan,
+        )
+        .unwrap();
+        (
+            PackagingRegistry::new().register(Arc::new(strategy)),
+            repository,
+        )
+    }
+
+    #[tokio::test]
+    async fn prefetches_a_conan_recipe_from_upstream() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub(
+            "https://center.conan.io/v2/conans/zlib/1.3.1/_/_/latest",
+            200,
+            Bytes::from_static(br#"{"revision":"rrev1","time":"2026-01-01T00:00:00Z"}"#),
+        );
+        http.stub(
+            "https://center.conan.io/v2/conans/zlib/1.3.1/_/_/revisions/rrev1/files",
+            200,
+            Bytes::from_static(br#"{"files":{"conanfile.py":{}}}"#),
+        );
+        http.stub(
+            "https://center.conan.io/v2/conans/zlib/1.3.1/_/_/revisions/rrev1/files/conanfile.py",
+            200,
+            Bytes::from_static(b"from conan import ConanFile\n"),
+        );
+        let (packaging, repository) = conan_mirror(http);
+
+        let outcome = PrefetchPackageUseCase::execute(
+            &packaging,
+            &repository,
+            PackageName::parse("zlib").unwrap(),
+            Some(PackageVersion::parse("1.3.1").unwrap()),
+        )
+        .await
+        .unwrap();
+
+        assert!(outcome.indexed);
+        assert!(outcome.downloaded);
+        assert_eq!(outcome.name, "zlib");
+        assert_eq!(outcome.version.as_deref(), Some("1.3.1"));
+    }
+
+    #[tokio::test]
+    async fn conan_prefetch_requires_a_version() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let (packaging, repository) = conan_mirror(http);
+        let err = PrefetchPackageUseCase::execute(
+            &packaging,
+            &repository,
+            PackageName::parse("zlib").unwrap(),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, PrefetchError::MissingVersion));
     }
 }

@@ -98,7 +98,7 @@
     "prefetchHint": "Trae ahora un paquete del upstream a este Mirror, sin esperar a un cliente.",
     "prefetchName": "Nombre del paquete",
     "prefetchVersion": "Versión",
-    "prefetchVersionHint": "Opcional en Cargo, npm, PyPI, Maven, NuGet y Go (solo índice). Obligatorio en OCI/Helm (etiqueta o digest).",
+    "prefetchVersionHint": "Opcional en Cargo, npm, PyPI, Maven, NuGet y Go (solo índice). Obligatorio en OCI/Helm (etiqueta o digest) y en Conan (versión de receta, p. ej. 1.3.1). Conan cachea la receta, no todos los binarios.",
     "prefetching": "Trayendo…",
     "prefetched": "Prefetch de {{name}}",
     "prefetchFailed": "No se pudo hacer prefetch del paquete",
