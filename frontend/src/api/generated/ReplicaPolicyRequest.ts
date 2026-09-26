@@ -21,6 +21,6 @@ token?: string,
  */
 direction?: string, 
 /**
- * Hours between scheduled runs. `0` disables. Omitted keeps the current value.
+ * Minutes between scheduled runs. `0` disables. Omitted keeps the current value.
  */
-interval_hours?: number, };
+interval_minutes?: number, };

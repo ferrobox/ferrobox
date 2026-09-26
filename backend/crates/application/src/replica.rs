@@ -136,7 +136,7 @@ impl ReplicaService {
         destination_id: Option<Uuid>,
         token: Option<String>,
         direction: Option<String>,
-        interval_hours: Option<u32>,
+        interval_minutes: Option<u32>,
     ) -> Result<ReplicaPolicy, ReplicaError> {
         self.require_pushable(repository_id).await?;
         let existing = self.load_policy(repository_id).await?;
@@ -147,9 +147,9 @@ impl ReplicaService {
                 .map(ReplicaTarget::direction)
                 .unwrap_or(ReplicaDirection::Push),
         };
-        let interval = match interval_hours {
-            Some(hours) => Some(hours),
-            None => existing.interval_hours(),
+        let interval = match interval_minutes {
+            Some(minutes) => Some(minutes),
+            None => existing.interval_minutes(),
         };
         let target = match (remote_url, destination_id) {
             (Some(url), Some(destination)) if !url.trim().is_empty() => {
@@ -340,10 +340,11 @@ impl ReplicaService {
             let more = index + 1 < urls.len();
             match self
                 .http_client
-                .post_with_headers(url, body.clone(), &[
-                    ("content-type", content_type),
-                    ("authorization", auth),
-                ])
+                .post_with_headers(
+                    url,
+                    body.clone(),
+                    &[("content-type", content_type), ("authorization", auth)],
+                )
                 .await
             {
                 Ok(response) if response.is_success() || response.status != 404 || !more => {

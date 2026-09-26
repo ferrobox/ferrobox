@@ -47,7 +47,7 @@ impl ReplicaStore for PostgresReplicaStore {
         let repository_id: Uuid = repository_id.into();
         let row = sqlx::query(
             r"
-            SELECT remote_url, destination_id, token, direction, interval_hours,
+            SELECT remote_url, destination_id, token, direction, interval_minutes,
                    last_run_at, last_packages_imported, last_artifacts_imported,
                    last_skipped, last_error
             FROM repository_replica
@@ -95,7 +95,7 @@ impl ReplicaStore for PostgresReplicaStore {
             r"
             INSERT INTO repository_replica (
                 repository_id, remote_url, destination_id, token, direction,
-                interval_hours, last_run_at, last_packages_imported,
+                interval_minutes, last_run_at, last_packages_imported,
                 last_artifacts_imported, last_skipped, last_error
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -104,7 +104,7 @@ impl ReplicaStore for PostgresReplicaStore {
                 destination_id = EXCLUDED.destination_id,
                 token = EXCLUDED.token,
                 direction = EXCLUDED.direction,
-                interval_hours = EXCLUDED.interval_hours,
+                interval_minutes = EXCLUDED.interval_minutes,
                 last_run_at = EXCLUDED.last_run_at,
                 last_packages_imported = EXCLUDED.last_packages_imported,
                 last_artifacts_imported = EXCLUDED.last_artifacts_imported,
@@ -120,7 +120,7 @@ impl ReplicaStore for PostgresReplicaStore {
         .bind(target.direction().as_str())
         .bind(
             policy
-                .interval_hours()
+                .interval_minutes()
                 .map(|hours| i32::try_from(hours).unwrap_or(i32::MAX)),
         )
         .bind(last_run_at)
@@ -138,7 +138,7 @@ impl ReplicaStore for PostgresReplicaStore {
         let rows = sqlx::query(
             r"
             SELECT repository_id, remote_url, destination_id, token, direction,
-                   interval_hours, last_run_at, last_packages_imported,
+                   interval_minutes, last_run_at, last_packages_imported,
                    last_artifacts_imported, last_skipped, last_error
             FROM repository_replica
             ",
@@ -218,7 +218,7 @@ fn policy_from_row(
     });
 
     let interval = row
-        .try_get::<Option<i32>, _>("interval_hours")
+        .try_get::<Option<i32>, _>("interval_minutes")
         .unwrap_or(None)
         .and_then(|hours| u32::try_from(hours).ok());
 
