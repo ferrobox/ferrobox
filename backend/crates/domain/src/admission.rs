@@ -1,5 +1,5 @@
-//! Política de admisión de un repositorio: reglas estructuradas que
-//! deciden si un artefacto puede bajarse (o, más adelante, publicarse).
+//! Admission policy for a repository: structured rules that decide
+//! whether an artifact may be pulled or promoted into another Forge.
 //!
 //! Varias cláusulas pueden estar armadas a la vez (firma, hallazgo OSV,
 //! licencia denegada). La primera que se cumple dispara el efecto.
@@ -519,7 +519,10 @@ impl AdmissionPolicy {
     /// Efecto que **bloquea** un pull ahora mismo (regla activa + deny).
     #[must_use]
     pub fn deny_pull(&self, signed: bool, verified: bool) -> bool {
-        matches!(self.apply_pull(signed, verified), Some(AdmissionEffect::Deny))
+        matches!(
+            self.apply_pull(signed, verified),
+            Some(AdmissionEffect::Deny)
+        )
     }
 
     /// Efecto que se aplica ahora mismo (regla activa).
