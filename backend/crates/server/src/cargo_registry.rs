@@ -465,9 +465,14 @@ mod tests {
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
-    use ferrobox_domain::package_coordinate::PackageEcosystem;
+    use ferrobox_domain::assay::{Assay, AssayComponent, AssayComponentKind, AssayStatus};
+    use ferrobox_domain::ids::{AssayId, RepositoryId};
+    use ferrobox_domain::package_coordinate::{
+        PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+    };
     use ferrobox_domain::repository::RepositoryName;
     use ferrobox_domain::user::Role;
+    use ferrobox_ports::assay_store::AssayStore;
     use serde_json::Value;
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -479,6 +484,7 @@ mod tests {
         repo_id: Uuid,
         developer_token: String,
         reader_token: String,
+        assay_store: Arc<InMemoryAssayStore>,
     }
 
     #[allow(clippy::too_many_lines)]
@@ -490,6 +496,7 @@ mod tests {
         let user_store = Arc::new(InMemoryUserStore::default());
         let api_token_store = Arc::new(InMemoryApiTokenStore::default());
         let http_client = Arc::new(InMemoryHttpClient::default());
+        let assay_store = Arc::new(InMemoryAssayStore::default());
 
         let packaging = PackagingRegistry::new().register(Arc::new(CargoPackagingStrategy::new(
             artifact_store.clone(),
@@ -570,7 +577,7 @@ mod tests {
             ),
             packaging,
             assays: ferrobox_application::assay::AssayService::new(
-                Arc::new(InMemoryAssayStore::default()),
+                assay_store.clone(),
                 package_index_store.clone(),
                 repository_store.clone(),
                 storage.clone(),
@@ -584,13 +591,14 @@ mod tests {
                     artifact_store.clone(),
                     package_index_store.clone(),
                 ),
-            ),
+            )
+            .with_assays(assay_store.clone()),
             retention: ferrobox_application::retention::RetentionService::new(
                 repository_store.clone(),
                 artifact_store,
                 package_index_store,
                 storage,
-                Arc::new(InMemoryAssayStore::default()),
+                assay_store.clone(),
                 Arc::new(InMemoryRetentionStore::default()),
             ),
             quota,
@@ -664,6 +672,7 @@ mod tests {
             repo_id: repo_id.into(),
             developer_token,
             reader_token,
+            assay_store,
         }
     }
 
@@ -1301,5 +1310,145 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["artifacts_copied"], 1);
         assert_eq!(json["bytes_copied"], 13);
+    }
+
+    #[tokio::test]
+    async fn promote_is_denied_by_the_destination_admission_policy() {
+        let fx = fixture().await;
+        let (_, created) = create_repo(
+            fx.app.clone(),
+            &fx.developer_token,
+            serde_json::json!({ "name": "crates-prod", "ecosystem": "cargo" }),
+        )
+        .await;
+        let target_id = created["id"].as_str().unwrap().to_string();
+
+        let payload = encode_publish_payload(
+            r#"{"name":"ferrobox-cli","vers":"0.1.0","deps":[],"features":{}}"#,
+            b"tarball-bytes",
+        );
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/cargo/{}/api/v1/crates/new", fx.repo_id))
+                .header("Authorization", format!("Token {}", fx.developer_token))
+                .body(Body::from(payload))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let mut root = AssayComponent::new("ferrobox-cli", "0.1.0", None, AssayComponentKind::Root);
+        root.add_licenses(["AGPL-3.0-only".to_string()]);
+        fx.assay_store
+            .upsert(&Assay::from_parts(
+                AssayId::new(),
+                RepositoryId::from(fx.repo_id),
+                PackageCoordinate::new(
+                    PackageEcosystem::Cargo,
+                    PackageName::parse("ferrobox-cli").unwrap(),
+                    PackageVersion::parse("0.1.0").unwrap(),
+                ),
+                AssayStatus::Ready,
+                Some("2026-09-26T00:00:00Z".to_string()),
+                None,
+                vec![root],
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/repositories/{target_id}/admission"))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "enabled": true,
+                        "when": "pull",
+                        "predicate": "not_signed",
+                        "effect": "deny",
+                        "profile": "copyleft_restrict",
+                        "forbidden_licenses": ["AGPL-3.0-only"]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, body) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": target_id,
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("promote"),
+            "{json}"
+        );
+
+        let (status, _) = send(
+            fx.app.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/repositories/{target_id}/admission"))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "enabled": false,
+                        "when": "pull",
+                        "predicate": "not_signed",
+                        "effect": "deny"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = send(
+            fx.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/repositories/{}/promote", fx.repo_id))
+                .header("Authorization", format!("Bearer {}", fx.developer_token))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "target_repository_id": target_id,
+                        "name": "ferrobox-cli",
+                        "version": "0.1.0"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
     }
 }

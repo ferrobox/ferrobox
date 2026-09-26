@@ -132,6 +132,17 @@ pub(crate) async fn promote_package(
         _ => None,
     };
 
+    if let (Some(name), Some(version)) = (payload.name.as_deref(), payload.version.as_deref()) {
+        let name = name.trim();
+        let version = version.trim();
+        if !name.is_empty() && !version.is_empty() {
+            state
+                .admission
+                .enforce_promote(target_id, source_id, name, version)
+                .await?;
+        }
+    }
+
     let outcome = state
         .promote_package
         .execute(

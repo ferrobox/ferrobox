@@ -1,4 +1,4 @@
-//! Política de admisión: persistencia, dry-run y denegación en el pull.
+//! Admission policy: persistence, dry-run, and deny/warn on pull and promote.
 
 use std::sync::Arc;
 
@@ -9,7 +9,9 @@ use ferrobox_domain::admission::{
 };
 use ferrobox_domain::assay::{Assay, AssaySeverity, AssayStatus};
 use ferrobox_domain::ids::{AdmissionEventId, RepositoryId};
-use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName, PackageVersion};
+use ferrobox_domain::package_coordinate::{
+    PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
+};
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
 use ferrobox_ports::assay_store::AssayStore;
@@ -270,6 +272,86 @@ impl AdmissionService {
             .await
     }
 
+    /// Evaluates the **target** policy against facts from the **source**
+    /// package before a promote. Same clauses as pull; fail-open without
+    /// a ready assay. OCI/Helm signatures use the target's Cosign keys.
+    ///
+    /// # Errors
+    ///
+    /// [`PackagingError::PolicyDenied`] if the target policy denies.
+    pub async fn enforce_promote(
+        &self,
+        target_id: RepositoryId,
+        source_id: RepositoryId,
+        name: &str,
+        reference: &str,
+    ) -> Result<(), PackagingError> {
+        let Ok(record) = self.store.find_by_repository(target_id).await else {
+            return Ok(());
+        };
+        let policy = record.policy;
+        let consider_signature = self.considers_signature(source_id).await;
+        let (signed, verified) = if consider_signature {
+            self.signature_facts(source_id, name, reference, &record.public_keys_pem)
+                .await
+        } else {
+            (true, true)
+        };
+        let assay = self.find_assay(source_id, name, reference).await;
+        let facts = facts_from_assay(assay.as_ref(), signed, verified, consider_signature);
+        let Some((effect, hit)) = policy.apply_facts(&facts) else {
+            return Ok(());
+        };
+        let reason = hit_reason_op(&hit, effect, true, "promote");
+        let now = Utc::now();
+        let recent = self
+            .store
+            .list_events(target_id, 10)
+            .await
+            .unwrap_or_default();
+        if !is_duplicate_pull_event(&recent, name, reference, effect, now) {
+            let event = AdmissionEvent::from_parts(
+                AdmissionEventId::new(),
+                target_id,
+                name,
+                reference,
+                effect,
+                reason,
+                now.to_rfc3339_opts(SecondsFormat::Secs, true),
+            );
+            let _ = self.store.record_event(&event).await;
+        }
+        if matches!(effect, AdmissionEffect::Deny) {
+            return Err(PackagingError::PolicyDenied(format!(
+                "admission policy denies promote of {name}:{reference}: {}",
+                hit_reason_op(&hit, effect, true, "promote")
+            )));
+        }
+        Ok(())
+    }
+
+    async fn signature_facts(
+        &self,
+        source_id: RepositoryId,
+        name: &str,
+        reference: &str,
+        public_keys_pem: &str,
+    ) -> (bool, bool) {
+        let Ok(listed) = self
+            .list_artifacts
+            .execute_with_keys(source_id, public_keys_pem)
+            .await
+        else {
+            return (true, true);
+        };
+        listed
+            .iter()
+            .find(|item| {
+                item.package_name() == Some(name) && item.package_version() == Some(reference)
+            })
+            .map_or((false, false), |item| (item.signed(), item.verified()))
+    }
+
     async fn require_target(&self, repository_id: RepositoryId) -> Result<(), AdmissionError> {
         let Some(repository) = self.repositories.find_by_id(repository_id).await? else {
             return Err(AdmissionError::RepositoryNotFound(repository_id));
@@ -316,12 +398,7 @@ impl AdmissionService {
     ) -> AdmissionFacts {
         let consider_signature = self.considers_signature(repository_id).await;
         let assay = self.find_assay(repository_id, name, reference).await;
-        facts_from_assay(
-            assay.as_ref(),
-            signed,
-            verified,
-            consider_signature,
-        )
+        facts_from_assay(assay.as_ref(), signed, verified, consider_signature)
     }
 
     async fn find_assay(
@@ -447,11 +524,20 @@ fn facts_from_assay(
 }
 
 fn hit_reason(hit: &AdmissionHit, effect: AdmissionEffect, applied: bool) -> String {
+    hit_reason_op(hit, effect, applied, "pull")
+}
+
+fn hit_reason_op(
+    hit: &AdmissionHit,
+    effect: AdmissionEffect,
+    applied: bool,
+    operation: &str,
+) -> String {
     let outcome = match (effect, applied) {
-        (AdmissionEffect::Deny, true) => "se denegó el pull",
-        (AdmissionEffect::Deny, false) => "se denegaría el pull",
-        (AdmissionEffect::Warn, true) => "solo aviso, el pull siguió",
-        (AdmissionEffect::Warn, false) => "solo aviso, el pull seguiría",
+        (AdmissionEffect::Deny, true) => format!("se denegó el {operation}"),
+        (AdmissionEffect::Deny, false) => format!("se denegaría el {operation}"),
+        (AdmissionEffect::Warn, true) => format!("solo aviso, el {operation} siguió"),
+        (AdmissionEffect::Warn, false) => format!("solo aviso, el {operation} seguiría"),
     };
     match hit {
         AdmissionHit::Unsigned => format!("no está firmada: {outcome}"),
@@ -1011,6 +1097,142 @@ mod tests {
         store.save(repository.id(), policy, "").await.unwrap();
         let error = service_with_assays(store, repositories, artifacts, index, assays)
             .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+    }
+
+    fn enabled_copyleft() -> AdmissionPolicy {
+        let policy = AdmissionPolicy::profile_copyleft_restrict();
+        AdmissionPolicy::compose(
+            true,
+            policy.when().as_str(),
+            policy.effect().as_str(),
+            policy.clauses().clone(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn promote_uses_target_policy_and_source_assay() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let source = forge_cargo(&repositories).await;
+        let target = Repository::new(
+            RepositoryName::parse("crates-prod").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repositories.save(&target).await.unwrap();
+        assays
+            .upsert(&ready_assay(
+                source.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Ready,
+                None,
+                &["AGPL-3.0-only"],
+            ))
+            .await
+            .unwrap();
+        store
+            .save(target.id(), enabled_copyleft(), "")
+            .await
+            .unwrap();
+
+        let error = service_with_assays(store.clone(), repositories, artifacts, index, assays)
+            .enforce_promote(target.id(), source.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PackagingError::PolicyDenied(_)));
+        assert!(error.to_string().contains("promote"));
+
+        let events = store.list_events(target.id(), 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].reason().contains("promote"));
+    }
+
+    #[tokio::test]
+    async fn promote_fails_open_without_a_ready_assay() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let source = forge_cargo(&repositories).await;
+        let target = Repository::new(
+            RepositoryName::parse("crates-prod").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repositories.save(&target).await.unwrap();
+        store
+            .save(target.id(), enabled_copyleft(), "")
+            .await
+            .unwrap();
+
+        service_with_assays(store, repositories, artifacts, index, assays)
+            .enforce_promote(target.id(), source.id(), "libc", "0.2.177")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn promote_denies_unsigned_oci_against_target_keys() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let source = forge_oci(&repositories).await;
+        let target = Repository::new(
+            RepositoryName::parse("oci-prod").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Oci,
+        )
+        .unwrap();
+        repositories.save(&target).await.unwrap();
+        let hex = "ab".repeat(32);
+        let image = Artifact::new(source.id(), checksum(&hex), 80);
+        artifacts.save(&image).await.unwrap();
+        index
+            .upsert_entry(
+                source.id(),
+                &PackageCoordinate::new(
+                    PackageEcosystem::Oci,
+                    PackageName::parse("alpine").unwrap(),
+                    PackageVersion::parse("latest").unwrap(),
+                ),
+                Some(image.id()),
+                Bytes::from(
+                    serde_json::json!({
+                        "name": "alpine",
+                        "reference": "latest",
+                        "digest": format!("sha256:{hex}"),
+                        "media_type": "application/vnd.oci.image.manifest.v1+json",
+                        "size": 80,
+                        "artifact_id": image.id().to_string()
+                    })
+                    .to_string(),
+                ),
+            )
+            .await
+            .unwrap();
+        store
+            .save(
+                target.id(),
+                AdmissionPolicy::parse(true, "pull", "not_signed", "deny").unwrap(),
+                "",
+            )
+            .await
+            .unwrap();
+
+        let error = service(store, repositories, artifacts, index)
+            .enforce_promote(target.id(), source.id(), "alpine", "latest")
             .await
             .unwrap_err();
         assert!(matches!(error, PackagingError::PolicyDenied(_)));
