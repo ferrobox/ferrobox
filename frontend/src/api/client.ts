@@ -16,6 +16,7 @@ import type { ErrorResponse } from "@/api/generated/ErrorResponse";
 import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
+import type { ImportRepositoryResponse } from "@/api/generated/ImportRepositoryResponse";
 import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
 import type { PrefetchPackageResponse } from "@/api/generated/PrefetchPackageResponse";
 import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
@@ -282,6 +283,40 @@ export function setMirrorSchedule(
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export async function exportRepository(
+  repositoryId: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`${API_BASE_URL}/repositories/${repositoryId}/export`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(disposition);
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] ?? "repository.ferrobox.tar.gz",
+  };
+}
+
+export async function importRepository(
+  repositoryId: string,
+  file: File,
+): Promise<ImportRepositoryResponse> {
+  const body = new FormData();
+  body.append("bundle", file);
+  const response = await fetch(`${API_BASE_URL}/repositories/${repositoryId}/import`, {
+    method: "POST",
+    headers: authHeaders(),
+    body,
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  return (await response.json()) as ImportRepositoryResponse;
 }
 
 export function prefetchPackage(

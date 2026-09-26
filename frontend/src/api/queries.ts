@@ -171,6 +171,28 @@ export function useSetMirrorSchedule(repositoryId: string) {
   });
 }
 
+export function useExportRepository(repositoryId: string) {
+  return useMutation({
+    mutationFn: () => api.exportRepository(repositoryId),
+  });
+}
+
+export function useImportRepository(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (file: File) => api.importRepository(repositoryId, file),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAssays(repositoryId),
+      });
+    },
+  });
+}
+
 export function usePrefetchPackage(repositoryId: string) {
   const queryClient = useQueryClient();
 

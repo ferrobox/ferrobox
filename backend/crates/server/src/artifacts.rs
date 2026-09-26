@@ -4,8 +4,11 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::body::Body;
+use axum::extract::{Multipart, Path, State};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
 use axum::http::StatusCode;
+use axum::response::Response;
 use bytes::Bytes;
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
@@ -15,8 +18,8 @@ use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
 use crate::dto::{
-    ArtifactResponse, PrefetchPackageRequest, PrefetchPackageResponse, PromotePackageRequest,
-    PromotePackageResponse, PublishResponse,
+    ArtifactResponse, ImportRepositoryResponse, PrefetchPackageRequest, PrefetchPackageResponse,
+    PromotePackageRequest, PromotePackageResponse, PublishResponse,
 };
 use crate::error::ApiError;
 
@@ -215,5 +218,91 @@ pub(crate) async fn prefetch_package(
         version: outcome.version,
         indexed: outcome.indexed,
         downloaded: outcome.downloaded,
+    }))
+}
+
+pub(crate) async fn export_repository(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, repository_id).await?;
+
+    let bundle = state.repository_bundle.export(repository_id).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RepositoryExported,
+        AuditTargetKind::Repository,
+        bundle.filename.clone(),
+        format!(
+            "{} packages, {} artifacts",
+            bundle.packages, bundle.artifacts
+        ),
+    )
+    .await;
+
+    let disposition = format!("attachment; filename=\"{}\"", bundle.filename);
+    let mut response = Response::new(Body::from(bundle.bytes));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/gzip"),
+    );
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&disposition)
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    );
+    Ok(response)
+}
+
+pub(crate) async fn import_repository(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<Json<ImportRepositoryResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
+
+    let mut bundle = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?
+    {
+        if field.name() == Some("bundle") {
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+            bundle = Some(bytes);
+        }
+    }
+    let bundle = bundle.ok_or_else(|| {
+        ApiError::BadRequest("multipart field 'bundle' is required".to_string())
+    })?;
+
+    let outcome = state.repository_bundle.import(repository_id, bundle).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::RepositoryImported,
+        AuditTargetKind::Repository,
+        repository_id.to_string(),
+        format!(
+            "{} packages, {} artifacts, {} skipped",
+            outcome.packages_imported, outcome.artifacts_imported, outcome.skipped
+        ),
+    )
+    .await;
+
+    Ok(Json(ImportRepositoryResponse {
+        packages_imported: outcome.packages_imported,
+        artifacts_imported: outcome.artifacts_imported,
+        skipped: outcome.skipped,
+        bytes_copied: outcome.bytes_copied,
     }))
 }

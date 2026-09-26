@@ -20,6 +20,7 @@ import { EcosystemBadge, ecosystemMeta } from "@/components/repository/Ecosystem
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { MirrorSchedulePanel } from "@/components/repository/MirrorSchedulePanel";
 import { PrefetchPackageDialog } from "@/components/repository/PrefetchPackageDialog";
+import { RepositoryBundleButtons } from "@/components/repository/RepositoryBundleButtons";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
@@ -226,6 +227,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
               {canWrite && repository.kind.type === "mirror" ? (
                 <PrefetchPackageDialog repositoryId={repositoryId} />
               ) : null}
+              <RepositoryBundleButtons
+                repositoryId={repositoryId}
+                kind={repository.kind.type}
+                canWrite={canWrite}
+              />
               <RefreshPackagesButton repositoryId={repositoryId} />
             </div>
           </div>

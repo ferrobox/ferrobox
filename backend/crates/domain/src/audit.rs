@@ -56,6 +56,10 @@ pub enum AuditAction {
     PackagePromoted,
     /// Se cacheó un paquete desde el *upstream* de un `Mirror`.
     PackagePrefetched,
+    /// Se exportó un repositorio a un archivo portable.
+    RepositoryExported,
+    /// Se importó un archivo portable en un repositorio.
+    RepositoryImported,
     /// Se cambió el intervalo de refresco de un `Mirror`.
     MirrorScheduleChanged,
     /// Se guardó la política de admisión.
@@ -229,6 +233,8 @@ impl AuditAction {
             Self::PackagePromoted => "package.promoted",
             Self::PackagePrefetched => "package.prefetched",
             Self::MirrorScheduleChanged => "mirror.schedule_changed",
+            Self::RepositoryExported => "repository.exported",
+            Self::RepositoryImported => "repository.imported",
             Self::AdmissionPolicyChanged => "admission.policy_changed",
             Self::RetentionPolicyChanged => "retention.policy_changed",
             Self::RetentionApplied => "retention.applied",
@@ -270,6 +276,8 @@ impl AuditAction {
             "package.promoted" => Ok(Self::PackagePromoted),
             "package.prefetched" => Ok(Self::PackagePrefetched),
             "mirror.schedule_changed" => Ok(Self::MirrorScheduleChanged),
+            "repository.exported" => Ok(Self::RepositoryExported),
+            "repository.imported" => Ok(Self::RepositoryImported),
             "admission.policy_changed" => Ok(Self::AdmissionPolicyChanged),
             "retention.policy_changed" => Ok(Self::RetentionPolicyChanged),
             "retention.applied" => Ok(Self::RetentionApplied),
@@ -353,6 +361,8 @@ mod tests {
             AuditAction::PackagePromoted,
             AuditAction::PackagePrefetched,
             AuditAction::MirrorScheduleChanged,
+            AuditAction::RepositoryExported,
+            AuditAction::RepositoryImported,
             AuditAction::AdmissionPolicyChanged,
             AuditAction::RetentionPolicyChanged,
             AuditAction::RetentionApplied,

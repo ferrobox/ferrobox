@@ -18,6 +18,7 @@ pub enum GetRepositoryError {
 }
 
 /// Caso de uso: consultar el detalle de un repositorio existente.
+#[derive(Clone)]
 pub struct GetRepositoryUseCase {
     repository_store: Arc<dyn RepositoryStore>,
 }

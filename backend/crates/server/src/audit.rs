@@ -133,6 +133,14 @@ mod tests {
                 package_index_store.clone(),
                 storage.clone(),
             ),
+            repository_bundle:
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
             promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),

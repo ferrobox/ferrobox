@@ -222,6 +222,14 @@ mod tests {
                 storage.clone(),
                 quota.clone(),
             ),
+            repository_bundle:
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
             packaging: PackagingRegistry::new(),
             assays: ferrobox_application::assay::AssayService::new(
                 assay_store.clone(),
