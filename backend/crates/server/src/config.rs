@@ -129,7 +129,14 @@ pub fn load_dotenv() -> Vec<PathBuf> {
     }
     if let Some(path) = explicit {
         if loaded.is_empty() {
-            panic!("ferrobox: FERROBOX_ENV_FILE={path} was not found or could not be read");
+            let tried = dotenv_candidates_from(Some(&path))
+                .into_iter()
+                .map(|candidate| candidate.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            panic!(
+                "ferrobox: FERROBOX_ENV_FILE={path} was not found or could not be read (tried {tried})"
+            );
         }
     }
     loaded
@@ -141,7 +148,7 @@ fn dotenv_candidates() -> Vec<PathBuf> {
 
 fn dotenv_candidates_from(explicit: Option<&str>) -> Vec<PathBuf> {
     if let Some(path) = explicit {
-        return vec![PathBuf::from(path)];
+        return explicit_env_paths(path);
     }
     let mut paths = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
@@ -149,6 +156,24 @@ fn dotenv_candidates_from(explicit: Option<&str>) -> Vec<PathBuf> {
         paths.push(cwd.join("backend/.env"));
     }
     paths.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env"));
+    paths
+}
+
+fn explicit_env_paths(path: &str) -> Vec<PathBuf> {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        return vec![path];
+    }
+    let mut paths = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        paths.push(cwd.join(&path));
+        paths.push(cwd.join("backend").join(&path));
+    }
+    paths.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(&path),
+    );
     paths
 }
 
@@ -214,9 +239,24 @@ mod tests {
     }
 
     #[test]
-    fn explicit_env_file_is_the_only_candidate() {
+    fn relative_env_file_also_looks_next_to_backend_env() {
         let paths = dotenv_candidates_from(Some(".env_b"));
-        assert_eq!(paths, vec![PathBuf::from(".env_b")]);
+        assert!(
+            paths.iter().any(|path| path.ends_with("../../.env_b")),
+            "expected a crate-relative backend/.env_b, got {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.file_name().and_then(|name| name.to_str()) == Some(".env_b")),
+            "expected a candidate named .env_b, got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn absolute_env_file_is_used_as_is() {
+        let paths = dotenv_candidates_from(Some("/tmp/.env_a"));
+        assert_eq!(paths, vec![PathBuf::from("/tmp/.env_a")]);
     }
 
     #[test]
