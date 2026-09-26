@@ -151,6 +151,7 @@
     "admission": "Policies",
     "retention": "Retention",
     "quota": "Quota",
+    "replica": "Replica",
     "webhooks": "Webhooks"
   },
   "common": {
@@ -624,7 +625,32 @@
     "quota.changed": "Changed quota",
     "webhook.created": "Created a webhook",
     "webhook.updated": "Updated a webhook",
-    "webhook.deleted": "Deleted a webhook"
+    "webhook.deleted": "Deleted a webhook",
+    "replica.policy_changed": "Changed replica target",
+    "replica.pushed": "Pushed a replica"
+  },
+  "replica": {
+    "title": "Instance replica",
+    "description": "Push this catalog to a Forge on another FerroBox (or this one). The destination must already exist and use the same ecosystem. Pull and a schedule come later.",
+    "loadFailed": "Could not load the replica target",
+    "remoteUrl": "Remote FerroBox URL",
+    "remoteUrlHint": "Origin of the other instance, for example http://127.0.0.1:3000. Same host is fine for a first test between two Forges.",
+    "destination": "Destination repository UUID",
+    "destinationHint": "Forge on the remote instance. Same ecosystem. Import still rejects a Mirror or an Alloy.",
+    "token": "API token",
+    "tokenPlaceholder": "Token with write access on the destination",
+    "tokenKept": "Token is saved. Leave empty to keep it.",
+    "tokenHint": "A robot or user token from the destination instance. It is not shown again.",
+    "saved": "Replica target saved.",
+    "cleared": "Replica target cleared.",
+    "saveFailed": "Could not save the replica target",
+    "pushNow": "Replicate now",
+    "pushing": "Replicating…",
+    "pushed": "Pushed {{packages}} packages and {{artifacts}} artifacts ({{skipped}} already there).",
+    "pushFailed": "Could not push the replica",
+    "lastRun": "Last push",
+    "lastRunOk": "{{packages}} packages, {{artifacts}} artifacts, {{skipped}} skipped.",
+    "readOnly": "You can see the target. Changing it needs write access."
   },
   "registry": {
     "copyClipboard": "Copy to clipboard",

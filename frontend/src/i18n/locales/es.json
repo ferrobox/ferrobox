@@ -151,6 +151,7 @@
     "admission": "Políticas",
     "retention": "Retención",
     "quota": "Cuota",
+    "replica": "Réplica",
     "webhooks": "Avisos"
   },
   "common": {
@@ -624,7 +625,32 @@
     "quota.changed": "Cambió la cuota",
     "webhook.created": "Creó un aviso",
     "webhook.updated": "Actualizó un aviso",
-    "webhook.deleted": "Eliminó un aviso"
+    "webhook.deleted": "Eliminó un aviso",
+    "replica.policy_changed": "Cambió el destino de réplica",
+    "replica.pushed": "Empujó una réplica"
+  },
+  "replica": {
+    "title": "Réplica entre instancias",
+    "description": "Empuja este catálogo a un Forge de otra FerroBox (o de esta). El destino tiene que existir y ser el mismo ecosistema. El pull y el cron vienen después.",
+    "loadFailed": "No se pudo cargar el destino de réplica",
+    "remoteUrl": "URL de la FerroBox remota",
+    "remoteUrlHint": "Origen de la otra instancia, por ejemplo http://127.0.0.1:3000. El mismo host vale para una primera prueba entre dos Forge.",
+    "destination": "UUID del repositorio destino",
+    "destinationHint": "Forge en la instancia remota. Mismo ecosistema. El import sigue rechazando un Mirror o un Alloy.",
+    "token": "Token de API",
+    "tokenPlaceholder": "Token con escritura en el destino",
+    "tokenKept": "El token está guardado. Déjalo vacío para conservarlo.",
+    "tokenHint": "Un token de robot o de usuario de la instancia destino. No se vuelve a mostrar.",
+    "saved": "Destino de réplica guardado.",
+    "cleared": "Destino de réplica borrado.",
+    "saveFailed": "No se pudo guardar el destino de réplica",
+    "pushNow": "Replicar ahora",
+    "pushing": "Replicando…",
+    "pushed": "Empujados {{packages}} paquetes y {{artifacts}} artefactos ({{skipped}} ya estaban).",
+    "pushFailed": "No se pudo empujar la réplica",
+    "lastRun": "Último push",
+    "lastRunOk": "{{packages}} paquetes, {{artifacts}} artefactos, {{skipped}} omitidos.",
+    "readOnly": "Puedes ver el destino. Cambiarlo pide escritura."
   },
   "registry": {
     "copyClipboard": "Copiar al portapapeles",

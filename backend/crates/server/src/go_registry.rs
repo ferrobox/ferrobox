@@ -28,10 +28,7 @@ const GO_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 
 /// Rutas de solo lectura (listado, `.info`, `.mod`, `.zip`, `@latest`).
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
-    Router::new().route(
-        "/go/{repository_id}/{*path}",
-        get(go_get).head(go_head),
-    )
+    Router::new().route("/go/{repository_id}/{*path}", get(go_get).head(go_head))
 }
 
 /// Rutas de escritura (subida del zip y yank).
@@ -251,8 +248,9 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryReplicaStore,
+        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -347,6 +345,18 @@ mod tests {
                     storage.clone(),
                     quota.clone(),
                 ),
+            replica: ferrobox_application::replica::ReplicaService::new(
+                Arc::new(InMemoryReplicaStore::default()),
+                repository_store.clone(),
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
+                http_client.clone(),
+            ),
             promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -460,7 +470,10 @@ mod tests {
                         "/go/{}/github.com/example/hello/@v/v1.0.0.zip",
                         fixture.repo_id
                     ))
-                    .header("Authorization", format!("Bearer {}", fixture.developer_token))
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", fixture.developer_token),
+                    )
                     .body(Body::from(zip.to_vec()))
                     .unwrap(),
             )

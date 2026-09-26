@@ -16,8 +16,8 @@ use crate::authz::require_manage_users;
 use ferrobox_domain::api_token::ApiTokenName;
 
 use crate::dto::{
-    CreateRobotRequest, CreateRobotResponse, CreateUserRequest, ResetUserPasswordRequest,
-    UpdateUserRoleRequest, UserResponse, ApiTokenCreatedResponse,
+    ApiTokenCreatedResponse, CreateRobotRequest, CreateRobotResponse, CreateUserRequest,
+    ResetUserPasswordRequest, UpdateUserRoleRequest, UserResponse,
 };
 use crate::error::ApiError;
 
@@ -223,8 +223,9 @@ mod tests {
     use ferrobox_application::search_packages::SearchPackagesUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryReplicaStore,
+        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -294,6 +295,18 @@ mod tests {
                     storage.clone(),
                     quota.clone(),
                 ),
+            replica: ferrobox_application::replica::ReplicaService::new(
+                Arc::new(InMemoryReplicaStore::default()),
+                repository_store.clone(),
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
+                http_client.clone(),
+            ),
             promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),

@@ -101,6 +101,9 @@ pub mod audit;
 /// Cuota de almacenamiento por repositorio.
 pub mod quota;
 
+/// Réplica push hacia otra instancia FerroBox.
+pub mod replica;
+
 /// Búsqueda de paquetes en el catálogo de la instancia.
 pub mod search_packages;
 

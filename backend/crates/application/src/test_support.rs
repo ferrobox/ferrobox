@@ -12,15 +12,16 @@ use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::assay::Assay;
 use ferrobox_domain::audit::AuditEvent;
 use ferrobox_domain::group::Group;
+use ferrobox_domain::group::GroupName;
 use ferrobox_domain::ids::{
     ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId, WebhookId,
 };
+use ferrobox_domain::oidc::OidcIdentity;
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::quota::StorageQuota;
+use ferrobox_domain::replica::ReplicaPolicy;
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::retention::RetentionPolicy;
-use ferrobox_domain::oidc::OidcIdentity;
-use ferrobox_domain::group::GroupName;
 use ferrobox_domain::user::{Email, Role, User, Username};
 use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
 use ferrobox_ports::admission_store::{AdmissionRecord, AdmissionStore, AdmissionStoreError};
@@ -34,6 +35,7 @@ use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
 };
 use ferrobox_ports::quota_store::{QuotaStore, QuotaStoreError};
+use ferrobox_ports::replica_store::{ReplicaStore, ReplicaStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::retention_store::{RetentionStore, RetentionStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
@@ -865,6 +867,41 @@ impl RetentionStore for InMemoryRetentionStore {
 }
 
 #[derive(Default)]
+pub struct InMemoryReplicaStore {
+    policies: Mutex<HashMap<RepositoryId, ReplicaPolicy>>,
+}
+
+#[async_trait]
+impl ReplicaStore for InMemoryReplicaStore {
+    async fn find_by_repository(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<ReplicaPolicy, ReplicaStoreError> {
+        Ok(self
+            .policies
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .cloned()
+            .unwrap_or_else(ReplicaPolicy::unconfigured))
+    }
+
+    async fn save(
+        &self,
+        repository_id: RepositoryId,
+        policy: &ReplicaPolicy,
+    ) -> Result<(), ReplicaStoreError> {
+        let mut policies = self.policies.lock().unwrap();
+        if policy.target().is_none() {
+            policies.remove(&repository_id);
+        } else {
+            policies.insert(repository_id, policy.clone());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
 pub struct InMemoryQuotaStore {
     quotas: Mutex<HashMap<RepositoryId, StorageQuota>>,
 }
@@ -982,11 +1019,7 @@ impl GroupStore for InMemoryGroupStore {
             .collect())
     }
 
-    async fn add_member(
-        &self,
-        group_id: GroupId,
-        user_id: UserId,
-    ) -> Result<(), GroupStoreError> {
+    async fn add_member(&self, group_id: GroupId, user_id: UserId) -> Result<(), GroupStoreError> {
         self.members
             .lock()
             .unwrap()

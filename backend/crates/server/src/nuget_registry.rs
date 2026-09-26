@@ -153,7 +153,8 @@ async fn nuget_root_head(
     headers: HeaderMap,
     uri: Uri,
 ) -> Result<(StatusCode, HeaderMap, Bytes), ApiError> {
-    let (status, headers, _) = nuget_root_index(State(state), Path(repository_id), headers, uri).await?;
+    let (status, headers, _) =
+        nuget_root_index(State(state), Path(repository_id), headers, uri).await?;
     Ok((status, headers, Bytes::new()))
 }
 
@@ -354,8 +355,9 @@ mod tests {
     use ferrobox_application::publish_artifact::PublishArtifactUseCase;
     use ferrobox_application::test_support::{
         InMemoryApiTokenStore, InMemoryArtifactStore, InMemoryAssayStore, InMemoryGroupStore,
-        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryRepositoryStore,
-        InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore, InMemoryWebhookStore,
+        InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryQuotaStore, InMemoryReplicaStore,
+        InMemoryRepositoryStore, InMemoryRetentionStore, InMemoryStorage, InMemoryUserStore,
+        InMemoryWebhookStore,
     };
     use ferrobox_application::update_alloy_members::UpdateAlloyMembersUseCase;
     use ferrobox_domain::api_token::ApiTokenName;
@@ -451,6 +453,18 @@ mod tests {
                     storage.clone(),
                     quota.clone(),
                 ),
+            replica: ferrobox_application::replica::ReplicaService::new(
+                Arc::new(InMemoryReplicaStore::default()),
+                repository_store.clone(),
+                ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                    repository_store.clone(),
+                    artifact_store.clone(),
+                    package_index_store.clone(),
+                    storage.clone(),
+                    quota.clone(),
+                ),
+                http_client.clone(),
+            ),
             promote_package: ferrobox_application::promote_package::PromotePackageUseCase::new(
                 repository_store.clone(),
                 artifact_store.clone(),
@@ -629,7 +643,10 @@ mod tests {
                 Request::builder()
                     .method("PUT")
                     .uri(format!("/nuget/{}/v3/package", fixture.repo_id))
-                    .header("Authorization", format!("Bearer {}", fixture.developer_token))
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", fixture.developer_token),
+                    )
                     .body(Body::from(nupkg.to_vec()))
                     .unwrap(),
             )

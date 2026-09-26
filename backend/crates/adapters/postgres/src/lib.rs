@@ -25,6 +25,9 @@ pub mod assay_store;
 /// Adaptador de `RetentionStore`.
 pub mod retention_store;
 
+/// Adaptador de `ReplicaStore`.
+pub mod replica_store;
+
 /// Adaptador de `AdmissionStore`.
 pub mod admission_store;
 

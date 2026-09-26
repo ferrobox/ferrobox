@@ -16,6 +16,7 @@ import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembe
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { AdmissionPolicyRequest } from "@/api/generated/AdmissionPolicyRequest";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
+import type { ReplicaPolicyRequest } from "@/api/generated/ReplicaPolicyRequest";
 import type { SetGroupMembersRequest } from "@/api/generated/SetGroupMembersRequest";
 import type { SetGroupRepositoriesRequest } from "@/api/generated/SetGroupRepositoriesRequest";
 import type { SetRepositoryAccessRequest } from "@/api/generated/SetRepositoryAccessRequest";
@@ -41,6 +42,7 @@ export const queryKeys = {
   repositoryAdmissionEvents: (id: string) =>
     ["repositories", id, "admission", "events"] as const,
   repositoryRetention: (id: string) => ["repositories", id, "retention"] as const,
+  repositoryReplica: (id: string) => ["repositories", id, "replica"] as const,
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
   repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
   webhookDeliveries: (repositoryId: string, webhookId: string) =>
@@ -680,6 +682,41 @@ export function useAuditEvents(enabled: boolean) {
     queryKey: queryKeys.audit,
     queryFn: api.listAuditEvents,
     enabled,
+  });
+}
+
+export function useReplicaPolicy(repositoryId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.repositoryReplica(repositoryId),
+    queryFn: () => api.getReplicaPolicy(repositoryId),
+    enabled,
+  });
+}
+
+export function useSaveReplicaPolicy(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: ReplicaPolicyRequest) =>
+      api.saveReplicaPolicy(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryReplica(repositoryId),
+      });
+    },
+  });
+}
+
+export function usePushReplica(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.pushReplica(repositoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryReplica(repositoryId),
+      });
+    },
   });
 }
 

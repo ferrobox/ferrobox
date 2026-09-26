@@ -50,6 +50,9 @@ pub mod retention;
 /// Política de admisión (firma, y más adelante otras condiciones).
 pub mod admission;
 
+/// Réplica push hacia otra instancia FerroBox.
+pub mod replica;
+
 /// Registro de auditoría de escrituras de negocio.
 pub mod audit;
 

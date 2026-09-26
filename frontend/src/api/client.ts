@@ -33,6 +33,9 @@ import type { AdmissionPolicyResponse } from "@/api/generated/AdmissionPolicyRes
 import type { AdmissionPreviewResponse } from "@/api/generated/AdmissionPreviewResponse";
 import type { RetentionPolicyRequest } from "@/api/generated/RetentionPolicyRequest";
 import type { RetentionPolicyResponse } from "@/api/generated/RetentionPolicyResponse";
+import type { ReplicaPolicyRequest } from "@/api/generated/ReplicaPolicyRequest";
+import type { ReplicaPolicyResponse } from "@/api/generated/ReplicaPolicyResponse";
+import type { ReplicaPushResponse } from "@/api/generated/ReplicaPushResponse";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
 import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { SettingsResponse } from "@/api/generated/SettingsResponse";
@@ -653,6 +656,26 @@ export function listAdmissionEvents(
 
 export function listAuditEvents(): Promise<AuditEventResponse[]> {
   return request<AuditEventResponse[]>("/audit");
+}
+
+export function getReplicaPolicy(repositoryId: string): Promise<ReplicaPolicyResponse> {
+  return request<ReplicaPolicyResponse>(`/repositories/${repositoryId}/replica`);
+}
+
+export function saveReplicaPolicy(
+  repositoryId: string,
+  payload: ReplicaPolicyRequest,
+): Promise<ReplicaPolicyResponse> {
+  return request<ReplicaPolicyResponse>(`/repositories/${repositoryId}/replica`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function pushReplica(repositoryId: string): Promise<ReplicaPushResponse> {
+  return request<ReplicaPushResponse>(`/repositories/${repositoryId}/replica/push`, {
+    method: "POST",
+  });
 }
 
 export function getRetentionPolicy(repositoryId: string): Promise<RetentionPolicyResponse> {
