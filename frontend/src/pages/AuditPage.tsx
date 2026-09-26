@@ -40,6 +40,7 @@ const ACTION_KEYS = [
   "package.yanked",
   "package.unyanked",
   "package.promoted",
+  "package.prefetched",
   "admission.policy_changed",
   "retention.policy_changed",
   "retention.applied",

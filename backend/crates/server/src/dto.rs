@@ -962,6 +962,28 @@ pub(crate) struct PromotePackageRequest {
     pub(crate) preserve_yanked: bool,
 }
 
+/// Cuerpo para calentar la caché de un `Mirror`.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct PrefetchPackageRequest {
+    /// Nombre del paquete, módulo o imagen.
+    pub(crate) name: String,
+    /// Versión, etiqueta OCI o digest. Vacío = solo índice.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) version: Option<String>,
+}
+
+/// Resultado del prefetch.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct PrefetchPackageResponse {
+    pub(crate) name: String,
+    pub(crate) version: Option<String>,
+    pub(crate) indexed: bool,
+    pub(crate) downloaded: bool,
+}
+
 /// Resultado de copiar una versión a otro Forge.
 #[derive(Serialize, TS)]
 #[ts(export)]

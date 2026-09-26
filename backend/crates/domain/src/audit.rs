@@ -54,6 +54,8 @@ pub enum AuditAction {
     PackageUnyanked,
     /// Se copió una versión de un Forge a otro.
     PackagePromoted,
+    /// Se cacheó un paquete desde el *upstream* de un `Mirror`.
+    PackagePrefetched,
     /// Se guardó la política de admisión.
     AdmissionPolicyChanged,
     /// Se guardó la política de retención.
@@ -223,6 +225,7 @@ impl AuditAction {
             Self::PackageYanked => "package.yanked",
             Self::PackageUnyanked => "package.unyanked",
             Self::PackagePromoted => "package.promoted",
+            Self::PackagePrefetched => "package.prefetched",
             Self::AdmissionPolicyChanged => "admission.policy_changed",
             Self::RetentionPolicyChanged => "retention.policy_changed",
             Self::RetentionApplied => "retention.applied",
@@ -262,6 +265,7 @@ impl AuditAction {
             "package.yanked" => Ok(Self::PackageYanked),
             "package.unyanked" => Ok(Self::PackageUnyanked),
             "package.promoted" => Ok(Self::PackagePromoted),
+            "package.prefetched" => Ok(Self::PackagePrefetched),
             "admission.policy_changed" => Ok(Self::AdmissionPolicyChanged),
             "retention.policy_changed" => Ok(Self::RetentionPolicyChanged),
             "retention.applied" => Ok(Self::RetentionApplied),
@@ -343,6 +347,7 @@ mod tests {
             AuditAction::PackageYanked,
             AuditAction::PackageUnyanked,
             AuditAction::PackagePromoted,
+            AuditAction::PackagePrefetched,
             AuditAction::AdmissionPolicyChanged,
             AuditAction::RetentionPolicyChanged,
             AuditAction::RetentionApplied,

@@ -23,6 +23,7 @@ use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
 use ferrobox_application::packaging::PackagingError;
+use ferrobox_application::prefetch_package::PrefetchError;
 use ferrobox_application::promote_package::PromoteError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
@@ -108,6 +109,18 @@ impl From<PublishArtifactError> for ApiError {
             PublishArtifactError::ReadOnlyRepository => Self::BadRequest(err.to_string()),
             PublishArtifactError::Quota(inner) => inner.into(),
             other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<PrefetchError> for ApiError {
+    fn from(err: PrefetchError) -> Self {
+        match err {
+            PrefetchError::NotAMirror(_)
+            | PrefetchError::UnsupportedEcosystem(_)
+            | PrefetchError::MissingVersion
+            | PrefetchError::MissingStrategy(_) => Self::BadRequest(err.to_string()),
+            PrefetchError::Packaging(inner) => inner.into(),
         }
     }
 }

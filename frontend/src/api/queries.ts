@@ -5,6 +5,7 @@ import type { AssayLookupRequest } from "@/api/generated/AssayLookupRequest";
 import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
+import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
 import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
@@ -148,6 +149,22 @@ export function useDeleteArtifact(repositoryId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function usePrefetchPackage(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: PrefetchPackageRequest) => api.prefetchPackage(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryAssays(repositoryId),
       });
     },
   });
