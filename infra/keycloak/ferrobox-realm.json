@@ -47,7 +47,8 @@
         "http://localhost:5173"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:3000/login##http://localhost:3000/login##http://127.0.0.1:5173/login##http://localhost:5173/login"
       },
       "protocolMappers": [
         {
@@ -105,6 +106,19 @@
       ],
       "realmRoles": ["ferrobox-admin"],
       "groups": ["/platform", "/backend"]
+    },
+    {
+      "username": "linus",
+      "enabled": true,
+      "email": "linus@example.com",
+      "emailVerified": true,
+      "firstName": "Linus",
+      "lastName": "Torvalds",
+      "credentials": [
+        { "type": "password", "value": "LinusLogin1", "temporary": false }
+      ],
+      "realmRoles": ["ferrobox-reader"],
+      "groups": []
     }
   ]
 }
