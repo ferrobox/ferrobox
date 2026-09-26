@@ -50,6 +50,7 @@ pub(crate) async fn save_policy(
             destination_id,
             payload.token,
             payload.direction,
+            payload.interval_hours,
         )
         .await?;
     crate::audit::record(
@@ -357,6 +358,7 @@ mod tests {
         assert_eq!(json["configured"], false);
         assert_eq!(json["has_token"], false);
         assert_eq!(json["direction"], "push");
+        assert_eq!(json["interval_hours"], serde_json::Value::Null);
     }
 
     #[tokio::test]
@@ -429,5 +431,31 @@ mod tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["direction"], "pull");
+    }
+
+    #[tokio::test]
+    async fn save_stores_the_cron_interval() {
+        let (app, token, _, repo) = fixture().await;
+        let dest = uuid::Uuid::now_v7();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/repositories/{repo}/replica"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"remote_url":"http://peer.example","destination_id":"{dest}","token":"t","interval_hours":6}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["interval_hours"], 6);
     }
 }

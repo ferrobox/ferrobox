@@ -632,7 +632,7 @@
   },
   "replica": {
     "title": "Instance replica",
-    "description": "Push this catalog to a Forge on another FerroBox, or pull a remote Forge into this one. The remote repository must already exist and use the same ecosystem. A schedule comes later.",
+    "description": "Push this catalog to a Forge on another FerroBox, or pull a remote Forge into this one. The remote repository must already exist and use the same ecosystem. An optional interval runs that push or pull in the background.",
     "loadFailed": "Could not load the replica target",
     "direction": "Direction",
     "directionHint": "Push sends this catalog to the remote Forge. Pull downloads the remote Forge into this repository.",
@@ -651,6 +651,9 @@
     "tokenKept": "Token is saved. Leave empty to keep it.",
     "tokenHint": "A robot or user token from the destination instance. It is not shown again.",
     "tokenHintPull": "A robot or user token from the source instance. It is not shown again.",
+    "interval": "Interval (hours)",
+    "intervalOff": "Off",
+    "intervalHint": "1–168 hours. Empty or 0 disables the cron. A policy that has never run is due on the next tick (~30s).",
     "saved": "Replica target saved.",
     "cleared": "Replica target cleared.",
     "saveFailed": "Could not save the replica target",

@@ -899,6 +899,16 @@ impl ReplicaStore for InMemoryReplicaStore {
         }
         Ok(())
     }
+
+    async fn list_all(&self) -> Result<Vec<(RepositoryId, ReplicaPolicy)>, ReplicaStoreError> {
+        Ok(self
+            .policies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, policy)| (*id, policy.clone()))
+            .collect())
+    }
 }
 
 #[derive(Default)]

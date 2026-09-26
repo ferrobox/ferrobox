@@ -32,6 +32,7 @@ const EMPTY: ReplicaPolicyResponse = {
   destination_id: null,
   direction: "push",
   has_token: false,
+  interval_hours: null,
   last_run: null,
 };
 
@@ -88,17 +89,33 @@ function ReplicaForm({
   const [remoteUrl, setRemoteUrl] = useState(policy.remote_url ?? "");
   const [destinationId, setDestinationId] = useState(policy.destination_id ?? "");
   const [direction, setDirection] = useState(policy.direction === "pull" ? "pull" : "push");
+  const [intervalHours, setIntervalHours] = useState(
+    policy.interval_hours == null ? "" : String(policy.interval_hours),
+  );
   const [token, setToken] = useState("");
   const pulling = direction === "pull";
   const running = pushReplica.isPending || pullReplica.isPending;
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedInterval = intervalHours.trim();
+    let interval: number | undefined;
+    if (trimmedInterval.length > 0) {
+      const parsed = Number.parseInt(trimmedInterval, 10);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 168) {
+        toast.error(t("replica.intervalHint"));
+        return;
+      }
+      interval = parsed;
+    } else {
+      interval = 0;
+    }
     const payload: ReplicaPolicyRequest = {
       remote_url: remoteUrl.trim() || undefined,
       destination_id: destinationId.trim() || undefined,
       token: token.trim() || undefined,
       direction,
+      interval_hours: interval,
     };
     try {
       await savePolicy.mutateAsync(payload);
@@ -202,6 +219,20 @@ function ReplicaForm({
         <p className="text-sm text-muted-foreground">
           {t(pulling ? "replica.tokenHintPull" : "replica.tokenHint")}
         </p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="replica-interval">{t("replica.interval")}</Label>
+        <Input
+          id="replica-interval"
+          type="number"
+          min={0}
+          max={168}
+          value={intervalHours}
+          onChange={(event) => setIntervalHours(event.target.value)}
+          placeholder={t("replica.intervalOff")}
+          disabled={!canWrite}
+        />
+        <p className="text-sm text-muted-foreground">{t("replica.intervalHint")}</p>
       </div>
 
       {policy.last_run ? (

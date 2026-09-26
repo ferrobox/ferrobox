@@ -47,8 +47,8 @@ impl ReplicaStore for PostgresReplicaStore {
         let repository_id: Uuid = repository_id.into();
         let row = sqlx::query(
             r"
-            SELECT remote_url, destination_id, token, direction, last_run_at,
-                   last_packages_imported, last_artifacts_imported,
+            SELECT remote_url, destination_id, token, direction, interval_hours,
+                   last_run_at, last_packages_imported, last_artifacts_imported,
                    last_skipped, last_error
             FROM repository_replica
             WHERE repository_id = $1
@@ -95,15 +95,16 @@ impl ReplicaStore for PostgresReplicaStore {
             r"
             INSERT INTO repository_replica (
                 repository_id, remote_url, destination_id, token, direction,
-                last_run_at, last_packages_imported, last_artifacts_imported,
-                last_skipped, last_error
+                interval_hours, last_run_at, last_packages_imported,
+                last_artifacts_imported, last_skipped, last_error
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (repository_id) DO UPDATE
             SET remote_url = EXCLUDED.remote_url,
                 destination_id = EXCLUDED.destination_id,
                 token = EXCLUDED.token,
                 direction = EXCLUDED.direction,
+                interval_hours = EXCLUDED.interval_hours,
                 last_run_at = EXCLUDED.last_run_at,
                 last_packages_imported = EXCLUDED.last_packages_imported,
                 last_artifacts_imported = EXCLUDED.last_artifacts_imported,
@@ -117,6 +118,11 @@ impl ReplicaStore for PostgresReplicaStore {
         .bind(Uuid::from(target.destination_id()))
         .bind(target.token())
         .bind(target.direction().as_str())
+        .bind(
+            policy
+                .interval_hours()
+                .map(|hours| i32::try_from(hours).unwrap_or(i32::MAX)),
+        )
         .bind(last_run_at)
         .bind(last.map(|run| i32::try_from(run.packages_imported()).unwrap_or(i32::MAX)))
         .bind(last.map(|run| i32::try_from(run.artifacts_imported()).unwrap_or(i32::MAX)))
@@ -126,6 +132,39 @@ impl ReplicaStore for PostgresReplicaStore {
         .await
         .map_err(|err| map_sqlx(&err))?;
         Ok(())
+    }
+
+    async fn list_all(&self) -> Result<Vec<(RepositoryId, ReplicaPolicy)>, ReplicaStoreError> {
+        let rows = sqlx::query(
+            r"
+            SELECT repository_id, remote_url, destination_id, token, direction,
+                   interval_hours, last_run_at, last_packages_imported,
+                   last_artifacts_imported, last_skipped, last_error
+            FROM repository_replica
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| map_sqlx(&err));
+
+        match rows {
+            Err(ReplicaStoreError::MissingSchema) => Ok(Vec::new()),
+            Err(err) => Err(err),
+            Ok(rows) => {
+                let mut policies = Vec::with_capacity(rows.len());
+                for row in rows {
+                    use sqlx::Row;
+                    let repository_id: Uuid = row
+                        .try_get("repository_id")
+                        .map_err(|err| backend_error(err.to_string()))?;
+                    policies.push((
+                        RepositoryId::from(repository_id),
+                        policy_from_row(repository_id, &row)?,
+                    ));
+                }
+                Ok(policies)
+            }
+        }
     }
 }
 
@@ -178,5 +217,12 @@ fn policy_from_row(
         )
     });
 
-    Ok(ReplicaPolicy::new(Some(target), last_run))
+    let interval = row
+        .try_get::<Option<i32>, _>("interval_hours")
+        .unwrap_or(None)
+        .and_then(|hours| u32::try_from(hours).ok());
+
+    ReplicaPolicy::new(Some(target), last_run)
+        .with_interval(interval)
+        .map_err(|err| backend_error(err.to_string()))
 }

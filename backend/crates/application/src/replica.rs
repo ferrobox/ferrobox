@@ -1,13 +1,13 @@
-//! Push o pull de un repositorio hacia otra instancia FerroBox.
+//! Push or pull a repository to another FerroBox instance.
 //!
-//! Push: empaqueta el catálogo y lo `POST` al import remoto.
-//! Pull: `GET` el export remoto y lo importa aquí. El cron no entra
-//! en este corte.
+//! Push: export the catalog and `POST` it to the remote import.
+//! Pull: `GET` the remote export and import it here.
+//! The background cron runs due policies on an interval.
 
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::replica::{
     ReplicaDirection, ReplicaPolicy, ReplicaPolicyError, ReplicaRun, ReplicaTarget,
@@ -85,7 +85,8 @@ pub enum ReplicaError {
     Bundle(#[from] BundleError),
 }
 
-/// Caso de uso: política de réplica y push manual.
+/// Use case: replica policy, manual push/pull, and the scheduled cron.
+#[derive(Clone)]
 pub struct ReplicaService {
     store: Arc<dyn ReplicaStore>,
     repositories: GetRepositoryUseCase,
@@ -135,6 +136,7 @@ impl ReplicaService {
         destination_id: Option<Uuid>,
         token: Option<String>,
         direction: Option<String>,
+        interval_hours: Option<u32>,
     ) -> Result<ReplicaPolicy, ReplicaError> {
         self.require_pushable(repository_id).await?;
         let existing = self.load_policy(repository_id).await?;
@@ -144,6 +146,10 @@ impl ReplicaService {
                 .target()
                 .map(ReplicaTarget::direction)
                 .unwrap_or(ReplicaDirection::Push),
+        };
+        let interval = match interval_hours {
+            Some(hours) => Some(hours),
+            None => existing.interval_hours(),
         };
         let target = match (remote_url, destination_id) {
             (Some(url), Some(destination)) if !url.trim().is_empty() => {
@@ -162,7 +168,8 @@ impl ReplicaService {
             }
             _ => None,
         };
-        let policy = ReplicaPolicy::new(target, existing.last_run().cloned());
+        let policy =
+            ReplicaPolicy::new(target, existing.last_run().cloned()).with_interval(interval)?;
         self.store.save(repository_id, &policy).await?;
         Ok(policy)
     }
@@ -281,6 +288,35 @@ impl ReplicaService {
             artifacts_imported: run.artifacts_imported(),
             skipped: run.skipped(),
         })
+    }
+
+    /// Run every configured policy whose interval is due.
+    ///
+    /// One repository failing does not abort the rest. `push_now` /
+    /// `pull_now` already persist `last_run` on success and on remote
+    /// errors, so the next tick waits for the interval.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplicaError::MissingSchema`] or a store failure while listing.
+    pub async fn run_due(&self, now: DateTime<Utc>) -> Result<u32, ReplicaError> {
+        let policies = match self.store.list_all().await {
+            Ok(policies) => policies,
+            Err(ReplicaStoreError::MissingSchema) => return Err(ReplicaError::MissingSchema),
+            Err(err) => return Err(err.into()),
+        };
+        let mut ran = 0;
+        for (repository_id, policy) in policies {
+            if !policy.is_due(now) {
+                continue;
+            }
+            ran += 1;
+            let _ = match policy.target().map(ReplicaTarget::direction) {
+                Some(ReplicaDirection::Pull) => self.pull_now(repository_id).await,
+                _ => self.push_now(repository_id).await,
+            };
+        }
+        Ok(ran)
     }
 
     async fn require_pushable(&self, repository_id: RepositoryId) -> Result<(), ReplicaError> {
@@ -506,6 +542,7 @@ mod tests {
                 Some(destination.id().into()),
                 Some("peer-token".into()),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -580,6 +617,7 @@ mod tests {
                 Some(destination.id().into()),
                 Some("tok".into()),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -629,6 +667,7 @@ mod tests {
                 Some(member.id().into()),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -665,6 +704,7 @@ mod tests {
                 Some("http://peer.example".into()),
                 Some(destination.id().into()),
                 Some("tok".into()),
+                None,
                 None,
             )
             .await
@@ -725,6 +765,7 @@ mod tests {
                 Some(source.id().into()),
                 Some("tok".into()),
                 Some("pull".into()),
+                None,
             )
             .await
             .unwrap();
@@ -795,11 +836,87 @@ mod tests {
                 Some(source.id().into()),
                 Some("tok".into()),
                 Some("pull".into()),
+                None,
             )
             .await
             .unwrap();
 
         let outcome = replica.pull_now(destination.id()).await.unwrap();
         assert_eq!(outcome.artifacts_imported, 1);
+    }
+
+    #[tokio::test]
+    async fn run_due_pushes_a_policy_that_never_ran() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let source = forge("src");
+        let destination = forge("dst");
+        repositories.save(&source).await.unwrap();
+        repositories.save(&destination).await.unwrap();
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub(
+            &format!(
+                "http://peer.example/api/repositories/{}/import",
+                destination.id()
+            ),
+            200,
+            Bytes::from_static(
+                br#"{"packages_imported":0,"artifacts_imported":0,"skipped":0,"bytes_copied":0}"#,
+            ),
+        );
+        let (replica, _) = service(
+            repositories,
+            artifacts,
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+        );
+        replica
+            .save_policy(
+                source.id(),
+                Some("http://peer.example".into()),
+                Some(destination.id().into()),
+                Some("tok".into()),
+                None,
+                Some(1),
+            )
+            .await
+            .unwrap();
+
+        let ran = replica.run_due(Utc::now()).await.unwrap();
+        assert_eq!(ran, 1);
+        assert_eq!(http.take_posts().len(), 1);
+        assert_eq!(replica.run_due(Utc::now()).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_due_skips_a_policy_without_an_interval() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let source = forge("src");
+        let destination = forge("dst");
+        repositories.save(&source).await.unwrap();
+        repositories.save(&destination).await.unwrap();
+        let http = Arc::new(InMemoryHttpClient::default());
+        let (replica, _) = service(
+            repositories,
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+        );
+        replica
+            .save_policy(
+                source.id(),
+                Some("http://peer.example".into()),
+                Some(destination.id().into()),
+                Some("tok".into()),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(replica.run_due(Utc::now()).await.unwrap(), 0);
+        assert!(http.take_posts().is_empty());
     }
 }
