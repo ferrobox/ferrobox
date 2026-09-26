@@ -98,7 +98,7 @@
     "prefetchHint": "Pull a package from the upstream into this Mirror now, without waiting for a client.",
     "prefetchName": "Package name",
     "prefetchVersion": "Version",
-    "prefetchVersionHint": "Optional for Cargo, npm, PyPI, Maven, NuGet, and Go (index only). Required for OCI/Helm (tag or digest).",
+    "prefetchVersionHint": "Optional for Cargo, npm, PyPI, Maven, NuGet, and Go (index only). Required for OCI/Helm (tag or digest) and for Conan (recipe version, e.g. 1.3.1). Conan caches the recipe, not every binary.",
     "prefetching": "Prefetching…",
     "prefetched": "Prefetched {{name}}",
     "prefetchFailed": "Could not prefetch the package",
