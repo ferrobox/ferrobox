@@ -117,15 +117,13 @@ pub fn load_dotenv() -> Vec<PathBuf> {
     let explicit = optional_env("FERROBOX_ENV_FILE");
     let mut loaded = Vec::new();
     for path in dotenv_candidates() {
-        let Ok(canonical) = path.canonicalize() else {
+        let Some(canonical) = load_env_file(&path) else {
             continue;
         };
         if loaded.iter().any(|seen| seen == &canonical) {
             continue;
         }
-        if dotenvy::from_path_override(&canonical).is_ok() {
-            loaded.push(canonical);
-        }
+        loaded.push(canonical);
     }
     if let Some(path) = explicit {
         if loaded.is_empty() {
@@ -164,17 +162,28 @@ fn explicit_env_paths(path: &str) -> Vec<PathBuf> {
     if path.is_absolute() {
         return vec![path];
     }
+    let crate_backend = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut paths = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         paths.push(cwd.join(&path));
         paths.push(cwd.join("backend").join(&path));
+        paths.push(cwd.join("..").join(&path));
     }
-    paths.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(&path),
-    );
+    paths.push(crate_backend.join(&path));
+    paths.push(crate_backend.join("..").join(&path));
     paths
+}
+
+fn load_env_file(path: &std::path::Path) -> Option<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        if dotenvy::from_path_override(&canonical).is_ok() {
+            return Some(canonical);
+        }
+    }
+    if path.is_file() && dotenvy::from_path_override(path).is_ok() {
+        return Some(path.to_path_buf());
+    }
+    None
 }
 
 fn require_env(key: &'static str) -> Result<String, ConfigError> {
@@ -239,17 +248,15 @@ mod tests {
     }
 
     #[test]
-    fn relative_env_file_also_looks_next_to_backend_env() {
+    fn relative_env_file_also_looks_in_the_repo_root() {
         let paths = dotenv_candidates_from(Some(".env_b"));
         assert!(
             paths.iter().any(|path| path.ends_with("../../.env_b")),
             "expected a crate-relative backend/.env_b, got {paths:?}"
         );
         assert!(
-            paths
-                .iter()
-                .any(|path| path.file_name().and_then(|name| name.to_str()) == Some(".env_b")),
-            "expected a candidate named .env_b, got {paths:?}"
+            paths.iter().any(|path| path.ends_with("../../../.env_b")),
+            "expected the git-root .env_b next to backend/, got {paths:?}"
         );
     }
 
