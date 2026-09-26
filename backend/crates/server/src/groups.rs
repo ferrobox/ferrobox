@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_manage_groups;
+use crate::authz::{require_manage_groups, require_token_read};
 use crate::dto::{
     CreateGroupRequest, GroupDetailResponse, GroupRepositoryGrantResponse, GroupSummaryResponse,
     MyGroupMembershipResponse, RepositoryAccessGrantResponse, SetGroupMembersRequest,
@@ -73,9 +73,9 @@ impl From<&GroupDetail> for GroupDetailResponse {
 
 pub(crate) async fn list_groups(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<GroupSummaryResponse>>, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let groups = state.groups.list().await?;
     Ok(Json(
         groups.iter().map(GroupSummaryResponse::from).collect(),
@@ -84,10 +84,10 @@ pub(crate) async fn list_groups(
 
 pub(crate) async fn create_group(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Json(payload): Json<CreateGroupRequest>,
 ) -> Result<(StatusCode, Json<GroupSummaryResponse>), ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let name =
         GroupName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let group = state.groups.create(name).await?;
@@ -115,18 +115,19 @@ pub(crate) async fn create_group(
 
 pub(crate) async fn get_group(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(group_id): Path<Uuid>,
 ) -> Result<Json<GroupDetailResponse>, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let detail = state.groups.get(GroupId::from(group_id)).await?;
     Ok(Json(GroupDetailResponse::from(&detail)))
 }
 
 pub(crate) async fn my_groups(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<MyGroupMembershipResponse>>, ApiError> {
+    require_token_read(&token)?;
     let memberships = state.groups.memberships_for(user.id()).await?;
     Ok(Json(
         memberships
@@ -138,10 +139,10 @@ pub(crate) async fn my_groups(
 
 pub(crate) async fn delete_group(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(group_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     state.groups.delete(GroupId::from(group_id)).await?;
     crate::audit::record(
         &state,
@@ -157,11 +158,11 @@ pub(crate) async fn delete_group(
 
 pub(crate) async fn set_members(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(group_id): Path<Uuid>,
     Json(payload): Json<SetGroupMembersRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let user_ids = parse_ids(&payload.user_ids, UserId::from, "invalid user id")?;
     let member_count = user_ids.len();
     state
@@ -182,11 +183,11 @@ pub(crate) async fn set_members(
 
 pub(crate) async fn set_repositories(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(group_id): Path<Uuid>,
     Json(payload): Json<SetGroupRepositoriesRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let mut grants = Vec::with_capacity(payload.grants.len());
     for grant in payload.grants {
         let repository_id = parse_uuid(&grant.repository_id, "invalid repository id")?;
@@ -211,10 +212,10 @@ pub(crate) async fn set_repositories(
 
 pub(crate) async fn get_repository_access(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<RepositoryAccessGrantResponse>>, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let grants = state
         .groups
         .repository_grants(RepositoryId::from(repository_id))
@@ -233,11 +234,11 @@ pub(crate) async fn get_repository_access(
 
 pub(crate) async fn set_repository_access(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<SetRepositoryAccessRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_groups(&user)?;
+    require_manage_groups(&user, &token)?;
     let mut grants = Vec::with_capacity(payload.grants.len());
     for grant in payload.grants {
         let group_id = parse_uuid(&grant.group_id, "invalid group id")?;

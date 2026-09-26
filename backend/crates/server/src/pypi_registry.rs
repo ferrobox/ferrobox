@@ -165,11 +165,11 @@ async fn download_file(
 
 async fn upload(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     multipart: Multipart,
 ) -> Result<(StatusCode, &'static str), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let repository = load_pypi_repository(&state, repository_id).await?;
     let payload = multipart_to_publish_payload(multipart).await?;
     let strategy = pypi_strategy(&state)?;
@@ -188,10 +188,10 @@ async fn upload(
 
 async fn yank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     crate::audit::record(
         &state,
@@ -207,10 +207,10 @@ async fn yank(
 
 async fn unyank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<PypiOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     crate::audit::record(
         &state,

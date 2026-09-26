@@ -20,23 +20,23 @@ use crate::error::ApiError;
 
 pub(crate) async fn list_webhooks(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<WebhookResponse>>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let webhooks = state.webhooks.list(repository_id).await?;
     Ok(Json(webhooks.iter().map(WebhookResponse::from).collect()))
 }
 
 pub(crate) async fn create_webhook(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<(StatusCode, Json<WebhookResponse>), ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let events: Vec<WebhookEvent> = payload.events.into_iter().map(WebhookEvent::from).collect();
     let webhook = state
         .webhooks
@@ -63,12 +63,12 @@ pub(crate) async fn create_webhook(
 
 pub(crate) async fn update_webhook(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, webhook_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdateWebhookRequest>,
 ) -> Result<Json<WebhookResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let events: Vec<WebhookEvent> = payload.events.into_iter().map(WebhookEvent::from).collect();
     let webhook = state
         .webhooks
@@ -96,11 +96,11 @@ pub(crate) async fn update_webhook(
 
 pub(crate) async fn delete_webhook(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, webhook_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     state
         .webhooks
         .delete(repository_id, WebhookId::from(webhook_id))
@@ -119,11 +119,11 @@ pub(crate) async fn delete_webhook(
 
 pub(crate) async fn list_deliveries(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, webhook_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Vec<WebhookDeliveryResponse>>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let deliveries = state
         .webhooks
         .deliveries(repository_id, WebhookId::from(webhook_id))
@@ -138,11 +138,11 @@ pub(crate) async fn list_deliveries(
 
 pub(crate) async fn ping_webhook(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, webhook_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<WebhookDeliveryResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let delivery = state
         .webhooks
         .ping(repository_id, WebhookId::from(webhook_id))

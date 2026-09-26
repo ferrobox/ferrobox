@@ -13,14 +13,17 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::{require_repo_read, require_repo_write, require_write_artifacts};
+use crate::authz::{
+    require_repo_read, require_repo_write, require_token_read, require_write_artifacts,
+};
 use crate::dto::{AssayLookupRequest, AssayRerunResponse, AssayResponse};
 use crate::error::ApiError;
 
 pub(crate) async fn list_all(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<AssayResponse>>, ApiError> {
+    require_token_read(&token)?;
     let visibility = state.groups.visibility(&user).await?;
     let assays = state.assays.list_all().await?;
     Ok(Json(
@@ -34,32 +37,32 @@ pub(crate) async fn list_all(
 
 pub(crate) async fn rerun_all(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<AssayRerunResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_write_artifacts(&user, &token)?;
     let scheduled = state.assays.rerun_all().await?;
     Ok(Json(AssayRerunResponse { scheduled }))
 }
 
 pub(crate) async fn list_for_repository(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<AssayResponse>>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let assays = state.assays.list_for_repository(repository_id).await?;
     Ok(Json(assays.iter().map(AssayResponse::from).collect()))
 }
 
 pub(crate) async fn get_or_run(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Query(lookup): Query<AssayLookupRequest>,
 ) -> Result<Json<AssayResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let assay = state
         .assays
         .get_or_run(
@@ -74,11 +77,17 @@ pub(crate) async fn get_or_run(
 
 pub(crate) async fn run(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(lookup): Json<AssayLookupRequest>,
 ) -> Result<Json<AssayResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let assay = state
         .assays
         .run(
@@ -93,21 +102,21 @@ pub(crate) async fn run(
 
 pub(crate) async fn get_by_id(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(assay_id): Path<Uuid>,
 ) -> Result<Json<AssayResponse>, ApiError> {
     let assay = state.assays.get_by_id(AssayId::from(assay_id)).await?;
-    require_repo_read(&state.groups, &user, assay.repository_id()).await?;
+    require_repo_read(&state.groups, &user, &token, assay.repository_id()).await?;
     Ok(Json(AssayResponse::from(&assay)))
 }
 
 pub(crate) async fn download_sbom(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(assay_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let assay = state.assays.get_by_id(AssayId::from(assay_id)).await?;
-    require_repo_read(&state.groups, &user, assay.repository_id()).await?;
+    require_repo_read(&state.groups, &user, &token, assay.repository_id()).await?;
     let body = to_cyclonedx(&assay);
     let filename = format!(
         "{}-{}.cdx.json",

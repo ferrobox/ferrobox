@@ -17,25 +17,25 @@ use ferrobox_domain::api_token::ApiTokenName;
 
 use crate::dto::{
     ApiTokenCreatedResponse, CreateRobotRequest, CreateRobotResponse, CreateUserRequest,
-    ResetUserPasswordRequest, UpdateUserRoleRequest, UserResponse,
+    ResetUserPasswordRequest, UpdateUserRoleRequest, UserResponse, token_scope_labels,
 };
 use crate::error::ApiError;
 
 pub(crate) async fn list_users(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<UserResponse>>, ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
     let users = state.list_users.execute().await?;
     Ok(Json(users.iter().map(UserResponse::from).collect()))
 }
 
 pub(crate) async fn create_user(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
 
     let username =
         Username::parse(payload.username).map_err(|err| ApiError::BadRequest(err.to_string()))?;
@@ -61,10 +61,10 @@ pub(crate) async fn create_user(
 
 pub(crate) async fn create_robot(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Json(payload): Json<CreateRobotRequest>,
 ) -> Result<(StatusCode, Json<CreateRobotResponse>), ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
 
     let username =
         Username::parse(payload.username).map_err(|err| ApiError::BadRequest(err.to_string()))?;
@@ -110,6 +110,7 @@ pub(crate) async fn create_robot(
                 prefix: token.token.prefix().to_string(),
                 token: token.plaintext_secret,
                 expires_at: token.token.expires_at().map(|at| at.to_rfc3339()),
+                scopes: token_scope_labels(&token.token),
             },
         }),
     ))
@@ -117,10 +118,10 @@ pub(crate) async fn create_robot(
 
 pub(crate) async fn delete_user(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(user_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
 
     state
         .delete_user
@@ -142,11 +143,11 @@ pub(crate) async fn delete_user(
 
 pub(crate) async fn update_user_role(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<UpdateUserRoleRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
 
     let updated = state
         .change_user_role
@@ -168,11 +169,11 @@ pub(crate) async fn update_user_role(
 
 pub(crate) async fn reset_user_password(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(user_id): Path<Uuid>,
     Json(payload): Json<ResetUserPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
 
     state
         .reset_user_password

@@ -273,7 +273,13 @@ async fn dispatch_write(
     Query(query): Query<DigestQuery>,
     body: Bytes,
 ) -> Result<(StatusCode, HeaderMap, Bytes), OciApiError> {
-    require_repo_write(&state.groups, &user.user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user.user,
+        &user.token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     match (method, parse_distribution_path(&rest)?) {
         (Method::PUT, DistributionPath::Manifest { name, reference }) => {
             put_manifest(
@@ -659,10 +665,16 @@ struct OciOk {
 
 async fn yank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &reference, true).await?;
     crate::audit::record(
         &state,
@@ -678,10 +690,16 @@ async fn yank(
 
 async fn unyank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, reference)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<OciOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &reference, false).await?;
     crate::audit::record(
         &state,

@@ -19,22 +19,22 @@ use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let policy = state.admission.get_policy(repository_id).await?;
     Ok(Json(AdmissionPolicyResponse::from(policy)))
 }
 
 pub(crate) async fn save_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let (policy, public_keys_pem) = payload.into_policy()?;
     let saved = state
         .admission
@@ -59,11 +59,11 @@ pub(crate) async fn save_policy(
 
 pub(crate) async fn dry_run(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let (policy, public_keys_pem) = payload.into_policy()?;
     let preview = state
         .admission
@@ -90,11 +90,11 @@ pub(crate) async fn enforce_download(
 
 pub(crate) async fn list_events(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<AdmissionEventResponse>>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let events = state.admission.list_events(repository_id).await?;
     Ok(Json(
         events

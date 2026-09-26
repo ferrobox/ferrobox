@@ -7,4 +7,8 @@ export type CreateApiTokenRequest = { name: string,
 /**
  * Caducidad RFC 3339. `null` o ausente = no caduca.
  */
-expires_at?: string, };
+expires_at?: string, 
+/**
+ * `read` and/or `write`. Empty or omitted = unrestricted.
+ */
+scopes?: Array<string>, };

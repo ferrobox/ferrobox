@@ -65,6 +65,113 @@ impl fmt::Display for ApiTokenName {
     }
 }
 
+/// Action a token may be limited to. Empty scopes mean unrestricted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TokenScope {
+    /// List, download, export, and other reads.
+    Read,
+    /// Publish, delete, prefetch, replica, and other writes. Implies read.
+    Write,
+}
+
+/// Motivos por los que un scope no es válido.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum TokenScopeError {
+    /// Unknown label.
+    #[error("token scope must be read or write")]
+    Unknown,
+}
+
+impl TokenScope {
+    /// Persist / API label.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+
+    /// Parse one label.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenScopeError::Unknown`] if the label is not `read` or `write`.
+    pub fn parse(raw: impl AsRef<str>) -> Result<Self, TokenScopeError> {
+        match raw.as_ref().trim().to_ascii_lowercase().as_str() {
+            "read" => Ok(Self::Read),
+            "write" => Ok(Self::Write),
+            _ => Err(TokenScopeError::Unknown),
+        }
+    }
+}
+
+/// Set of scopes on a token. Empty = the token inherits the user's full role.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TokenScopes(Vec<TokenScope>);
+
+impl TokenScopes {
+    /// No restriction beyond the user's role.
+    #[must_use]
+    pub fn unrestricted() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Parse labels. Duplicates are dropped. Empty input is unrestricted.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenScopeError::Unknown`] if any label is not `read` or `write`.
+    pub fn parse<I, S>(labels: I) -> Result<Self, TokenScopeError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut scopes = Vec::new();
+        for label in labels {
+            let scope = TokenScope::parse(label)?;
+            if !scopes.contains(&scope) {
+                scopes.push(scope);
+            }
+        }
+        Ok(Self(scopes))
+    }
+
+    /// Stored form: empty, `read`, `write`, or `read,write`.
+    #[must_use]
+    pub fn as_stored(&self) -> String {
+        self.0
+            .iter()
+            .map(|scope| scope.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Labels for the API.
+    #[must_use]
+    pub fn as_labels(&self) -> Vec<&'static str> {
+        self.0.iter().map(|scope| scope.as_str()).collect()
+    }
+
+    /// `true` when no scopes were set.
+    #[must_use]
+    pub fn is_unrestricted(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// `true` for unrestricted tokens or those with `read` or `write`.
+    #[must_use]
+    pub fn allows_read(&self) -> bool {
+        self.is_unrestricted() || self.0.contains(&TokenScope::Read) || self.allows_write()
+    }
+
+    /// `true` for unrestricted tokens or those with `write`.
+    #[must_use]
+    pub fn allows_write(&self) -> bool {
+        self.is_unrestricted() || self.0.contains(&TokenScope::Write)
+    }
+}
+
 /// Un token de API emitido a un usuario.
 ///
 /// El secreto en claro solo se muestra una vez al crearlo; en
@@ -78,6 +185,7 @@ pub struct ApiToken {
     name: ApiTokenName,
     prefix: String,
     expires_at: Option<DateTime<Utc>>,
+    scopes: TokenScopes,
 }
 
 impl ApiToken {
@@ -90,24 +198,21 @@ impl ApiToken {
             name,
             prefix,
             expires_at: None,
+            scopes: TokenScopes::unrestricted(),
         }
     }
 
     /// Reconstituye un token ya existente a partir de un identificador
     /// conocido (por ejemplo, al cargarlo desde persistencia).
     #[must_use]
-    pub fn from_parts(
-        id: ApiTokenId,
-        user_id: UserId,
-        name: ApiTokenName,
-        prefix: String,
-    ) -> Self {
+    pub fn from_parts(id: ApiTokenId, user_id: UserId, name: ApiTokenName, prefix: String) -> Self {
         Self {
             id,
             user_id,
             name,
             prefix,
             expires_at: None,
+            scopes: TokenScopes::unrestricted(),
         }
     }
 
@@ -152,10 +257,19 @@ impl ApiToken {
     /// Devuelve este token con una caducidad distinta.
     #[must_use]
     pub fn with_expires_at(self, expires_at: Option<DateTime<Utc>>) -> Self {
-        Self {
-            expires_at,
-            ..self
-        }
+        Self { expires_at, ..self }
+    }
+
+    /// Scopes stored on this token. Empty is unrestricted.
+    #[must_use]
+    pub fn scopes(&self) -> &TokenScopes {
+        &self.scopes
+    }
+
+    /// Replace the scopes.
+    #[must_use]
+    pub fn with_scopes(self, scopes: TokenScopes) -> Self {
+        Self { scopes, ..self }
     }
 }
 
@@ -210,5 +324,55 @@ mod tests {
         .with_expires_at(Some(deadline));
         assert!(token.is_expired(deadline));
         assert!(!token.is_expired(deadline - chrono::TimeDelta::seconds(1)));
+    }
+
+    #[test]
+    fn empty_scopes_are_unrestricted() {
+        let scopes = TokenScopes::parse(Vec::<&str>::new()).unwrap();
+        assert!(scopes.is_unrestricted());
+        assert!(scopes.allows_read());
+        assert!(scopes.allows_write());
+        assert_eq!(scopes.as_stored(), "");
+        assert!(scopes.as_labels().is_empty());
+    }
+
+    #[test]
+    fn read_scope_forbids_write() {
+        let scopes = TokenScopes::parse(["read"]).unwrap();
+        assert!(!scopes.is_unrestricted());
+        assert!(scopes.allows_read());
+        assert!(!scopes.allows_write());
+        assert_eq!(scopes.as_stored(), "read");
+    }
+
+    #[test]
+    fn write_scope_implies_read() {
+        let scopes = TokenScopes::parse(["write"]).unwrap();
+        assert!(scopes.allows_read());
+        assert!(scopes.allows_write());
+        assert_eq!(scopes.as_stored(), "write");
+    }
+
+    #[test]
+    fn parse_drops_duplicates_and_rejects_unknown_labels() {
+        let scopes = TokenScopes::parse(["read", "READ", "write"]).unwrap();
+        assert_eq!(scopes.as_labels(), vec!["read", "write"]);
+        assert_eq!(TokenScope::parse("admin"), Err(TokenScopeError::Unknown));
+        assert_eq!(
+            TokenScopes::parse(["read", "admin"]),
+            Err(TokenScopeError::Unknown)
+        );
+    }
+
+    #[test]
+    fn token_carries_scopes() {
+        let token = ApiToken::new(
+            UserId::new(),
+            ApiTokenName::parse("ci").unwrap(),
+            "fb_ab".into(),
+        )
+        .with_scopes(TokenScopes::parse(["read"]).unwrap());
+        assert!(token.scopes().allows_read());
+        assert!(!token.scopes().allows_write());
     }
 }

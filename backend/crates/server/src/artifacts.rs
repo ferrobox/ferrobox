@@ -25,12 +25,12 @@ use crate::error::ApiError;
 
 pub(crate) async fn publish_artifact(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
 
     let artifact_id = state.publish_artifact.execute(repository_id, body).await?;
 
@@ -54,25 +54,25 @@ pub(crate) async fn publish_artifact(
 
 pub(crate) async fn download_artifact(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(artifact_id): Path<Uuid>,
 ) -> Result<Bytes, ApiError> {
     let (artifact, content) = state
         .download_artifact
         .execute(ArtifactId::from(artifact_id))
         .await?;
-    require_repo_read(&state.groups, &user, artifact.repository_id()).await?;
+    require_repo_read(&state.groups, &user, &token, artifact.repository_id()).await?;
 
     Ok(content)
 }
 
 pub(crate) async fn list_repository_artifacts(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<Vec<ArtifactResponse>>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
 
     let artifacts = state
         .list_repository_artifacts
@@ -86,11 +86,11 @@ pub(crate) async fn list_repository_artifacts(
 
 pub(crate) async fn delete_artifact(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, artifact_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
 
     state
         .delete_artifact
@@ -112,7 +112,7 @@ pub(crate) async fn delete_artifact(
 
 pub(crate) async fn promote_package(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<PromotePackageRequest>,
 ) -> Result<(StatusCode, Json<PromotePackageResponse>), ApiError> {
@@ -120,8 +120,8 @@ pub(crate) async fn promote_package(
     let target_uuid = Uuid::parse_str(&payload.target_repository_id)
         .map_err(|_| ApiError::BadRequest("invalid target repository id".to_string()))?;
     let target_id = RepositoryId::from(target_uuid);
-    require_repo_read(&state.groups, &user, source_id).await?;
-    require_repo_write(&state.groups, &user, target_id).await?;
+    require_repo_read(&state.groups, &user, &token, source_id).await?;
+    require_repo_write(&state.groups, &user, &token, target_id).await?;
 
     let artifact_id = match payload.artifact_id.as_deref() {
         Some(value) if !value.is_empty() => {
@@ -172,12 +172,12 @@ pub(crate) async fn promote_package(
 
 pub(crate) async fn prefetch_package(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<PrefetchPackageRequest>,
 ) -> Result<Json<PrefetchPackageResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
 
     let name = ferrobox_domain::package_coordinate::PackageName::parse(payload.name.trim())
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
@@ -223,11 +223,11 @@ pub(crate) async fn prefetch_package(
 
 pub(crate) async fn export_repository(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
 
     let bundle = state.repository_bundle.export(repository_id).await?;
     crate::audit::record(
@@ -260,12 +260,12 @@ pub(crate) async fn export_repository(
 
 pub(crate) async fn import_repository(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Result<Json<ImportRepositoryResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
 
     let mut bundle = None;
     while let Some(field) = multipart

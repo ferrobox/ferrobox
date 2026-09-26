@@ -19,22 +19,22 @@ use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<RetentionPolicyResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let policy = state.retention.get_policy(repository_id).await?;
     Ok(Json(RetentionPolicyResponse::from(policy)))
 }
 
 pub(crate) async fn save_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let saved = state
         .retention
@@ -58,11 +58,11 @@ pub(crate) async fn save_policy(
 
 pub(crate) async fn dry_run(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -73,11 +73,11 @@ pub(crate) async fn dry_run(
 
 pub(crate) async fn apply(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -97,10 +97,10 @@ pub(crate) async fn apply(
 
 pub(crate) async fn collect_garbage(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<CleanupReportResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let report = state
         .retention
         .collect_garbage_only(RepositoryId::from(repository_id))
@@ -119,18 +119,18 @@ pub(crate) async fn collect_garbage(
 
 pub(crate) async fn dry_run_garbage_collection(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_write_artifacts(&user, &token)?;
     let preview = state.retention.dry_run_garbage_collection().await?;
     Ok(Json(CleanupPreviewResponse::from(preview)))
 }
 
 pub(crate) async fn collect_garbage_all(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_write_artifacts(&user)?;
+    require_write_artifacts(&user, &token)?;
     let preview = state.retention.collect_garbage_all().await?;
     crate::audit::record(
         &state,

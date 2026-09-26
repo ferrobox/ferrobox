@@ -124,11 +124,11 @@ async fn npm_get(
 
 async fn npm_put(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, path)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let path = decode_npm_path(&path);
 
     if let Some((name, version)) = strip_suffix_action(&path, "/unyank") {
@@ -160,10 +160,10 @@ async fn npm_put(
 
 async fn npm_delete(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, path)): Path<(Uuid, String)>,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
     let path = decode_npm_path(&path);
 
     let Some((name, version)) = strip_suffix_action(&path, "/yank") else {
