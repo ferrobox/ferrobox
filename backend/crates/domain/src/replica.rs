@@ -115,14 +115,18 @@ impl ReplicaTarget {
         self
     }
 
-    /// URL del `POST` de import en la instancia remota.
+    /// URLs del `POST` de import en la instancia remota.
+    ///
+    /// Primero `{origen}/api/repositories/{id}/import` (compose / `FRONTEND_DIR`).
+    /// Después `{origen}/repositories/{id}/import` (`cargo run` + Vite).
     #[must_use]
-    pub fn import_url(&self) -> String {
-        format!(
-            "{}/api/repositories/{}/import",
-            replica_origin(&self.remote_url),
-            self.destination_id
-        )
+    pub fn import_urls(&self) -> [String; 2] {
+        let origin = replica_origin(&self.remote_url);
+        let dest = self.destination_id;
+        [
+            format!("{origin}/api/repositories/{dest}/import"),
+            format!("{origin}/repositories/{dest}/import"),
+        ]
     }
 }
 
@@ -289,8 +293,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            target.import_url(),
-            format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2))
+            target.import_urls(),
+            [
+                format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2)),
+                format!("http://127.0.0.1:3000/repositories/{}/import", repo(2)),
+            ]
         );
     }
 }
