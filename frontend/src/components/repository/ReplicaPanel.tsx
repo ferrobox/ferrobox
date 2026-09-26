@@ -32,7 +32,7 @@ const EMPTY: ReplicaPolicyResponse = {
   destination_id: null,
   direction: "push",
   has_token: false,
-  interval_hours: null,
+  interval_minutes: null,
   last_run: null,
 };
 
@@ -89,8 +89,8 @@ function ReplicaForm({
   const [remoteUrl, setRemoteUrl] = useState(policy.remote_url ?? "");
   const [destinationId, setDestinationId] = useState(policy.destination_id ?? "");
   const [direction, setDirection] = useState(policy.direction === "pull" ? "pull" : "push");
-  const [intervalHours, setIntervalHours] = useState(
-    policy.interval_hours == null ? "" : String(policy.interval_hours),
+  const [intervalMinutes, setIntervalMinutes] = useState(
+    policy.interval_minutes == null ? "" : String(policy.interval_minutes),
   );
   const [token, setToken] = useState("");
   const pulling = direction === "pull";
@@ -98,11 +98,11 @@ function ReplicaForm({
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedInterval = intervalHours.trim();
+    const trimmedInterval = intervalMinutes.trim();
     let interval: number | undefined;
     if (trimmedInterval.length > 0) {
       const parsed = Number.parseInt(trimmedInterval, 10);
-      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 168) {
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 10080) {
         toast.error(t("replica.intervalHint"));
         return;
       }
@@ -115,7 +115,7 @@ function ReplicaForm({
       destination_id: destinationId.trim() || undefined,
       token: token.trim() || undefined,
       direction,
-      interval_hours: interval,
+      interval_minutes: interval,
     };
     try {
       await savePolicy.mutateAsync(payload);
@@ -226,9 +226,9 @@ function ReplicaForm({
           id="replica-interval"
           type="number"
           min={0}
-          max={168}
-          value={intervalHours}
-          onChange={(event) => setIntervalHours(event.target.value)}
+          max={10080}
+          value={intervalMinutes}
+          onChange={(event) => setIntervalMinutes(event.target.value)}
           placeholder={t("replica.intervalOff")}
           disabled={!canWrite}
         />

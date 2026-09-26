@@ -4,4 +4,4 @@ import type { ReplicaRunResponse } from "./ReplicaRunResponse";
 /**
  * Política de réplica de un repositorio.
  */
-export type ReplicaPolicyResponse = { configured: boolean, remote_url: string | null, destination_id: string | null, direction: string, has_token: boolean, interval_hours: number | null, last_run: ReplicaRunResponse | null, };
+export type ReplicaPolicyResponse = { configured: boolean, remote_url: string | null, destination_id: string | null, direction: string, has_token: boolean, interval_minutes: number | null, last_run: ReplicaRunResponse | null, };

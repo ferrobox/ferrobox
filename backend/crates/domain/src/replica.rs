@@ -11,10 +11,10 @@ use crate::ids::RepositoryId;
 
 const MAX_URL_LENGTH: usize = 2048;
 const MAX_TOKEN_LENGTH: usize = 512;
-/// Minimum hours between scheduled replica runs.
-pub const MIN_INTERVAL_HOURS: u32 = 1;
-/// Maximum hours between scheduled replica runs (one week).
-pub const MAX_INTERVAL_HOURS: u32 = 168;
+/// Minimum minutes between scheduled replica runs.
+pub const MIN_INTERVAL_MINUTES: u32 = 1;
+/// Maximum minutes between scheduled replica runs (one week).
+pub const MAX_INTERVAL_MINUTES: u32 = 10_080;
 
 /// Sentido de la réplica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub struct ReplicaRun {
 pub struct ReplicaPolicy {
     target: Option<ReplicaTarget>,
     last_run: Option<ReplicaRun>,
-    interval_hours: Option<u32>,
+    interval_minutes: Option<u32>,
 }
 
 /// Motivos por los que una política de réplica no es válida.
@@ -81,9 +81,9 @@ pub enum ReplicaPolicyError {
     #[error("replica direction must be push or pull")]
     InvalidDirection,
 
-    /// Interval is outside 1..=168 (0 / missing disables the cron).
+    /// Interval is outside 1..=10080 (0 / missing disables the cron).
     #[error(
-        "replica interval must be between {MIN_INTERVAL_HOURS} and {MAX_INTERVAL_HOURS} hours, or 0 to disable"
+        "replica interval must be between {MIN_INTERVAL_MINUTES} and {MAX_INTERVAL_MINUTES} minutes, or 0 to disable"
     )]
     InvalidInterval,
 }
@@ -268,7 +268,7 @@ impl ReplicaPolicy {
         Self {
             target: None,
             last_run: None,
-            interval_hours: None,
+            interval_minutes: None,
         }
     }
 
@@ -278,7 +278,7 @@ impl ReplicaPolicy {
         Self {
             target,
             last_run,
-            interval_hours: None,
+            interval_minutes: None,
         }
     }
 
@@ -294,10 +294,10 @@ impl ReplicaPolicy {
         self.last_run.as_ref()
     }
 
-    /// Hours between scheduled runs. `None` disables the cron.
+    /// Minutes between scheduled runs. `None` disables the cron.
     #[must_use]
-    pub fn interval_hours(&self) -> Option<u32> {
-        self.interval_hours
+    pub fn interval_minutes(&self) -> Option<u32> {
+        self.interval_minutes
     }
 
     /// Replaces the last-run counts.
@@ -311,9 +311,9 @@ impl ReplicaPolicy {
     ///
     /// # Errors
     ///
-    /// [`ReplicaPolicyError::InvalidInterval`] if the value is outside 1..=168.
-    pub fn with_interval(mut self, hours: Option<u32>) -> Result<Self, ReplicaPolicyError> {
-        self.interval_hours = normalize_interval(hours)?;
+    /// [`ReplicaPolicyError::InvalidInterval`] if the value is outside 1..=10080.
+    pub fn with_interval(mut self, minutes: Option<u32>) -> Result<Self, ReplicaPolicyError> {
+        self.interval_minutes = normalize_interval(minutes)?;
         Ok(self)
     }
 
@@ -329,29 +329,31 @@ impl ReplicaPolicy {
         if target.token().is_none() {
             return false;
         }
-        let Some(hours) = self.interval_hours.filter(|hours| *hours > 0) else {
+        let Some(minutes) = self.interval_minutes.filter(|minutes| *minutes > 0) else {
             return false;
         };
         match self.last_run.as_ref() {
             None => true,
             Some(run) => match DateTime::parse_from_rfc3339(run.occurred_at()) {
-                Ok(last) => now >= last.with_timezone(&Utc) + TimeDelta::hours(i64::from(hours)),
+                Ok(last) => {
+                    now >= last.with_timezone(&Utc) + TimeDelta::minutes(i64::from(minutes))
+                }
                 Err(_) => true,
             },
         }
     }
 }
 
-/// `None` or `0` disables the cron; 1..=168 keeps it on.
+/// `None` or `0` disables the cron; 1..=10080 keeps it on.
 ///
 /// # Errors
 ///
 /// [`ReplicaPolicyError::InvalidInterval`] if the value is positive and out of range.
-pub fn normalize_interval(hours: Option<u32>) -> Result<Option<u32>, ReplicaPolicyError> {
-    match hours {
+pub fn normalize_interval(minutes: Option<u32>) -> Result<Option<u32>, ReplicaPolicyError> {
+    match minutes {
         None | Some(0) => Ok(None),
-        Some(hours) if (MIN_INTERVAL_HOURS..=MAX_INTERVAL_HOURS).contains(&hours) => {
-            Ok(Some(hours))
+        Some(minutes) if (MIN_INTERVAL_MINUTES..=MAX_INTERVAL_MINUTES).contains(&minutes) => {
+            Ok(Some(minutes))
         }
         Some(_) => Err(ReplicaPolicyError::InvalidInterval),
     }
@@ -427,14 +429,20 @@ mod tests {
             repo(1),
         )
         .unwrap();
-        assert_eq!(target.import_urls(), [
-            format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2)),
-            format!("http://127.0.0.1:3000/repositories/{}/import", repo(2)),
-        ]);
-        assert_eq!(target.export_urls(), [
-            format!("http://127.0.0.1:3000/api/repositories/{}/export", repo(2)),
-            format!("http://127.0.0.1:3000/repositories/{}/export", repo(2)),
-        ]);
+        assert_eq!(
+            target.import_urls(),
+            [
+                format!("http://127.0.0.1:3000/api/repositories/{}/import", repo(2)),
+                format!("http://127.0.0.1:3000/repositories/{}/import", repo(2)),
+            ]
+        );
+        assert_eq!(
+            target.export_urls(),
+            [
+                format!("http://127.0.0.1:3000/api/repositories/{}/export", repo(2)),
+                format!("http://127.0.0.1:3000/repositories/{}/export", repo(2)),
+            ]
+        );
         assert_eq!(
             ReplicaDirection::parse("pull").unwrap(),
             ReplicaDirection::Pull
@@ -454,18 +462,18 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         let idle = ReplicaPolicy::new(Some(target.clone()), None)
-            .with_interval(Some(1))
+            .with_interval(Some(30))
             .unwrap();
         assert!(idle.is_due(now));
 
-        let just_ran = idle.with_last_run(ReplicaRun::new("2026-09-26T11:30:00Z", 0, 0, 0, None));
+        let just_ran = idle.with_last_run(ReplicaRun::new("2026-09-26T11:45:00Z", 0, 0, 0, None));
         assert!(!just_ran.is_due(now));
-        assert!(just_ran.is_due(now + TimeDelta::hours(1)));
+        assert!(just_ran.is_due(now + TimeDelta::minutes(30)));
 
         let no_cron = ReplicaPolicy::new(Some(target), None);
         assert!(!no_cron.is_due(now));
         assert!(matches!(
-            ReplicaPolicy::unconfigured().with_interval(Some(200)),
+            ReplicaPolicy::unconfigured().with_interval(Some(20_000)),
             Err(ReplicaPolicyError::InvalidInterval)
         ));
     }

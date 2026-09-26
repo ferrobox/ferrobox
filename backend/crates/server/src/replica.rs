@@ -50,7 +50,7 @@ pub(crate) async fn save_policy(
             destination_id,
             payload.token,
             payload.direction,
-            payload.interval_hours,
+            payload.interval_minutes,
         )
         .await?;
     crate::audit::record(
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(json["configured"], false);
         assert_eq!(json["has_token"], false);
         assert_eq!(json["direction"], "push");
-        assert_eq!(json["interval_hours"], serde_json::Value::Null);
+        assert_eq!(json["interval_minutes"], serde_json::Value::Null);
     }
 
     #[tokio::test]
@@ -445,7 +445,7 @@ mod tests {
                     .header("Authorization", format!("Bearer {token}"))
                     .header("content-type", "application/json")
                     .body(Body::from(format!(
-                        r#"{{"remote_url":"http://peer.example","destination_id":"{dest}","token":"t","interval_hours":6}}"#
+                        r#"{{"remote_url":"http://peer.example","destination_id":"{dest}","token":"t","interval_minutes":6}}"#
                     )))
                     .unwrap(),
             )
@@ -456,6 +456,6 @@ mod tests {
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["interval_hours"], 6);
+        assert_eq!(json["interval_minutes"], 6);
     }
 }
