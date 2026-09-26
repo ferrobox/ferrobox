@@ -24,6 +24,9 @@ pub mod publish_artifact;
 /// Caso de uso: copiar una versión publicada de un Forge a otro Forge.
 pub mod promote_package;
 
+/// Caso de uso: calentar la caché de un `Mirror` desde su *upstream*.
+pub mod prefetch_package;
+
 /// Caso de uso: eliminar un repositorio y todo su contenido.
 pub mod delete_repository;
 

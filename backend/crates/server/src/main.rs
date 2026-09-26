@@ -307,6 +307,10 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             post(artifacts::promote_package),
         )
         .route(
+            "/repositories/{repository_id}/prefetch",
+            post(artifacts::prefetch_package),
+        )
+        .route(
             "/artifacts/{artifact_id}",
             get(artifacts::download_artifact),
         )

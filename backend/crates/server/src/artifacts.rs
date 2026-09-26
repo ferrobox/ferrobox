@@ -15,7 +15,8 @@ use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
 use crate::dto::{
-    ArtifactResponse, PromotePackageRequest, PromotePackageResponse, PublishResponse,
+    ArtifactResponse, PrefetchPackageRequest, PrefetchPackageResponse, PromotePackageRequest,
+    PromotePackageResponse, PublishResponse,
 };
 use crate::error::ApiError;
 
@@ -164,4 +165,55 @@ pub(crate) async fn promote_package(
             bytes_copied: outcome.bytes_copied,
         }),
     ))
+}
+
+pub(crate) async fn prefetch_package(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<PrefetchPackageRequest>,
+) -> Result<Json<PrefetchPackageResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, repository_id).await?;
+
+    let name = ferrobox_domain::package_coordinate::PackageName::parse(payload.name.trim())
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let version = match payload.version.as_deref().map(str::trim).filter(|item| !item.is_empty())
+    {
+        Some(value) => Some(
+            ferrobox_domain::package_coordinate::PackageVersion::parse(value)
+                .map_err(|err| ApiError::BadRequest(err.to_string()))?,
+        ),
+        None => None,
+    };
+
+    let repository = state.get_repository.execute(repository_id).await?;
+    let outcome = ferrobox_application::prefetch_package::PrefetchPackageUseCase::execute(
+        &state.packaging,
+        &repository,
+        name,
+        version,
+    )
+    .await?;
+
+    let audit_target = match &outcome.version {
+        Some(version) => format!("{}@{version}", outcome.name),
+        None => outcome.name.clone(),
+    };
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::PackagePrefetched,
+        AuditTargetKind::Package,
+        audit_target,
+        repository_id.to_string(),
+    )
+    .await;
+
+    Ok(Json(PrefetchPackageResponse {
+        name: outcome.name,
+        version: outcome.version,
+        indexed: outcome.indexed,
+        downloaded: outcome.downloaded,
+    }))
 }

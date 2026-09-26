@@ -16,6 +16,8 @@ import type { ErrorResponse } from "@/api/generated/ErrorResponse";
 import type { LoginRequest } from "@/api/generated/LoginRequest";
 import type { LoginResponse } from "@/api/generated/LoginResponse";
 import type { PublishResponse } from "@/api/generated/PublishResponse";
+import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
+import type { PrefetchPackageResponse } from "@/api/generated/PrefetchPackageResponse";
 import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
 import type { PromotePackageResponse } from "@/api/generated/PromotePackageResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
@@ -266,6 +268,16 @@ export function promotePackage(
   payload: PromotePackageRequest,
 ): Promise<PromotePackageResponse> {
   return request<PromotePackageResponse>(`/repositories/${repositoryId}/promote`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function prefetchPackage(
+  repositoryId: string,
+  payload: PrefetchPackageRequest,
+): Promise<PrefetchPackageResponse> {
+  return request<PrefetchPackageResponse>(`/repositories/${repositoryId}/prefetch`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

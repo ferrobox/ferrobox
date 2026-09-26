@@ -18,6 +18,7 @@ import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
+import { PrefetchPackageDialog } from "@/components/repository/PrefetchPackageDialog";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
 import { QuotaPanel } from "@/components/repository/QuotaPanel";
 import { RepositoryAccessPanel } from "@/components/repository/RepositoryAccessPanel";
@@ -220,7 +221,12 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             <p className="text-xs text-muted-foreground">
               {t("repositories.groupedHint")}
             </p>
-            <RefreshPackagesButton repositoryId={repositoryId} />
+            <div className="flex items-center gap-2">
+              {canWrite && repository.kind.type === "mirror" ? (
+                <PrefetchPackageDialog repositoryId={repositoryId} />
+              ) : null}
+              <RefreshPackagesButton repositoryId={repositoryId} />
+            </div>
           </div>
           <ArtifactsTable
             repositoryId={repositoryId}
