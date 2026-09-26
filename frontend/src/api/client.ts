@@ -678,6 +678,12 @@ export function pushReplica(repositoryId: string): Promise<ReplicaPushResponse> 
   });
 }
 
+export function pullReplica(repositoryId: string): Promise<ReplicaPushResponse> {
+  return request<ReplicaPushResponse>(`/repositories/${repositoryId}/replica/pull`, {
+    method: "POST",
+  });
+}
+
 export function getRetentionPolicy(repositoryId: string): Promise<RetentionPolicyResponse> {
   return request<RetentionPolicyResponse>(`/repositories/${repositoryId}/retention`);
 }

@@ -1008,9 +1008,13 @@ pub(crate) struct ReplicaPolicyRequest {
     #[serde(default)]
     #[ts(optional)]
     pub(crate) token: Option<String>,
+    /// `push` (defecto) o `pull`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) direction: Option<String>,
 }
 
-/// Último push de réplica.
+/// Última ejecución de réplica.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ReplicaRunResponse {
@@ -1031,6 +1035,7 @@ pub(crate) struct ReplicaPolicyResponse {
     pub(crate) configured: bool,
     pub(crate) remote_url: Option<String>,
     pub(crate) destination_id: Option<String>,
+    pub(crate) direction: String,
     pub(crate) has_token: bool,
     pub(crate) last_run: Option<ReplicaRunResponse>,
 }
@@ -1049,6 +1054,7 @@ impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
                 configured: true,
                 remote_url: Some(target.remote_url().as_str().to_string()),
                 destination_id: Some(target.destination_id().to_string()),
+                direction: target.direction().as_str().to_string(),
                 has_token: target.token().is_some(),
                 last_run,
             },
@@ -1056,6 +1062,7 @@ impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
                 configured: false,
                 remote_url: None,
                 destination_id: None,
+                direction: "push".to_string(),
                 has_token: false,
                 last_run,
             },

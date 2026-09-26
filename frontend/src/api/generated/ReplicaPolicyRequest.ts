@@ -15,4 +15,8 @@ destination_id?: string,
 /**
  * Token de API con escritura en el destino. Ausente: conserva el anterior.
  */
-token?: string, };
+token?: string, 
+/**
+ * `push` (defecto) o `pull`.
+ */
+direction?: string, };

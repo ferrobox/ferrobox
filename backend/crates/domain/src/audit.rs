@@ -82,6 +82,8 @@ pub enum AuditAction {
     ReplicaPolicyChanged,
     /// Se empujó un repositorio a otra instancia.
     ReplicaPushed,
+    /// Se tiró un repositorio desde otra instancia.
+    ReplicaPulled,
 }
 
 /// Clase del objeto sobre el que actúa el evento.
@@ -249,6 +251,7 @@ impl AuditAction {
             Self::WebhookDeleted => "webhook.deleted",
             Self::ReplicaPolicyChanged => "replica.policy_changed",
             Self::ReplicaPushed => "replica.pushed",
+            Self::ReplicaPulled => "replica.pulled",
         }
     }
 
@@ -294,6 +297,7 @@ impl AuditAction {
             "webhook.deleted" => Ok(Self::WebhookDeleted),
             "replica.policy_changed" => Ok(Self::ReplicaPolicyChanged),
             "replica.pushed" => Ok(Self::ReplicaPushed),
+            "replica.pulled" => Ok(Self::ReplicaPulled),
             other => Err(AuditParseError::UnknownAction(other.to_string())),
         }
     }
@@ -381,6 +385,7 @@ mod tests {
             AuditAction::WebhookDeleted,
             AuditAction::ReplicaPolicyChanged,
             AuditAction::ReplicaPushed,
+            AuditAction::ReplicaPulled,
         ] {
             assert_eq!(AuditAction::parse(action.as_str()).unwrap(), action);
         }
