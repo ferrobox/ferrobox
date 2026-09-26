@@ -57,6 +57,7 @@ fn row_to_user(
     email: Option<String>,
     oidc_issuer: Option<String>,
     oidc_subject: Option<String>,
+    robot: bool,
 ) -> Result<User, UserStoreError> {
     let username = Username::parse(username).map_err(|err| backend_error(err.to_string()))?;
     let role = Role::parse(role).map_err(|err| backend_error(err.to_string()))?;
@@ -70,7 +71,9 @@ fn row_to_user(
         }
         _ => None,
     };
-    Ok(User::from_parts(UserId::from(id), username, role, email).with_oidc(oidc))
+    Ok(User::from_parts(UserId::from(id), username, role, email)
+        .with_oidc(oidc)
+        .with_robot(robot))
 }
 
 #[async_trait]
@@ -87,15 +90,16 @@ impl UserStore for PostgresUserStore {
 
         sqlx::query!(
             r#"
-            INSERT INTO users (id, username, password_hash, role, email, oidc_issuer, oidc_subject)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO users (id, username, password_hash, role, email, oidc_issuer, oidc_subject, robot)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (id) DO UPDATE
             SET username = EXCLUDED.username,
                 password_hash = EXCLUDED.password_hash,
                 role = EXCLUDED.role,
                 email = EXCLUDED.email,
                 oidc_issuer = EXCLUDED.oidc_issuer,
-                oidc_subject = EXCLUDED.oidc_subject
+                oidc_subject = EXCLUDED.oidc_subject,
+                robot = EXCLUDED.robot
             "#,
             id,
             user.username().as_str(),
@@ -104,6 +108,7 @@ impl UserStore for PostgresUserStore {
             email,
             oidc_issuer,
             oidc_subject,
+            user.is_robot(),
         )
         .execute(&self.pool)
         .await
@@ -117,7 +122,7 @@ impl UserStore for PostgresUserStore {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, username, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             WHERE id = $1
             "#,
@@ -135,6 +140,7 @@ impl UserStore for PostgresUserStore {
                 row.email,
                 row.oidc_issuer,
                 row.oidc_subject,
+                row.robot,
             )
         })
         .transpose()
@@ -146,7 +152,7 @@ impl UserStore for PostgresUserStore {
     ) -> Result<Option<(User, String)>, UserStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, username, password_hash, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, password_hash, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             WHERE username = $1
             "#,
@@ -164,6 +170,7 @@ impl UserStore for PostgresUserStore {
                 row.email,
                 row.oidc_issuer,
                 row.oidc_subject,
+                row.robot,
             )?;
             Ok((user, row.password_hash))
         })
@@ -173,7 +180,7 @@ impl UserStore for PostgresUserStore {
     async fn find_by_email(&self, email: &Email) -> Result<Option<User>, UserStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, username, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             WHERE email = $1
             "#,
@@ -191,6 +198,7 @@ impl UserStore for PostgresUserStore {
                 row.email,
                 row.oidc_issuer,
                 row.oidc_subject,
+                row.robot,
             )
         })
         .transpose()
@@ -202,7 +210,7 @@ impl UserStore for PostgresUserStore {
     ) -> Result<Option<User>, UserStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, username, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             WHERE oidc_issuer = $1 AND oidc_subject = $2
             "#,
@@ -221,6 +229,7 @@ impl UserStore for PostgresUserStore {
                 row.email,
                 row.oidc_issuer,
                 row.oidc_subject,
+                row.robot,
             )
         })
         .transpose()
@@ -233,7 +242,7 @@ impl UserStore for PostgresUserStore {
         let id: Uuid = id.into();
         let row = sqlx::query!(
             r#"
-            SELECT id, username, password_hash, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, password_hash, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             WHERE id = $1
             "#,
@@ -251,6 +260,7 @@ impl UserStore for PostgresUserStore {
                 row.email,
                 row.oidc_issuer,
                 row.oidc_subject,
+                row.robot,
             )?;
             Ok((user, row.password_hash))
         })
@@ -260,7 +270,7 @@ impl UserStore for PostgresUserStore {
     async fn find_all(&self) -> Result<Vec<User>, UserStoreError> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, username, role, email, oidc_issuer, oidc_subject
+            SELECT id, username, role, email, oidc_issuer, oidc_subject, robot
             FROM users
             ORDER BY username ASC
             "#,
@@ -278,6 +288,7 @@ impl UserStore for PostgresUserStore {
                     row.email,
                     row.oidc_issuer,
                     row.oidc_subject,
+                    row.robot,
                 )
             })
             .collect()

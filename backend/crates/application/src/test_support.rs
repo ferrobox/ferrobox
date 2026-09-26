@@ -540,6 +540,7 @@ impl ApiTokenStore for InMemoryApiTokenStore {
             .map(|(token, _, created_at)| ApiTokenRecord {
                 token: token.clone(),
                 created_at_rfc3339: created_at.clone(),
+                expires_at_rfc3339: token.expires_at().map(|at| at.to_rfc3339()),
             })
             .collect())
     }

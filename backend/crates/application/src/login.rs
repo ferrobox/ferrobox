@@ -1,5 +1,7 @@
 use std::sync::Arc;
+use std::time::Duration;
 
+use chrono::Utc;
 use ferrobox_domain::api_token::{ApiToken, ApiTokenName};
 use ferrobox_domain::user::{User, Username};
 use ferrobox_ports::api_token_store::{ApiTokenStore, ApiTokenStoreError};
@@ -44,15 +46,28 @@ pub struct LoginResult {
 pub struct LoginUseCase {
     user_store: Arc<dyn UserStore>,
     api_token_store: Arc<dyn ApiTokenStore>,
+    session_ttl: Duration,
 }
 
 impl LoginUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Construye el caso de uso a partir de sus puertos. La sesión
+    /// caduca a las 12 horas.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>, api_token_store: Arc<dyn ApiTokenStore>) -> Self {
+        Self::with_session_ttl(user_store, api_token_store, Duration::from_hours(12))
+    }
+
+    /// Igual que [`Self::new`] con un TTL de sesión configurable.
+    #[must_use]
+    pub fn with_session_ttl(
+        user_store: Arc<dyn UserStore>,
+        api_token_store: Arc<dyn ApiTokenStore>,
+        session_ttl: Duration,
+    ) -> Self {
         Self {
             user_store,
             api_token_store,
+            session_ttl,
         }
     }
 
@@ -82,16 +97,18 @@ impl LoginUseCase {
             return Err(LoginError::InvalidCredentials);
         };
 
-        if !verify_password(password, &password_hash) {
+        if user.is_robot() || !verify_password(password, &password_hash) {
             return Err(LoginError::InvalidCredentials);
         }
 
         let (plaintext_secret, prefix) = generate_api_token_secret();
+        let expires_at = Utc::now() + self.session_ttl;
         let token = ApiToken::new(
             user.id(),
             ApiTokenName::parse("session").expect("literal 'session' is a valid token name"),
             prefix,
-        );
+        )
+        .with_expires_at(Some(expires_at));
         let token_hash = hash_api_token_secret(&plaintext_secret);
         self.api_token_store.save(&token, &token_hash).await?;
 
@@ -163,6 +180,25 @@ mod tests {
 
         let result = use_case
             .execute(Username::parse("nobody").unwrap(), "admin")
+            .await;
+
+        assert!(matches!(result, Err(LoginError::InvalidCredentials)));
+    }
+
+    #[tokio::test]
+    async fn login_rejects_a_robot_account() {
+        let user_store = Arc::new(InMemoryUserStore::default());
+        let api_token_store = Arc::new(InMemoryApiTokenStore::default());
+        let robot = User::new(Username::parse("ci").unwrap(), Role::Developer).with_robot(true);
+        let hash = hash_password("Secret1a").unwrap();
+        user_store
+            .save_with_password_hash(&robot, &hash)
+            .await
+            .unwrap();
+        let use_case = LoginUseCase::new(user_store, api_token_store);
+
+        let result = use_case
+            .execute(Username::parse("ci").unwrap(), "Secret1a")
             .await;
 
         assert!(matches!(result, Err(LoginError::InvalidCredentials)));

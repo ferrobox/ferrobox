@@ -17,6 +17,10 @@ pub enum ChangePasswordError {
     #[error("current password is incorrect")]
     InvalidCurrentPassword,
 
+    /// Las cuentas robot no tienen contraseña.
+    #[error("a robot account has no password")]
+    RobotAccount,
+
     /// El usuario autenticado ya no existe.
     #[error("user not found")]
     NotFound,
@@ -64,6 +68,10 @@ impl ChangePasswordUseCase {
         else {
             return Err(ChangePasswordError::NotFound);
         };
+
+        if user.is_robot() {
+            return Err(ChangePasswordError::RobotAccount);
+        }
 
         if !verify_password(current_password, &password_hash) {
             return Err(ChangePasswordError::InvalidCurrentPassword);

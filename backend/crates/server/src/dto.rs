@@ -287,6 +287,8 @@ pub(crate) struct UserResponse {
     pub(crate) role: RoleDto,
     /// `true` si la cuenta está vinculada a un emisor `OIDC`.
     pub(crate) sso: bool,
+    /// `true` si es una cuenta robot (CI).
+    pub(crate) robot: bool,
 }
 
 impl From<&User> for UserResponse {
@@ -297,6 +299,7 @@ impl From<&User> for UserResponse {
             email: user.email().map(ToString::to_string),
             role: user.role().into(),
             sso: user.is_sso_linked(),
+            robot: user.is_robot(),
         }
     }
 }
@@ -342,6 +345,26 @@ pub(crate) struct CreateUserRequest {
     pub(crate) email: String,
     pub(crate) password: String,
     pub(crate) role: RoleDto,
+}
+
+/// Cuerpo de la petición para crear una cuenta robot.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateRobotRequest {
+    pub(crate) username: String,
+    pub(crate) role: RoleDto,
+    pub(crate) token_name: String,
+    /// Caducidad RFC 3339 del token inicial. `null` = no caduca.
+    #[ts(optional)]
+    pub(crate) expires_at: Option<String>,
+}
+
+/// Respuesta al crear un robot: la cuenta y el secreto del token inicial.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct CreateRobotResponse {
+    pub(crate) user: UserResponse,
+    pub(crate) token: ApiTokenCreatedResponse,
 }
 
 /// Cuerpo de la petición para que un Admin restablezca la contraseña de
@@ -411,6 +434,9 @@ pub(crate) struct LoginResponse {
 #[ts(export)]
 pub(crate) struct CreateApiTokenRequest {
     pub(crate) name: String,
+    /// Caducidad RFC 3339. `null` o ausente = no caduca.
+    #[ts(optional)]
+    pub(crate) expires_at: Option<String>,
 }
 
 /// Representación de un token de API (sin secreto) en listados.
@@ -421,6 +447,8 @@ pub(crate) struct ApiTokenResponse {
     pub(crate) name: String,
     pub(crate) prefix: String,
     pub(crate) created_at: String,
+    /// Caducidad RFC 3339, o `null` si no caduca.
+    pub(crate) expires_at: Option<String>,
 }
 
 /// Respuesta al crear un token de API: incluye el secreto una sola vez.
@@ -432,6 +460,8 @@ pub(crate) struct ApiTokenCreatedResponse {
     pub(crate) prefix: String,
     /// Secreto en claro. Solo se expone en esta respuesta.
     pub(crate) token: String,
+    /// Caducidad RFC 3339, o `null` si no caduca.
+    pub(crate) expires_at: Option<String>,
 }
 
 /// Estado de un ensaye.

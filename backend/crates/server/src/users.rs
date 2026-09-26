@@ -13,8 +13,11 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::require_manage_users;
+use ferrobox_domain::api_token::ApiTokenName;
+
 use crate::dto::{
-    CreateUserRequest, ResetUserPasswordRequest, UpdateUserRoleRequest, UserResponse,
+    CreateRobotRequest, CreateRobotResponse, CreateUserRequest, ResetUserPasswordRequest,
+    UpdateUserRoleRequest, UserResponse, ApiTokenCreatedResponse,
 };
 use crate::error::ApiError;
 
@@ -54,6 +57,62 @@ pub(crate) async fn create_user(
     .await;
 
     Ok((StatusCode::CREATED, Json(UserResponse::from(&created))))
+}
+
+pub(crate) async fn create_robot(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    Json(payload): Json<CreateRobotRequest>,
+) -> Result<(StatusCode, Json<CreateRobotResponse>), ApiError> {
+    require_manage_users(&user)?;
+
+    let username =
+        Username::parse(payload.username).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let token_name = ApiTokenName::parse(payload.token_name)
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let expires_at = crate::auth::parse_optional_expiry(payload.expires_at.as_deref())?;
+
+    let created = state
+        .create_user
+        .execute_robot(username, payload.role.into())
+        .await?;
+    let token = state
+        .create_api_token
+        .execute(created.id(), token_name, expires_at)
+        .await?;
+
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::UserCreated,
+        AuditTargetKind::User,
+        created.username().to_string(),
+        "robot",
+    )
+    .await;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::TokenCreated,
+        AuditTargetKind::Token,
+        token.token.name().to_string(),
+        token.token.prefix().to_string(),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateRobotResponse {
+            user: UserResponse::from(&created),
+            token: ApiTokenCreatedResponse {
+                id: token.token.id().to_string(),
+                name: token.token.name().to_string(),
+                prefix: token.token.prefix().to_string(),
+                token: token.plaintext_secret,
+                expires_at: token.token.expires_at().map(|at| at.to_rfc3339()),
+            },
+        }),
+    ))
 }
 
 pub(crate) async fn delete_user(
@@ -294,7 +353,7 @@ mod tests {
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
         let admin_token = state
             .create_api_token
-            .execute(admin.id(), ApiTokenName::parse("admin").unwrap())
+            .execute(admin.id(), ApiTokenName::parse("admin").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;
@@ -305,7 +364,7 @@ mod tests {
             .unwrap();
         let reader_token = state
             .create_api_token
-            .execute(reader.id(), ApiTokenName::parse("read").unwrap())
+            .execute(reader.id(), ApiTokenName::parse("read").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;

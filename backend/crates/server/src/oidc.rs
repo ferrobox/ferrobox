@@ -66,13 +66,16 @@ pub(crate) fn service_from_config(
     .with_group_claim(config.oidc_group_claim.clone().unwrap_or_default())
     .with_auto_create_groups(config.oidc_auto_create_groups)
     .with_scopes(config.oidc_scopes.clone().unwrap_or_default());
-    Some(OidcLoginService::new(
-        settings,
-        http_client,
-        user_store,
-        group_store,
-        api_token_store,
-    ))
+    Some(
+        OidcLoginService::new(
+            settings,
+            http_client,
+            user_store,
+            group_store,
+            api_token_store,
+        )
+        .with_session_ttl(config.session_ttl),
+    )
 }
 
 fn role_mapping(

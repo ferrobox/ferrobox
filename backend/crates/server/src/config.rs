@@ -1,6 +1,7 @@
 //! Configuración del servidor, leída desde variables de entorno.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -64,6 +65,8 @@ pub struct Config {
     pub oidc_group_claim: Option<String>,
     /// Si `false`, no se crean grupos que aún no existan.
     pub oidc_auto_create_groups: bool,
+    /// Caducidad de los tokens de sesión (login y SSO).
+    pub session_ttl: Duration,
 }
 
 impl Config {
@@ -98,6 +101,7 @@ impl Config {
             oidc_role_claim: optional_env("OIDC_ROLE_CLAIM"),
             oidc_group_claim: optional_env("OIDC_GROUP_CLAIM"),
             oidc_auto_create_groups: env_flag("OIDC_AUTO_CREATE_GROUPS", true),
+            session_ttl: session_ttl_from_env(),
         })
     }
 }
@@ -160,6 +164,14 @@ fn env_flag(key: &str, default: bool) -> bool {
         ),
         None => default,
     }
+}
+
+fn session_ttl_from_env() -> Duration {
+    let hours = optional_env("SESSION_TTL_HOURS")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|hours| *hours > 0)
+        .unwrap_or(12);
+    Duration::from_secs(hours.saturating_mul(3600))
 }
 
 fn normalize_env(value: impl AsRef<str>) -> Option<String> {

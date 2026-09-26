@@ -213,7 +213,10 @@ impl From<LoginError> for ApiError {
 
 impl From<CreateApiTokenError> for ApiError {
     fn from(err: CreateApiTokenError) -> Self {
-        Self::Internal(err.to_string())
+        match err {
+            CreateApiTokenError::ExpiryInThePast => Self::BadRequest(err.to_string()),
+            CreateApiTokenError::Persistence(_) => Self::Internal(err.to_string()),
+        }
     }
 }
 
@@ -245,7 +248,9 @@ impl From<AuthenticateTokenError> for ApiError {
 impl From<CreateUserError> for ApiError {
     fn from(err: CreateUserError) -> Self {
         match &err {
-            CreateUserError::InvalidPassword(_) => Self::BadRequest(err.to_string()),
+            CreateUserError::InvalidPassword(_) | CreateUserError::RobotCannotBeAdmin => {
+                Self::BadRequest(err.to_string())
+            }
             CreateUserError::Persistence(
                 ferrobox_ports::user_store::UserStoreError::DuplicateUsername(_)
                 | ferrobox_ports::user_store::UserStoreError::DuplicateEmail(_),
@@ -306,6 +311,7 @@ impl From<ChangeUserRoleError> for ApiError {
         match err {
             ChangeUserRoleError::NotFound => Self::NotFound(err.to_string()),
             ChangeUserRoleError::CannotDemoteLastAdmin => Self::Conflict(err.to_string()),
+            ChangeUserRoleError::RobotCannotBeAdmin => Self::BadRequest(err.to_string()),
             ChangeUserRoleError::Persistence(_) => Self::Internal(err.to_string()),
         }
     }
@@ -315,7 +321,8 @@ impl From<ChangePasswordError> for ApiError {
     fn from(err: ChangePasswordError) -> Self {
         match err {
             ChangePasswordError::InvalidPassword(_)
-            | ChangePasswordError::InvalidCurrentPassword => Self::BadRequest(err.to_string()),
+            | ChangePasswordError::InvalidCurrentPassword
+            | ChangePasswordError::RobotAccount => Self::BadRequest(err.to_string()),
             ChangePasswordError::NotFound => Self::NotFound(err.to_string()),
             ChangePasswordError::PasswordHashing(_) | ChangePasswordError::Persistence(_) => {
                 Self::Internal(err.to_string())
@@ -327,7 +334,8 @@ impl From<ChangePasswordError> for ApiError {
 impl From<ResetUserPasswordError> for ApiError {
     fn from(err: ResetUserPasswordError) -> Self {
         match err {
-            ResetUserPasswordError::InvalidPassword(_) => Self::BadRequest(err.to_string()),
+            ResetUserPasswordError::InvalidPassword(_)
+            | ResetUserPasswordError::RobotAccount => Self::BadRequest(err.to_string()),
             ResetUserPasswordError::CannotResetSelf => Self::Conflict(err.to_string()),
             ResetUserPasswordError::NotFound => Self::NotFound(err.to_string()),
             ResetUserPasswordError::PasswordHashing(_) | ResetUserPasswordError::Persistence(_) => {

@@ -8,6 +8,8 @@ import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordReques
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { CreateRepositoryResponse } from "@/api/generated/CreateRepositoryResponse";
+import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
+import type { CreateRobotResponse } from "@/api/generated/CreateRobotResponse";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { ResetUserPasswordRequest } from "@/api/generated/ResetUserPasswordRequest";
 import type { ErrorResponse } from "@/api/generated/ErrorResponse";
@@ -182,6 +184,13 @@ export function listUsers(): Promise<UserResponse[]> {
 
 export function createUser(payload: CreateUserRequest): Promise<UserResponse> {
   return request<UserResponse>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createRobot(payload: CreateRobotRequest): Promise<CreateRobotResponse> {
+  return request<CreateRobotResponse>("/users/robots", {
     method: "POST",
     body: JSON.stringify(payload),
   });

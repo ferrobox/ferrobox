@@ -508,7 +508,7 @@ mod tests {
             .unwrap();
         let developer_token = state
             .create_api_token
-            .execute(developer.id(), ApiTokenName::parse("dev").unwrap())
+            .execute(developer.id(), ApiTokenName::parse("dev").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;

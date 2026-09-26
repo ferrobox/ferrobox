@@ -283,7 +283,7 @@ mod tests {
             .unwrap();
         let token = state
             .create_api_token
-            .execute(developer.id(), ApiTokenName::parse("dev").unwrap())
+            .execute(developer.id(), ApiTokenName::parse("dev").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;
@@ -294,7 +294,7 @@ mod tests {
             .unwrap();
         let reader_token = state
             .create_api_token
-            .execute(reader.id(), ApiTokenName::parse("read").unwrap())
+            .execute(reader.id(), ApiTokenName::parse("read").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;
