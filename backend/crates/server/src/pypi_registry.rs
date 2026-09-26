@@ -147,6 +147,12 @@ async fn download_file(
             "filename must not contain path separators".to_string(),
         ));
     }
+    crate::admission::enforce_download(
+        &state,
+        repository.id(),
+        ferrobox_application::packaging::pypi::admission_download_target(&filename),
+    )
+    .await?;
     let strategy = pypi_strategy(&state)?;
     let body = strategy.download_file(&repository, &filename).await?;
     let mut headers = HeaderMap::new();

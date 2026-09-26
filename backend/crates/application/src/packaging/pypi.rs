@@ -991,6 +991,43 @@ fn has_attr(tag: &str, name: &str) -> bool {
     tag.to_ascii_lowercase().contains(&name.to_ascii_lowercase())
 }
 
+/// Nombre y versión de un wheel o sdist, para evaluar admisión en el pull.
+#[must_use]
+pub fn admission_download_target(filename: &str) -> Option<(String, String)> {
+    if filename.contains('/') || filename.contains('\\') {
+        return None;
+    }
+    if let Some(stem) = filename.strip_suffix(".whl") {
+        let parts: Vec<&str> = stem.split('-').collect();
+        if parts.len() >= 5 {
+            return Some((
+                normalize_pypi_name(parts[0]),
+                parts[1].replace('_', "-"),
+            ));
+        }
+        return None;
+    }
+    let stem = filename
+        .strip_suffix(".tar.gz")
+        .or_else(|| filename.strip_suffix(".tar.bz2"))
+        .or_else(|| filename.strip_suffix(".tar.xz"))
+        .or_else(|| filename.strip_suffix(".tgz"))
+        .or_else(|| filename.strip_suffix(".zip"))?;
+    let parts: Vec<&str> = stem.split('-').collect();
+    let split = parts.iter().position(|part| {
+        part.chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+    })?;
+    if split == 0 {
+        return None;
+    }
+    Some((
+        normalize_pypi_name(&parts[..split].join("-")),
+        parts[split..].join("-"),
+    ))
+}
+
 fn version_from_filename(filename: &str, project: &str) -> Option<String> {
     if let Some(stem) = filename.strip_suffix(".whl") {
         let parts: Vec<&str> = stem.split('-').collect();
@@ -1551,6 +1588,19 @@ mod tests {
             PackageEcosystem::PyPi,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn admission_download_target_reads_wheels_and_sdists() {
+        assert_eq!(
+            admission_download_target("requests-2.32.3-py3-none-any.whl"),
+            Some(("requests".into(), "2.32.3".into()))
+        );
+        assert_eq!(
+            admission_download_target("demo_ferrobox_pypi-1.0.0.tar.gz"),
+            Some(("demo-ferrobox-pypi".into(), "1.0.0".into()))
+        );
+        assert_eq!(admission_download_target("simple/index.html"), None);
     }
 
     #[test]

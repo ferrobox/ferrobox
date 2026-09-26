@@ -80,6 +80,22 @@ pub(crate) async fn dry_run(
     Ok(Json(AdmissionPreviewResponse::from(preview)))
 }
 
+/// Evalúa la política en un pull HTTP si hay nombre y versión de paquete.
+pub(crate) async fn enforce_download(
+    state: &AppState,
+    repository_id: RepositoryId,
+    target: Option<(String, String)>,
+) -> Result<(), ApiError> {
+    let Some((name, version)) = target else {
+        return Ok(());
+    };
+    state
+        .admission
+        .enforce_package_pull(repository_id, &name, &version)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn list_events(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, .. }: AuthenticatedUser,

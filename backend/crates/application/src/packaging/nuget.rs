@@ -843,6 +843,15 @@ fn nuget_service_index_url(upstream: &Url) -> String {
     }
 }
 
+/// Id y versión de un `.nupkg`. El índice y el `.nuspec` no disparan.
+#[must_use]
+pub fn admission_download_target(path: &str) -> Option<(String, String)> {
+    match parse_nuget_path(path).ok()? {
+        NugetResource::Nupkg { id, version } => Some((id.to_ascii_lowercase(), version)),
+        _ => None,
+    }
+}
+
 fn parse_nuget_path(path: &str) -> Result<NugetResource, PackagingError> {
     let (path, query) = path.split_once('?').unwrap_or((path, ""));
     let trimmed = path.trim_matches('/');
@@ -1189,6 +1198,18 @@ mod tests {
         assert!(is_prerelease_version("1.0.0-rc.1+build"));
         assert!(!is_prerelease_version("1.0.0"));
         assert!(!is_prerelease_version("1.0.0+build"));
+    }
+
+    #[test]
+    fn admission_download_target_is_nupkg_only() {
+        assert_eq!(
+            admission_download_target("v3/flat/hello.world/1.0.0/hello.world.1.0.0.nupkg"),
+            Some(("hello.world".into(), "1.0.0".into()))
+        );
+        assert_eq!(
+            admission_download_target("v3/flat/hello.world/index.json"),
+            None
+        );
     }
 
     #[test]

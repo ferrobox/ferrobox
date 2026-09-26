@@ -201,6 +201,12 @@ async fn conan_get(
     }
 
     if rest.contains("/files/") && !rest.ends_with("/files") && !rest.ends_with("/files/") {
+        crate::admission::enforce_download(
+            &state,
+            repository.id(),
+            ferrobox_application::packaging::conan::admission_download_target(rest),
+        )
+        .await?;
         let body = strategy.get_protocol_file(&repository, rest).await?;
         return Ok(bytes_response(body));
     }

@@ -124,6 +124,12 @@ async fn go_get(
     let repository = load_go_repository(&state, repository_id).await?;
     let strategy = go_strategy(&state)?;
     let path = path.trim_matches('/');
+    crate::admission::enforce_download(
+        &state,
+        repository.id(),
+        ferrobox_application::packaging::golang::admission_download_target(path),
+    )
+    .await?;
     let body = strategy.get_protocol_file(&repository, path).await?;
     Ok(bytes_response(path, body))
 }

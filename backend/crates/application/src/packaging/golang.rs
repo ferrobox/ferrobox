@@ -733,6 +733,15 @@ pub fn unescape_module_path(path: &str) -> Result<String, PackagingError> {
     Ok(out)
 }
 
+/// Módulo y versión de un `.zip`. `.info`, `.mod` y `list` no disparan.
+#[must_use]
+pub fn admission_download_target(path: &str) -> Option<(String, String)> {
+    match parse_go_path(path).ok()? {
+        GoResource::Zip { module, version } => Some((module, version)),
+        _ => None,
+    }
+}
+
 fn parse_go_path(path: &str) -> Result<GoResource, PackagingError> {
     let trimmed = path.trim_matches('/');
     if let Some(module) = trimmed.strip_suffix("/@latest") {
@@ -970,6 +979,22 @@ mod tests {
         assert_eq!(
             unescape_module_path("github.com/!azure/go-autorest").unwrap(),
             "github.com/Azure/go-autorest"
+        );
+    }
+
+    #[test]
+    fn admission_download_target_is_zip_only() {
+        assert_eq!(
+            admission_download_target("github.com/!azure/go-autorest/@v/v1.0.0.zip"),
+            Some(("github.com/Azure/go-autorest".into(), "v1.0.0".into()))
+        );
+        assert_eq!(
+            admission_download_target("github.com/example/hello/@v/list"),
+            None
+        );
+        assert_eq!(
+            admission_download_target("github.com/example/hello/@v/v1.0.0.mod"),
+            None
         );
     }
 
