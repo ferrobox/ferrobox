@@ -71,7 +71,7 @@ impl WormService {
         }
     }
 
-    /// Saves the lock. Turning it off is allowed in this first cut.
+    /// Saves the lock. Turning it off stays allowed.
     ///
     /// # Errors
     ///

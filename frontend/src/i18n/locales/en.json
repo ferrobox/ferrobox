@@ -552,7 +552,7 @@
   },
   "worm": {
     "title": "WORM",
-    "description": "Write-once lock for this repository. When enabled, delete, yank, unyank, retention apply, and per-repository garbage collection return 403. Publish is unchanged. You can still turn the lock off in this first cut.",
+    "description": "Write-once lock for this repository. When enabled, delete, yank, unyank, retention apply, and per-repository garbage collection return 403. Publish is unchanged.",
     "saveFailed": "Could not save the WORM lock",
     "loadFailed": "Could not load the WORM lock",
     "enable": "Enable WORM",
