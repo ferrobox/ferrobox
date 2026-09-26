@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, Bell, Loader2, Send, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -21,21 +22,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const EVENTS: readonly { value: WebhookEventDto; label: string; hint: string }[] = [
-  {
-    value: "assay.completed",
-    label: "Ensaye completado",
-    hint: "Incluye recuento de hallazgos (Critical, High, …). El install no espera.",
-  },
-  {
-    value: "package.published",
-    label: "Paquete publicado",
-    hint: "Al publicar en un Forge o al cachear en un Mirror.",
-  },
-];
+const EVENT_VALUES: readonly WebhookEventDto[] = ["assay.completed", "package.published"];
 
 function isMissingMigration(message: string): boolean {
   return message.includes("sqlx migrate run");
+}
+
+function eventCopy(
+  event: WebhookEventDto,
+  t: (key: string) => string,
+): { label: string; hint: string } {
+  if (event === "assay.completed") {
+    return { label: t("webhooks.assayCompleted"), hint: t("webhooks.assayCompletedHint") };
+  }
+  return { label: t("webhooks.packagePublished"), hint: t("webhooks.packagePublishedHint") };
 }
 
 export function WebhooksPanel({
@@ -45,6 +45,7 @@ export function WebhooksPanel({
   repositoryId: string;
   canWrite: boolean;
 }) {
+  const { t } = useTranslation();
   const webhooksQuery = useWebhooks(repositoryId, canWrite);
   const createWebhook = useCreateWebhook(repositoryId);
   const [name, setName] = useState("");
@@ -55,7 +56,7 @@ export function WebhooksPanel({
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (events.length === 0) {
-      toast.error("Elige al menos un evento");
+      toast.error(t("webhooks.needEvent"));
       return;
     }
     try {
@@ -69,9 +70,9 @@ export function WebhooksPanel({
       setName("");
       setUrl("");
       setSecret("");
-      toast.success("Aviso creado");
+      toast.success(t("webhooks.created"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo crear el aviso");
+      toast.error(err instanceof ApiError ? err.message : t("webhooks.createFailed"));
     }
   }
 
@@ -85,17 +86,12 @@ export function WebhooksPanel({
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Avisos HTTP</CardTitle>
-          <CardDescription>
-            FerroBox envía un POST JSON cuando ocurre un evento. El publish y el install no
-            esperan a la respuesta: un destino caído no bloquea el catálogo.
-          </CardDescription>
+          <CardTitle>{t("webhooks.title")}</CardTitle>
+          <CardDescription>{t("webhooks.description")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!canWrite ? (
-            <p className="text-sm text-muted-foreground">
-              Solo quien puede escribir en este repositorio configura avisos.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("webhooks.readOnly")}</p>
           ) : null}
 
           {webhooksQuery.isPending ? <Skeleton className="h-24 w-full rounded-md" /> : null}
@@ -104,16 +100,13 @@ export function WebhooksPanel({
             isMissingMigration(webhooksQuery.error.message) ? (
               <Alert>
                 <AlertCircle />
-                <AlertTitle>Falta una migración SQL</AlertTitle>
-                <AlertDescription>
-                  Desde el directorio <code className="font-mono">backend</code> ejecuta{" "}
-                  <code className="font-mono">sqlx migrate run</code> y reinicia el backend.
-                </AlertDescription>
+                <AlertTitle>{t("retention.migrationTitle")}</AlertTitle>
+                <AlertDescription>{t("webhooks.migrationBody")}</AlertDescription>
               </Alert>
             ) : (
               <Alert variant="destructive">
                 <AlertCircle />
-                <AlertTitle>No se pudieron cargar los avisos</AlertTitle>
+                <AlertTitle>{t("webhooks.loadFailed")}</AlertTitle>
                 <AlertDescription>{webhooksQuery.error.message}</AlertDescription>
               </Alert>
             )
@@ -123,12 +116,12 @@ export function WebhooksPanel({
             <form onSubmit={(event) => void onCreate(event)} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="webhook-name">Nombre</Label>
+                  <Label htmlFor="webhook-name">{t("common.name")}</Label>
                   <Input
                     id="webhook-name"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
-                    placeholder="Slack CI"
+                    placeholder={t("webhooks.namePlaceholder")}
                     required
                   />
                 </div>
@@ -145,36 +138,39 @@ export function WebhooksPanel({
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="webhook-secret">Secreto HMAC (opcional)</Label>
+                <Label htmlFor="webhook-secret">{t("webhooks.secret")}</Label>
                 <Input
                   id="webhook-secret"
                   type="password"
                   autoComplete="off"
                   value={secret}
                   onChange={(event) => setSecret(event.target.value)}
-                  placeholder="Se envía como X-FerroBox-Signature"
+                  placeholder={t("webhooks.secretPlaceholder")}
                 />
               </div>
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Eventos</legend>
-                {EVENTS.map((item) => (
-                  <label key={item.value} className="flex cursor-pointer items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-primary"
-                      checked={events.includes(item.value)}
-                      onChange={() => toggleEvent(item.value)}
-                    />
-                    <span>
-                      <span className="font-medium">{item.label}</span>
-                      <span className="block text-xs text-muted-foreground">{item.hint}</span>
-                    </span>
-                  </label>
-                ))}
+                <legend className="text-sm font-medium">{t("webhooks.events")}</legend>
+                {EVENT_VALUES.map((value) => {
+                  const copy = eventCopy(value, t);
+                  return (
+                    <label key={value} className="flex cursor-pointer items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-1 size-4 accent-primary"
+                        checked={events.includes(value)}
+                        onChange={() => toggleEvent(value)}
+                      />
+                      <span>
+                        <span className="font-medium">{copy.label}</span>
+                        <span className="block text-xs text-muted-foreground">{copy.hint}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </fieldset>
               <Button type="submit" disabled={createWebhook.isPending || name.trim().length === 0}>
                 {createWebhook.isPending ? <Loader2 className="animate-spin" /> : <Bell />}
-                Crear aviso
+                {t("webhooks.create")}
               </Button>
             </form>
           ) : null}
@@ -197,6 +193,7 @@ function WebhookCard({
   webhook: WebhookResponse;
   canWrite: boolean;
 }) {
+  const { t } = useTranslation();
   const updateWebhook = useUpdateWebhook(repositoryId);
   const deleteWebhook = useDeleteWebhook(repositoryId);
   const pingWebhook = usePingWebhook(repositoryId);
@@ -213,9 +210,9 @@ function WebhookCard({
           enabled: !webhook.enabled,
         },
       });
-      toast.success(webhook.enabled ? "Aviso pausado" : "Aviso activado");
+      toast.success(webhook.enabled ? t("webhooks.paused") : t("webhooks.enabled"));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo actualizar el aviso");
+      toast.error(err instanceof ApiError ? err.message : t("webhooks.updateFailed"));
     }
   }
 
@@ -223,24 +220,29 @@ function WebhookCard({
     try {
       const delivery = await pingWebhook.mutateAsync(webhook.id);
       if (delivery.status === "success") {
-        toast.success("El destino respondió bien");
+        toast.success(t("webhooks.pingOk"));
       } else {
-        toast.error(delivery.error ?? "El destino no respondió 2xx");
+        toast.error(delivery.error ?? t("webhooks.pingFailed"));
       }
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo probar el aviso");
+      toast.error(err instanceof ApiError ? err.message : t("webhooks.testFailed"));
     }
   }
 
   async function onDelete() {
     try {
       await deleteWebhook.mutateAsync(webhook.id);
-      toast.success(`Aviso «${webhook.name}» eliminado`);
+      toast.success(t("webhooks.deleted", { name: webhook.name }));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo eliminar el aviso");
+      toast.error(err instanceof ApiError ? err.message : t("webhooks.deleteFailed"));
       throw err;
     }
   }
+
+  const extras = [
+    webhook.has_secret ? t("webhooks.hmac") : null,
+    webhook.enabled ? null : t("webhooks.pausedSuffix"),
+  ].filter((item): item is string => item != null);
 
   return (
     <Card>
@@ -249,9 +251,8 @@ function WebhookCard({
           <CardTitle className="text-base">{webhook.name}</CardTitle>
           <CardDescription className="break-all font-mono text-xs">{webhook.url}</CardDescription>
           <p className="mt-2 text-xs text-muted-foreground">
-            {webhook.events.map(eventLabel).join(" · ")}
-            {webhook.has_secret ? " · firma HMAC" : ""}
-            {webhook.enabled ? "" : " · pausado"}
+            {webhook.events.map((event) => eventCopy(event, t).label).join(" · ")}
+            {extras.length > 0 ? ` · ${extras.join(" · ")}` : ""}
           </p>
         </div>
         {canWrite ? (
@@ -262,7 +263,7 @@ function WebhookCard({
               onClick={() => void onToggle()}
               disabled={updateWebhook.isPending}
             >
-              {webhook.enabled ? "Pausar" : "Activar"}
+              {webhook.enabled ? t("webhooks.pause") : t("webhooks.enable")}
             </Button>
             <Button
               size="sm"
@@ -271,17 +272,17 @@ function WebhookCard({
               disabled={pingWebhook.isPending}
             >
               {pingWebhook.isPending ? <Loader2 className="animate-spin" /> : <Send />}
-              Probar
+              {t("webhooks.test")}
             </Button>
             <ConfirmDeleteDialog
-              title={`Eliminar «${webhook.name}»`}
-              description="Se dejarán de enviar avisos a esta URL. El historial de envíos también se borra."
+              title={t("webhooks.deleteTitle", { name: webhook.name })}
+              description={t("webhooks.deleteBody")}
               pending={deleteWebhook.isPending}
               onConfirm={onDelete}
               trigger={
                 <Button size="sm" variant="ghost">
                   <Trash2 />
-                  Eliminar
+                  {t("common.delete")}
                 </Button>
               }
             />
@@ -291,7 +292,7 @@ function WebhookCard({
       <CardContent>
         {deliveriesQuery.isPending ? <Skeleton className="h-16 w-full rounded-md" /> : null}
         {deliveriesQuery.data && deliveriesQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no hay envíos. Usa Probar para un ping.</p>
+          <p className="text-sm text-muted-foreground">{t("webhooks.noDeliveries")}</p>
         ) : null}
         {deliveriesQuery.data && deliveriesQuery.data.length > 0 ? (
           <ul className="space-y-2 text-sm">
@@ -304,7 +305,7 @@ function WebhookCard({
                       delivery.status === "success" ? "text-emerald-500" : "text-destructive"
                     }
                   >
-                    {delivery.status === "success" ? "OK" : "Falló"}
+                    {delivery.status === "success" ? "OK" : t("webhooks.failed")}
                     {delivery.http_status != null ? ` · HTTP ${delivery.http_status}` : ""}
                   </span>
                 </div>
@@ -319,10 +320,6 @@ function WebhookCard({
       </CardContent>
     </Card>
   );
-}
-
-function eventLabel(event: WebhookEventDto): string {
-  return EVENTS.find((item) => item.value === event)?.label ?? event;
 }
 
 function formatWhen(value: string): string {

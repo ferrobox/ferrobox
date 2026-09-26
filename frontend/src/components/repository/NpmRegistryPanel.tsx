@@ -1,11 +1,13 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useSettings } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function CopyableCodeBlock({ code }: { code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -24,7 +26,7 @@ function CopyableCodeBlock({ code }: { code: string }) {
         size="icon"
         className="absolute top-1.5 right-1.5 size-7 opacity-0 transition-opacity group-hover:opacity-100"
         onClick={() => void handleCopy()}
-        aria-label="Copiar al portapapeles"
+        aria-label={t("registry.copyClipboard")}
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
       </Button>
@@ -41,6 +43,7 @@ export function NpmRegistryPanel({
   kind?: "forge" | "mirror" | "alloy";
   framed?: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError } = useSettings();
 
   if (isPending) {
@@ -49,9 +52,7 @@ export function NpmRegistryPanel({
 
   if (isError || !data) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No se pudo obtener la URL pública de la instancia.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("registry.publicUrlFailed")}</p>
     );
   }
 
@@ -62,15 +63,15 @@ export function NpmRegistryPanel({
   const readOnly = isMirror || isAlloy;
 
   const introTitle = isAlloy
-    ? "Alloy npm"
+    ? t("registry.npmAlloy")
     : isMirror
-      ? "Mirror npm"
-      : "Registro npm";
+      ? t("registry.npmMirror")
+      : t("registry.npmTitle");
   const introBody = isAlloy
-    ? "Este Alloy agrega Forges y/o Mirrors npm en una sola URL. npm install resuelve contra los miembros, en orden. No acepta npm publish: publica en un Forge miembro."
+    ? t("registry.npmAlloyBody")
     : isMirror
-      ? "Este Mirror cachea paquetes del upstream la primera vez que npm install los resuelve o descarga. No acepta npm publish ni yank."
-      : "Este repositorio implementa el protocolo de registro de npm: npm publish y npm install funcionan de forma nativa.";
+      ? t("registry.npmMirrorBody")
+      : t("registry.npm");
 
   const body = (
     <div className="space-y-5">
@@ -81,22 +82,18 @@ export function NpmRegistryPanel({
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          1. Apunta npm a este registro
+          {t("registry.npmStep1")}
         </p>
         <CopyableCodeBlock
           code={`registry=${registryUrl}\n//${authHost}:_authToken=fb_…`}
         />
-        <p className="text-xs text-muted-foreground">
-          Ponlo en <code className="font-mono">.npmrc</code> del paquete o en{" "}
-          <code className="font-mono">~/.npmrc</code>. El token se crea en Seguridad. La barra
-          final de la URL es obligatoria.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("registry.npmStep1Hint")}</p>
       </div>
 
       {readOnly ? (
         <div className="space-y-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            2. Instala un paquete
+            {t("registry.npmStepInstall")}
           </p>
           <CopyableCodeBlock code="npm install demo-pkg" />
         </div>
@@ -104,13 +101,13 @@ export function NpmRegistryPanel({
         <>
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              2. Publica tu paquete
+              {t("registry.npmStepPublish")}
             </p>
             <CopyableCodeBlock code="npm publish" />
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              3. Instálalo en otro proyecto
+              {t("registry.npmStepInstallOther")}
             </p>
             <CopyableCodeBlock code="npm install demo-pkg" />
           </div>

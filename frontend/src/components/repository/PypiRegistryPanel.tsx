@@ -1,11 +1,13 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useSettings } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function CopyableCodeBlock({ code }: { code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -24,7 +26,7 @@ function CopyableCodeBlock({ code }: { code: string }) {
         size="icon"
         className="absolute top-1.5 right-1.5 size-7 opacity-0 transition-opacity group-hover:opacity-100"
         onClick={() => void handleCopy()}
-        aria-label="Copiar al portapapeles"
+        aria-label={t("registry.copyClipboard")}
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
       </Button>
@@ -41,6 +43,7 @@ export function PypiRegistryPanel({
   kind?: "forge" | "mirror" | "alloy";
   framed?: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError } = useSettings();
 
   if (isPending) {
@@ -49,9 +52,7 @@ export function PypiRegistryPanel({
 
   if (isError || !data) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No se pudo obtener la URL pública de la instancia.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("registry.publicUrlFailed")}</p>
     );
   }
 
@@ -62,12 +63,16 @@ export function PypiRegistryPanel({
   const isAlloy = kind === "alloy";
   const readOnly = isMirror || isAlloy;
 
-  const introTitle = isAlloy ? "Alloy PyPI" : isMirror ? "Mirror PyPI" : "Registro PyPI";
-  const introBody = isAlloy
-    ? "Este Alloy agrega Forges y/o Mirrors PyPI en una sola URL. pip install resuelve contra los miembros, en orden. No acepta twine upload: publica en un Forge miembro."
+  const introTitle = isAlloy
+    ? t("registry.pypiAlloy")
     : isMirror
-      ? "Este Mirror cachea paquetes del upstream la primera vez que pip install los resuelve o descarga. No acepta twine upload ni yank."
-      : "Este repositorio implementa el protocolo de PyPI: twine upload y pip install funcionan de forma nativa.";
+      ? t("registry.pypiMirror")
+      : t("registry.pypiTitle");
+  const introBody = isAlloy
+    ? t("registry.pypiAlloyBody")
+    : isMirror
+      ? t("registry.pypiMirrorBody")
+      : t("registry.pypi");
 
   const body = (
     <div className="space-y-5">
@@ -79,7 +84,7 @@ export function PypiRegistryPanel({
       {readOnly ? (
         <div className="space-y-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            1. Instala un paquete
+            {t("registry.pypiStepInstall")}
           </p>
           <CopyableCodeBlock
             code={
@@ -95,19 +100,13 @@ export function PypiRegistryPanel({
                 : `uv pip install demo-ferrobox-pypi --index-url ${indexUrl} --allow-insecure-host 127.0.0.1`
             }
           />
-          <p className="text-xs text-muted-foreground">
-            La barra final de <code className="font-mono">/simple/</code> es obligatoria. En HTTP
-            local, <code className="font-mono">pip</code> usa{" "}
-            <code className="font-mono">--trusted-host</code> y <code className="font-mono">uv</code>{" "}
-            usa <code className="font-mono">--allow-insecure-host</code>. Ambos piden el índice JSON
-            PEP 691.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("registry.pypiStepInstallHint")}</p>
         </div>
       ) : (
         <>
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              1. Configura twine
+              {t("registry.pypiStepTwine")}
             </p>
             <CopyableCodeBlock
               code={`[distutils]
@@ -118,20 +117,17 @@ repository = ${repositoryUrl}
 username = __token__
 password = fb_…`}
             />
-            <p className="text-xs text-muted-foreground">
-              Ponlo en <code className="font-mono">~/.pypirc</code>. El token se crea en Seguridad.
-              Copia el UUID completo (8-4-4-4-12).
-            </p>
+            <p className="text-xs text-muted-foreground">{t("registry.pypiStepTwineHint")}</p>
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              2. Publica tu paquete
+              {t("registry.pypiStepPublish")}
             </p>
             <CopyableCodeBlock code="python -m build && twine upload --repository ferrobox dist/*" />
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              3. Instálalo en otro entorno
+              {t("registry.pypiStepInstallOther")}
             </p>
             <CopyableCodeBlock
               code={`pip install demo-ferrobox-pypi --index-url ${indexUrl} --trusted-host 127.0.0.1`}
@@ -139,12 +135,7 @@ password = fb_…`}
             <CopyableCodeBlock
               code={`uv pip install demo-ferrobox-pypi --index-url ${indexUrl} --allow-insecure-host 127.0.0.1`}
             />
-            <p className="text-xs text-muted-foreground">
-              En HTTP local, <code className="font-mono">uv</code> usa{" "}
-              <code className="font-mono">--allow-insecure-host</code> en lugar de{" "}
-              <code className="font-mono">--trusted-host</code>. pip y uv piden el índice JSON PEP
-              691.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("registry.pypiStepInstallOtherHint")}</p>
           </div>
         </>
       )}

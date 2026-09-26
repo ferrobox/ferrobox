@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { AlertCircle, HardDrive, Save } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -54,19 +55,23 @@ function splitLimit(limitBytes: number | null): { value: string; unit: Unit } {
   return { value: String(limitBytes / MIB), unit: "MiB" };
 }
 
-function payloadFromFields(value: string, unit: Unit): QuotaRequest | undefined {
+function payloadFromFields(
+  value: string,
+  unit: Unit,
+  messages: { limitPositive: string; limitRange: string },
+): QuotaRequest | undefined {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
     return { limit_bytes: undefined };
   }
   const parsed = Number.parseFloat(trimmed.replace(",", "."));
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    toast.error("El tope debe ser un número mayor que 0, o quedar vacío");
+    toast.error(messages.limitPositive);
     return undefined;
   }
   const limitBytes = Math.round(parsed * UNIT_BYTES[unit]);
   if (limitBytes < 1 || limitBytes > MAX_LIMIT_BYTES) {
-    toast.error("El tope debe estar entre 1 byte y 10 TiB");
+    toast.error(messages.limitRange);
     return undefined;
   }
   return { limit_bytes: limitBytes };
@@ -79,17 +84,14 @@ export function QuotaPanel({
   repositoryId: string;
   canWrite: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError, error } = useQuota(repositoryId, true);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Cuota</CardTitle>
-        <CardDescription>
-          Tope de disco de este repositorio. Vacío = sin límite. Cuenta todos los binarios, también
-          los que ya no están en el catálogo hasta que corre la recolección de basura. Un publish
-          que no quepa se rechaza.
-        </CardDescription>
+        <CardTitle>{t("quota.title")}</CardTitle>
+        <CardDescription>{t("quota.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isPending ? <Skeleton className="h-24 w-full rounded-md" /> : null}
@@ -99,7 +101,7 @@ export function QuotaPanel({
           ) : (
             <Alert variant="destructive">
               <AlertCircle />
-              <AlertTitle>No se pudo cargar la cuota</AlertTitle>
+              <AlertTitle>{t("quota.loadFailed")}</AlertTitle>
               <AlertDescription>{error.message}</AlertDescription>
             </Alert>
           )
@@ -113,18 +115,17 @@ export function QuotaPanel({
 }
 
 function MigrationAlert() {
+  const { t } = useTranslation();
   return (
     <Alert variant="destructive">
       <AlertCircle />
-      <AlertTitle>Falta la migración SQL</AlertTitle>
+      <AlertTitle>{t("retention.migrationTitle")}</AlertTitle>
       <AlertDescription className="gap-2">
-        <p>
-          La tabla de cuotas no existe. Desde el directorio <code>backend/</code> ejecuta:
-        </p>
+        <p>{t("quota.migrationBody")}</p>
         <pre className="mt-1 w-full overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
           sqlx migrate run
         </pre>
-        <p>Luego reinicia el backend. Consultar el uso funciona sin migrar; guardar, no.</p>
+        <p>{t("quota.migrationHint")}</p>
       </AlertDescription>
     </Alert>
   );
@@ -139,6 +140,7 @@ function QuotaForm({
   canWrite: boolean;
   snapshot: QuotaResponse | undefined;
 }) {
+  const { t } = useTranslation();
   const saveQuota = useSaveQuota(repositoryId);
   const initial = splitLimit(snapshot?.limit_bytes ?? null);
   const [value, setValue] = useState(initial.value);
@@ -152,7 +154,10 @@ function QuotaForm({
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const payload = payloadFromFields(value, unit);
+    const payload = payloadFromFields(value, unit, {
+      limitPositive: t("quota.limitPositive"),
+      limitRange: t("quota.limitRange"),
+    });
     if (!payload) {
       return;
     }
@@ -160,16 +165,14 @@ function QuotaForm({
       await saveQuota.mutateAsync(payload);
       setSchemaError(false);
       toast.success(
-        payload.limit_bytes == null
-          ? "Cuota ilimitada. Los próximos publish no se rechazan por tamaño."
-          : "Tope guardado. Un publish que no quepa devolverá conflicto.",
+        payload.limit_bytes == null ? t("quota.unlimitedSaved") : t("quota.limitSaved"),
       );
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "";
       if (isMissingMigration(message)) {
         setSchemaError(true);
       }
-      toast.error(err instanceof ApiError ? err.message : "No se pudo guardar la cuota");
+      toast.error(err instanceof ApiError ? err.message : t("quota.saveFailed"));
     }
   }
 
@@ -178,11 +181,11 @@ function QuotaForm({
       {schemaError ? <MigrationAlert /> : null}
 
       <div className="space-y-2">
-        <p className="text-sm font-medium text-foreground">Uso actual</p>
+        <p className="text-sm font-medium text-foreground">{t("quota.usage")}</p>
         <p className="text-sm text-muted-foreground">
           {savedLimit == null
-            ? `${formatBytes(usedBytes)} usados · sin límite`
-            : `${formatBytes(usedBytes)} de ${formatBytes(savedLimit)}`}
+            ? t("quota.usedUnlimited", { used: formatBytes(usedBytes) })
+            : t("quota.usedOf", { used: formatBytes(usedBytes), limit: formatBytes(savedLimit) })}
         </p>
         {savedLimit != null ? (
           <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -192,23 +195,18 @@ function QuotaForm({
             />
           </div>
         ) : null}
-        {overLimit ? (
-          <p className="text-sm text-destructive">
-            El uso supera el tope. Los próximos publish fallarán hasta que subas el límite o
-            liberes disco en Configuración → Recolección de basura.
-          </p>
-        ) : null}
+        {overLimit ? <p className="text-sm text-destructive">{t("quota.overLimit")}</p> : null}
       </div>
 
       <div className="space-y-3">
-        <p className="text-sm font-medium text-foreground">Tope</p>
+        <p className="text-sm font-medium text-foreground">{t("quota.cap")}</p>
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-2">
-            <Label htmlFor="quota-limit">Cantidad</Label>
+            <Label htmlFor="quota-limit">{t("quota.amount")}</Label>
             <Input
               id="quota-limit"
               inputMode="decimal"
-              placeholder="Sin límite"
+              placeholder={t("quota.unlimitedPlaceholder")}
               value={value}
               onChange={(event) => setValue(event.target.value)}
               disabled={!canWrite}
@@ -216,7 +214,7 @@ function QuotaForm({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="quota-unit">Unidad</Label>
+            <Label htmlFor="quota-unit">{t("quota.unit")}</Label>
             <Select
               value={unit}
               onValueChange={(next) => setUnit(next as Unit)}
@@ -233,20 +231,16 @@ function QuotaForm({
             </Select>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Deja la cantidad vacía para quitar el tope. 1 GiB = 1024 MiB.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("quota.emptyHint")}</p>
       </div>
 
       {canWrite ? (
         <Button type="submit" variant="outline" disabled={saveQuota.isPending}>
           {saveQuota.isPending ? <HardDrive className="animate-pulse" /> : <Save />}
-          {saveQuota.isPending ? "Guardando…" : "Guardar"}
+          {saveQuota.isPending ? t("common.saving") : t("common.save")}
         </Button>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Solo lectura: un usuario Developer o Admin puede cambiar el tope.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("quota.readOnly")}</p>
       )}
     </form>
   );

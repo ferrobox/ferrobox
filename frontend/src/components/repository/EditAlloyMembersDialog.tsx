@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Loader2, Pencil } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -26,6 +27,7 @@ export function EditAlloyMembersDialog({
   ecosystem: PackageEcosystemDto;
   members: readonly string[];
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([...members]);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function EditAlloyMembersDialog({
     setValidationError(null);
 
     if (memberIds.length === 0) {
-      setValidationError("Un Alloy necesita al menos un repositorio Forge o Mirror.");
+      setValidationError(t("repositories.alloyNeedsMember"));
       return;
     }
 
@@ -44,7 +46,7 @@ export function EditAlloyMembersDialog({
       { members: memberIds },
       {
         onSuccess: () => {
-          toast.success("Miembros del Alloy actualizados.");
+          toast.success(t("repositories.membersUpdated"));
           setOpen(false);
         },
       },
@@ -67,18 +69,21 @@ export function EditAlloyMembersDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="icon" aria-label="Editar miembros" title="Editar miembros">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label={t("repositories.editMembers")}
+          title={t("repositories.editMembers")}
+        >
           <Pencil />
         </Button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Editar miembros</DialogTitle>
-            <DialogDescription>
-              Cambia qué Forges y Mirrors agrega este Alloy, y en qué orden se
-              resuelven las lecturas.
-            </DialogDescription>
+            <DialogTitle>{t("repositories.editMembers")}</DialogTitle>
+            <DialogDescription>{t("repositories.editMembersHint")}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
@@ -95,11 +100,11 @@ export function EditAlloyMembersDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancelar
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? <Loader2 className="animate-spin" /> : null}
-              Guardar
+              {t("common.save")}
             </Button>
           </DialogFooter>
         </form>

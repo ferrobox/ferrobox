@@ -172,16 +172,16 @@ function AssayBody({
       <Tabs defaultValue="findings" className="min-h-0 flex-1">
         <TabsList>
           <TabsTrigger value="findings">
-            Impurezas ({assay.findings.length})
+            {t("assays.impurities", { count: assay.findings.length })}
           </TabsTrigger>
           <TabsTrigger value="components">
-            Composición ({assay.components.length})
+            {t("assays.composition", { count: assay.components.length })}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="findings" className="mt-3 min-h-0 overflow-y-auto">
           {assay.findings.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No hay vulnerabilidades conocidas para las versiones concretas de este inventario.
+              {t("assays.noVulns")}
             </p>
           ) : (
             <ul className="space-y-3">
@@ -197,7 +197,7 @@ function AssayBody({
                     <SeverityBadge severity={finding.severity} />
                     {finding.fixed_version ? (
                       <span className="text-xs text-muted-foreground">
-                        corrige en {finding.fixed_version}
+                        {t("assays.fixedIn", { version: finding.fixed_version })}
                       </span>
                     ) : null}
                   </div>
@@ -213,7 +213,7 @@ function AssayBody({
                       rel="noreferrer"
                       className="mt-2 inline-block text-xs text-primary underline-offset-4 hover:underline"
                     >
-                      Ficha pública
+                      {t("assays.publicAdvisory")}
                     </a>
                   ) : null}
                 </li>
@@ -239,10 +239,10 @@ function AssayBody({
                   />
                   <span className="text-xs text-muted-foreground">
                     {component.kind === "root"
-                      ? "ensayado"
+                      ? t("assays.kindRoot")
                       : component.kind === "transitive"
-                        ? "transitiva"
-                        : "dependencia"}
+                        ? t("assays.kindTransitive")
+                        : t("assays.kindDirect")}
                   </span>
                 </span>
               </li>

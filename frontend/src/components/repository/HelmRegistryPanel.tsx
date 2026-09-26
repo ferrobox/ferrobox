@@ -1,11 +1,13 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useSettings } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function CopyableCodeBlock({ code }: { code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -24,7 +26,7 @@ function CopyableCodeBlock({ code }: { code: string }) {
         size="icon"
         className="absolute top-1.5 right-1.5 size-7 opacity-0 transition-opacity group-hover:opacity-100"
         onClick={() => void handleCopy()}
-        aria-label="Copiar al portapapeles"
+        aria-label={t("registry.copyClipboard")}
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
       </Button>
@@ -41,6 +43,7 @@ export function HelmRegistryPanel({
   kind?: "forge" | "mirror" | "alloy";
   framed?: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError } = useSettings();
 
   if (isPending) {
@@ -49,9 +52,7 @@ export function HelmRegistryPanel({
 
   if (isError || !data) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No se pudo obtener la URL pública de la instancia.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("registry.publicUrlFailed")}</p>
     );
   }
 
@@ -63,12 +64,16 @@ export function HelmRegistryPanel({
   const readOnly = isMirror || isAlloy;
   const plainHttp = baseUrl.startsWith("http://");
 
-  const introTitle = isAlloy ? "Alloy Helm" : isMirror ? "Mirror Helm" : "Registro Helm";
-  const introBody = isAlloy
-    ? "Este Alloy agrega Forges y/o Mirrors Helm en una sola URL. helm pull e helm install resuelven contra los miembros, en orden. No acepta helm push: publica en un Forge miembro."
+  const introTitle = isAlloy
+    ? t("registry.helmAlloy")
     : isMirror
-      ? "Este Mirror cachea charts OCI del upstream la primera vez que helm pull los resuelve. No acepta helm push ni yank."
-      : "Los charts se publican como artefactos OCI (Distribution Spec v2). helm push y helm pull hablan con /v2/ en la raíz del host.";
+      ? t("registry.helmMirror")
+      : t("registry.helmTitle");
+  const introBody = isAlloy
+    ? t("registry.helmAlloyBody")
+    : isMirror
+      ? t("registry.helmMirrorBody")
+      : t("registry.helm");
 
   const login = `echo 'fb_…' | helm registry login ${registryHost} -u __token__ --password-stdin`;
   const pushPull = plainHttp
@@ -77,6 +82,7 @@ export function HelmRegistryPanel({
   const pullOnly = plainHttp
     ? `helm pull ${chartRef} --version 0.1.0 --plain-http`
     : `helm pull ${chartRef} --version 0.1.0`;
+  const hubCommand = `helm pull oci://${registryHost}/${repositoryId}/bitnami/nginx --version 18.0.0${plainHttp ? " --plain-http" : ""}`;
 
   const body = (
     <div className="space-y-5">
@@ -88,39 +94,22 @@ export function HelmRegistryPanel({
       {readOnly ? null : (
         <div className="space-y-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            1. Login (token de Seguridad)
+            {t("registry.helmStep1")}
           </p>
           <CopyableCodeBlock code={login} />
           <p className="text-xs text-muted-foreground">
-            Copia el UUID completo (8-4-4-4-12). En HTTP local,{" "}
-            <code className="font-mono">helm push</code> / <code className="font-mono">helm pull</code>{" "}
-            necesitan <code className="font-mono">--plain-http</code>. Si un push anterior falló con
-            401, <code className="font-mono">helm logout {registryHost}</code> y vuelve a entrar:
-            Helm puede haber cacheado un token anónimo del ping a{" "}
-            <code className="font-mono">/v2/</code>.
+            {t("registry.helmStep1Hint", { host: registryHost })}
           </p>
         </div>
       )}
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {readOnly ? "1. Instala (pull)" : "2. Empaqueta, publica y tira"}
+          {readOnly ? t("registry.helmStepPull") : t("registry.helmStepPush")}
         </p>
         <CopyableCodeBlock code={readOnly ? pullOnly : pushPull} />
         <p className="text-xs text-muted-foreground">
-          El chart queda en <code className="font-mono">oci://&lt;host&gt;/&lt;UUID&gt;/&lt;nombre&gt;</code>
-          . El nombre sale de <code className="font-mono">Chart.yaml</code>. Los nombres con barra
-          (por ejemplo <code className="font-mono">bitnami/nginx</code>) también funcionan.
-          {isMirror ? (
-            <>
-              {" "}
-              Con upstream Docker Hub:{" "}
-              <code className="font-mono">
-                helm pull oci://{registryHost}/{repositoryId}/bitnami/nginx --version 18.0.0
-                {plainHttp ? " --plain-http" : ""}
-              </code>
-              .
-            </>
-          ) : null}
+          {t("registry.helmStepHint")}
+          {isMirror ? ` ${t("registry.helmMirrorHub", { command: hubCommand })}` : null}
         </p>
       </div>
     </div>

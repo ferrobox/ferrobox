@@ -1,11 +1,13 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { useSettings } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function CopyableCodeBlock({ code }: { code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -24,7 +26,7 @@ function CopyableCodeBlock({ code }: { code: string }) {
         size="icon"
         className="absolute top-1.5 right-1.5 size-7 opacity-0 transition-opacity group-hover:opacity-100"
         onClick={() => void handleCopy()}
-        aria-label="Copiar al portapapeles"
+        aria-label={t("registry.copyClipboard")}
       >
         {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
       </Button>
@@ -41,6 +43,7 @@ export function ConanRegistryPanel({
   kind?: "forge" | "mirror" | "alloy";
   framed?: boolean;
 }) {
+  const { t } = useTranslation();
   const { data, isPending, isError } = useSettings();
 
   if (isPending) {
@@ -49,9 +52,7 @@ export function ConanRegistryPanel({
 
   if (isError || !data) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No se pudo obtener la URL pública de la instancia.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("registry.publicUrlFailed")}</p>
     );
   }
 
@@ -60,12 +61,16 @@ export function ConanRegistryPanel({
   const isAlloy = kind === "alloy";
   const readOnly = isMirror || isAlloy;
 
-  const introTitle = isAlloy ? "Alloy Conan" : isMirror ? "Mirror Conan" : "Registro Conan";
-  const introBody = isAlloy
-    ? "Este Alloy agrega Forges Conan en una sola URL. conan install resuelve contra los miembros, en orden. No acepta conan upload: publica en un Forge miembro."
+  const introTitle = isAlloy
+    ? t("registry.conanAlloy")
     : isMirror
-      ? "El Mirror Conan todavía no está implementado. Usa un Forge o un Alloy de Forges."
-      : "Este repositorio implementa la API v2 de Conan (revisiones). conan upload y conan install hablan con /conan/<UUID>/.";
+      ? t("registry.conanMirror")
+      : t("registry.conanTitle");
+  const introBody = isAlloy
+    ? t("registry.conanAlloyBody")
+    : isMirror
+      ? t("registry.conanMirrorPending")
+      : t("registry.conan");
 
   const remote = `conan remote add ferrobox ${remoteUrl}`;
   const login = `conan remote login ferrobox __token__`;
@@ -81,31 +86,27 @@ export function ConanRegistryPanel({
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          1. Añade el remoto
+          {t("registry.conanStep1")}
         </p>
         <CopyableCodeBlock code={remote} />
         <p className="text-xs text-muted-foreground">
-          Copia el UUID completo (8-4-4-4-12). La URL del remoto es{" "}
-          <code className="font-mono">{remoteUrl}</code>.
+          {t("registry.conanStep1Hint", { url: remoteUrl })}
         </p>
       </div>
 
       {readOnly ? null : (
         <div className="space-y-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            2. Login (token de Seguridad)
+            {t("registry.conanStep2")}
           </p>
           <CopyableCodeBlock code={login} />
-          <p className="text-xs text-muted-foreground">
-            Usuario <code className="font-mono">__token__</code>. Cuando pida la contraseña, pega el
-            token de Seguridad.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("registry.conanStep2Hint")}</p>
         </div>
       )}
 
       <div className="space-y-2">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          {readOnly ? "2. Instala" : "3. Crea, publica e instala"}
+          {readOnly ? t("registry.conanStepInstall") : t("registry.conanStepPublish")}
         </p>
         <CopyableCodeBlock code={readOnly ? install : `${upload}\n${install}`} />
       </div>
