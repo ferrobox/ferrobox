@@ -1,38 +1,8 @@
-import { Check, Copy } from "lucide-react";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useSettings } from "@/api/queries";
-import { Button } from "@/components/ui/button";
+import { CopyableCodeBlock } from "@/components/repository/CopyableCodeBlock";
 import { Skeleton } from "@/components/ui/skeleton";
-
-function CopyableCodeBlock({ code }: { code: string }) {
-  const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  return (
-    <div className="group relative">
-      <pre className="overflow-x-auto rounded-md bg-muted px-4 py-3 font-mono text-xs text-foreground">
-        {code}
-      </pre>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute top-1.5 right-1.5 size-7 opacity-0 transition-opacity group-hover:opacity-100"
-        onClick={() => void handleCopy()}
-        aria-label={t("registry.copyClipboard")}
-      >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      </Button>
-    </div>
-  );
-}
 
 export function OciRegistryPanel({
   repositoryId,
