@@ -9,6 +9,7 @@
 
 # Entorno y secretos
 .env
+.env_*
 .env.local
 *.pem
 
