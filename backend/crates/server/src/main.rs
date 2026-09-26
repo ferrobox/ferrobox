@@ -258,6 +258,7 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         .route("/auth/tokens/{token_id}", delete(auth::revoke_token))
         .route("/audit", get(audit::list_events))
         .route("/users", get(users::list_users).post(users::create_user))
+        .route("/users/robots", post(users::create_robot))
         .route(
             "/users/{user_id}",
             patch(users::update_user_role).delete(users::delete_user),
@@ -559,7 +560,11 @@ fn build_app_state(
         quota,
         search_packages,
         public_base_url: config.public_base_url.clone(),
-        login: LoginUseCase::new(user_store.clone(), api_token_store.clone()),
+        login: LoginUseCase::with_session_ttl(
+            user_store.clone(),
+            api_token_store.clone(),
+            config.session_ttl,
+        ),
         change_password: ChangePasswordUseCase::new(user_store.clone()),
         authenticate_token: AuthenticateTokenUseCase::new(
             user_store.clone(),

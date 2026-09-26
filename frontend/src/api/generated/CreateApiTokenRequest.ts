@@ -3,4 +3,8 @@
 /**
  * Cuerpo de la petición para crear un token de API.
  */
-export type CreateApiTokenRequest = { name: string, };
+export type CreateApiTokenRequest = { name: string, 
+/**
+ * Caducidad RFC 3339. `null` o ausente = no caduca.
+ */
+expires_at?: string, };

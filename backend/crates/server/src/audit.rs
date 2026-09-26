@@ -200,7 +200,7 @@ mod tests {
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();
         let admin_token = state
             .create_api_token
-            .execute(admin.id(), ApiTokenName::parse("admin").unwrap())
+            .execute(admin.id(), ApiTokenName::parse("admin").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;
@@ -211,7 +211,7 @@ mod tests {
             .unwrap();
         let reader_token = state
             .create_api_token
-            .execute(reader.id(), ApiTokenName::parse("read").unwrap())
+            .execute(reader.id(), ApiTokenName::parse("read").unwrap(), None)
             .await
             .unwrap()
             .plaintext_secret;

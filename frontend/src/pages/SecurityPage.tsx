@@ -34,14 +34,19 @@ export function SecurityPage() {
   const createToken = useCreateApiToken();
   const revokeToken = useRevokeApiToken();
   const [name, setName] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const result = await createToken.mutateAsync({ name: name.trim() });
+      const result = await createToken.mutateAsync({
+        name: name.trim(),
+        expires_at: expiresAt.trim() ? new Date(expiresAt).toISOString() : undefined,
+      });
       setCreatedSecret(result.token);
       setName("");
+      setExpiresAt("");
       toast.success(t("security.created"));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("security.createFailed"));
@@ -73,6 +78,15 @@ export function SecurityPage() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
+          />
+        </div>
+        <div className="w-full space-y-2 sm:max-w-xs">
+          <Label htmlFor="token-expires">{t("security.expiresAt")}</Label>
+          <Input
+            id="token-expires"
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(event) => setExpiresAt(event.target.value)}
           />
         </div>
         <Button type="submit" disabled={createToken.isPending || name.trim().length === 0}>
@@ -118,6 +132,7 @@ export function SecurityPage() {
                 <TableHead>{t("common.name")}</TableHead>
                 <TableHead>{t("security.prefix")}</TableHead>
                 <TableHead>{t("security.createdAt")}</TableHead>
+                <TableHead>{t("security.expiresAt")}</TableHead>
                 <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -130,6 +145,9 @@ export function SecurityPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatCreatedAt(token.created_at)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {token.expires_at ? formatCreatedAt(token.expires_at) : t("security.never")}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button

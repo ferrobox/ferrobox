@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use ferrobox_domain::api_token::{ApiToken, ApiTokenName};
 use ferrobox_domain::ids::{ApiTokenId, UserId};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
@@ -33,6 +34,7 @@ fn row_to_token(
     user_id: Uuid,
     name: String,
     prefix: String,
+    expires_at: Option<DateTime<Utc>>,
 ) -> Result<ApiToken, ApiTokenStoreError> {
     let name = ApiTokenName::parse(name).map_err(|err| backend_error(err.to_string()))?;
     Ok(ApiToken::from_parts(
@@ -40,7 +42,8 @@ fn row_to_token(
         UserId::from(user_id),
         name,
         prefix,
-    ))
+    )
+    .with_expires_at(expires_at))
 }
 
 #[async_trait]
@@ -51,18 +54,20 @@ impl ApiTokenStore for PostgresApiTokenStore {
 
         sqlx::query!(
             r#"
-            INSERT INTO api_tokens (id, user_id, name, prefix, token_hash)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO api_tokens (id, user_id, name, prefix, token_hash, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (id) DO UPDATE
             SET name = EXCLUDED.name,
                 prefix = EXCLUDED.prefix,
-                token_hash = EXCLUDED.token_hash
+                token_hash = EXCLUDED.token_hash,
+                expires_at = EXCLUDED.expires_at
             "#,
             id,
             user_id,
             token.name().as_str(),
             token.prefix(),
             token_hash,
+            token.expires_at(),
         )
         .execute(&self.pool)
         .await
@@ -77,7 +82,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
     ) -> Result<Option<ApiToken>, ApiTokenStoreError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, user_id, name, prefix
+            SELECT id, user_id, name, prefix, expires_at
             FROM api_tokens
             WHERE token_hash = $1
             "#,
@@ -87,7 +92,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|row| row_to_token(row.id, row.user_id, row.name, row.prefix))
+        row.map(|row| row_to_token(row.id, row.user_id, row.name, row.prefix, row.expires_at))
             .transpose()
     }
 
@@ -99,7 +104,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
 
         let rows = sqlx::query!(
             r#"
-            SELECT id, user_id, name, prefix, created_at
+            SELECT id, user_id, name, prefix, created_at, expires_at
             FROM api_tokens
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -112,10 +117,12 @@ impl ApiTokenStore for PostgresApiTokenStore {
 
         rows.into_iter()
             .map(|row| {
-                let token = row_to_token(row.id, row.user_id, row.name, row.prefix)?;
+                let token =
+                    row_to_token(row.id, row.user_id, row.name, row.prefix, row.expires_at)?;
                 Ok(ApiTokenRecord {
                     token,
                     created_at_rfc3339: row.created_at.to_rfc3339(),
+                    expires_at_rfc3339: row.expires_at.map(|at| at.to_rfc3339()),
                 })
             })
             .collect()

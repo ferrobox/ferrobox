@@ -21,6 +21,10 @@ pub enum CreateUserError {
     /// Fallo al persistir el usuario (incluye nombre o correo duplicado).
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
+
+    /// Una cuenta robot no puede ser administradora de instancia.
+    #[error("a robot account cannot be an admin")]
+    RobotCannotBeAdmin,
 }
 
 /// Caso de uso: crear un usuario con rol, correo y contraseña.
@@ -52,6 +56,30 @@ impl CreateUserUseCase {
         validate_password_policy(password)?;
         let user = User::new(username, role).with_email(Some(email));
         let password_hash = hash_password(password)?;
+        self.user_store
+            .save_with_password_hash(&user, &password_hash)
+            .await?;
+        Ok(user)
+    }
+
+    /// Crea una cuenta robot: sin correo, sin contraseña usable, solo
+    /// tokens de API. No puede ser [`Role::Admin`].
+    ///
+    /// # Errors
+    ///
+    /// [`CreateUserError::RobotCannotBeAdmin`] si el rol es admin, o
+    /// un error de hashing / persistencia.
+    pub async fn execute_robot(
+        &self,
+        username: Username,
+        role: Role,
+    ) -> Result<User, CreateUserError> {
+        if role == Role::Admin {
+            return Err(CreateUserError::RobotCannotBeAdmin);
+        }
+        let user = User::new(username, role).with_robot(true);
+        let random = format!("R{}aA1", uuid::Uuid::now_v7().simple());
+        let password_hash = hash_password(&random)?;
         self.user_store
             .save_with_password_hash(&user, &password_hash)
             .await?;
@@ -182,6 +210,10 @@ pub enum ChangeUserRoleError {
     #[error("cannot demote the last admin user")]
     CannotDemoteLastAdmin,
 
+    /// Una cuenta robot no puede ser administradora de instancia.
+    #[error("a robot account cannot be an admin")]
+    RobotCannotBeAdmin,
+
     /// Fallo al consultar / actualizar el almacén.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
@@ -215,6 +247,10 @@ impl ChangeUserRoleUseCase {
             return Err(ChangeUserRoleError::NotFound);
         };
 
+        if target.is_robot() && new_role == Role::Admin {
+            return Err(ChangeUserRoleError::RobotCannotBeAdmin);
+        }
+
         if target.role() == new_role {
             return Ok(target);
         }
@@ -247,6 +283,10 @@ pub enum ResetUserPasswordError {
     /// La nueva contraseña no cumple la política de la instancia.
     #[error(transparent)]
     InvalidPassword(#[from] ferrobox_domain::user::PasswordPolicyError),
+
+    /// Las cuentas robot no tienen contraseña.
+    #[error("a robot account has no password")]
+    RobotAccount,
 
     /// Fallo al hashear la nueva contraseña.
     #[error(transparent)]
@@ -293,6 +333,9 @@ impl ResetUserPasswordUseCase {
         let Some(target) = self.user_store.find_by_id(target_id).await? else {
             return Err(ResetUserPasswordError::NotFound);
         };
+        if target.is_robot() {
+            return Err(ResetUserPasswordError::RobotAccount);
+        }
 
         let password_hash = hash_password(new_password)?;
         self.user_store
@@ -574,5 +617,27 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, ResetUserPasswordError::InvalidPassword(_)));
+    }
+
+    #[tokio::test]
+    async fn create_robot_rejects_admin_role() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let err = CreateUserUseCase::new(store)
+            .execute_robot(Username::parse("ci").unwrap(), Role::Admin)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CreateUserError::RobotCannotBeAdmin));
+    }
+
+    #[tokio::test]
+    async fn create_robot_persists_a_developer_without_email() {
+        let store = Arc::new(InMemoryUserStore::default());
+        let robot = CreateUserUseCase::new(store)
+            .execute_robot(Username::parse("ci").unwrap(), Role::Developer)
+            .await
+            .unwrap();
+        assert!(robot.is_robot());
+        assert_eq!(robot.role(), Role::Developer);
+        assert!(robot.email().is_none());
     }
 }

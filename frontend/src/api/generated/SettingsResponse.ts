@@ -14,7 +14,7 @@ public_base_url: string,
  */
 version: string, 
 /**
- * `true` si hay un IdP `OIDC` configurado.
+ * `true` si hay un `IdP` `OIDC` configurado.
  */
 oidc_enabled: boolean, 
 /**

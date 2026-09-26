@@ -7,4 +7,8 @@ export type ApiTokenCreatedResponse = { id: string, name: string, prefix: string
 /**
  * Secreto en claro. Solo se expone en esta respuesta.
  */
-token: string, };
+token: string, 
+/**
+ * Caducidad RFC 3339, o `null` si no caduca.
+ */
+expires_at: string | null, };

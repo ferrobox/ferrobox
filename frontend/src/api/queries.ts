@@ -5,6 +5,7 @@ import type { AssayLookupRequest } from "@/api/generated/AssayLookupRequest";
 import type { ChangePasswordRequest } from "@/api/generated/ChangePasswordRequest";
 import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenRequest";
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
+import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
@@ -261,6 +262,17 @@ export function useUsers() {
   return useQuery({
     queryKey: queryKeys.users,
     queryFn: api.listUsers,
+  });
+}
+
+export function useCreateRobot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateRobotRequest) => api.createRobot(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users });
+    },
   });
 }
 

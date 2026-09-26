@@ -10,6 +10,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
+import { CreateRobotDialog } from "@/components/users/CreateRobotDialog";
 import { CreateUserDialog } from "@/components/users/CreateUserDialog";
 import { ResetPasswordDialog } from "@/components/users/ResetPasswordDialog";
 import { RolePermissionsCard } from "@/components/users/RolePermissionsCard";
@@ -73,7 +74,12 @@ export function UsersPage() {
       <PageHeader
         title={t("users.title")}
         description={t("users.description")}
-        actions={<CreateUserDialog />}
+        actions={
+          <div className="flex gap-2">
+            <CreateRobotDialog />
+            <CreateUserDialog />
+          </div>
+        }
       />
 
       {isPending ? (
@@ -120,6 +126,9 @@ export function UsersPage() {
                         {entry.sso ? (
                           <Badge variant="secondary">{t("users.sso")}</Badge>
                         ) : null}
+                        {entry.robot ? (
+                          <Badge variant="secondary">{t("users.robot")}</Badge>
+                        ) : null}
                       </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -144,7 +153,10 @@ export function UsersPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {ROLE_OPTIONS.map((option) => (
+                          {(entry.robot
+                            ? ROLE_OPTIONS.filter((option) => option !== "admin")
+                            : ROLE_OPTIONS
+                          ).map((option) => (
                             <SelectItem key={option} value={option}>
                               {roleLabel(option)}
                             </SelectItem>
@@ -154,16 +166,18 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <ResetPasswordDialog
-                          userId={entry.id}
-                          username={entry.username}
-                          trigger={
-                            <Button variant="ghost" size="sm" disabled={isSelf}>
-                              <KeyRound />
-                              {t("users.reset")}
-                            </Button>
-                          }
-                        />
+                        {entry.robot ? null : (
+                          <ResetPasswordDialog
+                            userId={entry.id}
+                            username={entry.username}
+                            trigger={
+                              <Button variant="ghost" size="sm" disabled={isSelf}>
+                                <KeyRound />
+                                {t("users.reset")}
+                              </Button>
+                            }
+                          />
+                        )}
                         <ConfirmDeleteDialog
                           title={t("repositories.deleteTitle", { name: entry.username })}
                           description={t("users.deleteTokens")}

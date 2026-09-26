@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use ferrobox_domain::api_token::{ApiToken, ApiTokenName};
 use ferrobox_domain::ids::UserId;
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
@@ -10,6 +11,10 @@ use crate::auth_crypto::{generate_api_token_secret, hash_api_token_secret};
 /// Motivos por los que crear un token de API puede fallar.
 #[derive(Debug, Error)]
 pub enum CreateApiTokenError {
+    /// La caducidad está en el pasado.
+    #[error("token expiry must be in the future")]
+    ExpiryInThePast,
+
     /// Fallo al persistir el token.
     #[error(transparent)]
     Persistence(#[from] ApiTokenStoreError),
@@ -47,9 +52,13 @@ impl CreateApiTokenUseCase {
         &self,
         user_id: UserId,
         name: ApiTokenName,
+        expires_at: Option<DateTime<Utc>>,
     ) -> Result<CreateApiTokenResult, CreateApiTokenError> {
+        if expires_at.is_some_and(|at| at <= Utc::now()) {
+            return Err(CreateApiTokenError::ExpiryInThePast);
+        }
         let (plaintext_secret, prefix) = generate_api_token_secret();
-        let token = ApiToken::new(user_id, name, prefix);
+        let token = ApiToken::new(user_id, name, prefix).with_expires_at(expires_at);
         let token_hash = hash_api_token_secret(&plaintext_secret);
         self.api_token_store.save(&token, &token_hash).await?;
 
@@ -162,6 +171,7 @@ mod tests {
             .execute(
                 user.id(),
                 ApiTokenName::parse("cargo-publish").unwrap(),
+                None,
             )
             .await
             .unwrap();

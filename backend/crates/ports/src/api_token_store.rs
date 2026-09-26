@@ -10,6 +10,8 @@ pub struct ApiTokenRecord {
     pub token: ApiToken,
     /// Momento de creación en formato RFC 3339.
     pub created_at_rfc3339: String,
+    /// Caducidad en RFC 3339, o `None` si no caduca.
+    pub expires_at_rfc3339: Option<String>,
 }
 
 /// Motivos por los que una operación de persistencia de tokens puede
@@ -132,6 +134,7 @@ mod tests {
                 .map(|(token, _, created_at)| ApiTokenRecord {
                     token: token.clone(),
                     created_at_rfc3339: created_at.clone(),
+                    expires_at_rfc3339: token.expires_at().map(|at| at.to_rfc3339()),
                 })
                 .collect())
         }

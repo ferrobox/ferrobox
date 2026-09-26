@@ -3,4 +3,8 @@
 /**
  * Representación de un token de API (sin secreto) en listados.
  */
-export type ApiTokenResponse = { id: string, name: string, prefix: string, created_at: string, };
+export type ApiTokenResponse = { id: string, name: string, prefix: string, created_at: string, 
+/**
+ * Caducidad RFC 3339, o `null` si no caduca.
+ */
+expires_at: string | null, };

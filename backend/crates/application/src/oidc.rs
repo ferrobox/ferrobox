@@ -9,6 +9,8 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
+
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bytes::Bytes;
@@ -245,6 +247,7 @@ pub struct OidcLoginService {
     api_token_store: std::sync::Arc<dyn ApiTokenStore>,
     pending: Mutex<HashMap<String, PendingAuth>>,
     discovery: Mutex<Option<OidcDiscovery>>,
+    session_ttl: Duration,
 }
 
 impl OidcLoginService {
@@ -265,7 +268,15 @@ impl OidcLoginService {
             api_token_store,
             pending: Mutex::new(HashMap::new()),
             discovery: Mutex::new(None),
+            session_ttl: Duration::from_hours(12),
         }
+    }
+
+    /// TTL del token de sesión emitido tras el callback.
+    #[must_use]
+    pub fn with_session_ttl(mut self, session_ttl: Duration) -> Self {
+        self.session_ttl = session_ttl;
+        self
     }
 
     /// Si el SSO está listo para usarse.
@@ -422,9 +433,13 @@ impl OidcLoginService {
 
         let existing = self.user_store.find_by_oidc(&identity).await?;
         let existing = match existing {
-            Some(user) => Some(user),
+            Some(user) if !user.is_robot() => Some(user),
+            Some(_) => None,
             None => match &email {
-                Some(email) => self.user_store.find_by_email(email).await?,
+                Some(email) => {
+                    let found = self.user_store.find_by_email(email).await?;
+                    found.filter(|user| !user.is_robot())
+                }
                 None => None,
             },
         };
@@ -465,11 +480,13 @@ impl OidcLoginService {
 
     async fn issue_session(&self, user: User) -> Result<LoginResult, OidcError> {
         let (plaintext_secret, prefix) = generate_api_token_secret();
+        let expires_at = Utc::now() + self.session_ttl;
         let token = ApiToken::new(
             user.id(),
             ApiTokenName::parse("session").expect("literal 'session' is a valid token name"),
             prefix,
-        );
+        )
+        .with_expires_at(Some(expires_at));
         let token_hash = hash_api_token_secret(&plaintext_secret);
         self.api_token_store.save(&token, &token_hash).await?;
         Ok(LoginResult {
@@ -918,6 +935,44 @@ mod tests {
         assert_eq!(provision.user.username().as_str(), "ada");
         assert_eq!(provision.user.role(), Role::Developer);
         assert!(provision.user.is_sso_linked());
+        let stored = users
+            .find_by_id_with_password_hash(local.id())
+            .await
+            .unwrap()
+            .expect("linked user must still have a password hash");
+        assert_eq!(
+            stored.1, "hash",
+            "SSO link must keep the local password hash"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_password_still_logs_in_after_sso_link() {
+        let users = Arc::new(InMemoryUserStore::default());
+        let groups = Arc::new(InMemoryGroupStore::default());
+        let tokens = Arc::new(InMemoryApiTokenStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let local = User::new(Username::parse("linus").unwrap(), Role::Reader)
+            .with_email(Some(Email::parse("linus@example.com").unwrap()));
+        users
+            .save_with_password_hash(&local, &hash_password("LocalPass1").unwrap())
+            .await
+            .unwrap();
+        let oidc = service(users.clone(), groups, tokens.clone(), http);
+        oidc.provision(&claims(
+            "sub-linus",
+            "linus",
+            "linus@example.com",
+            &["ferrobox-reader"],
+            &[],
+        ))
+        .await
+        .unwrap();
+
+        crate::login::LoginUseCase::new(users, tokens)
+            .execute(Username::parse("linus").unwrap(), "LocalPass1")
+            .await
+            .expect("admin-set local password must still work after SSO link");
     }
 
     #[tokio::test]

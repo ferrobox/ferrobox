@@ -1,5 +1,6 @@
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::ids::{ApiTokenId, UserId};
@@ -76,6 +77,7 @@ pub struct ApiToken {
     user_id: UserId,
     name: ApiTokenName,
     prefix: String,
+    expires_at: Option<DateTime<Utc>>,
 }
 
 impl ApiToken {
@@ -87,6 +89,7 @@ impl ApiToken {
             user_id,
             name,
             prefix,
+            expires_at: None,
         }
     }
 
@@ -104,6 +107,7 @@ impl ApiToken {
             user_id,
             name,
             prefix,
+            expires_at: None,
         }
     }
 
@@ -130,6 +134,28 @@ impl ApiToken {
     #[must_use]
     pub fn prefix(&self) -> &str {
         &self.prefix
+    }
+
+    /// Momento en el que el token deja de ser válido, si tiene
+    /// caducidad.
+    #[must_use]
+    pub fn expires_at(&self) -> Option<DateTime<Utc>> {
+        self.expires_at
+    }
+
+    /// `true` si `now` es posterior o igual a [`Self::expires_at`].
+    #[must_use]
+    pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at.is_some_and(|at| now >= at)
+    }
+
+    /// Devuelve este token con una caducidad distinta.
+    #[must_use]
+    pub fn with_expires_at(self, expires_at: Option<DateTime<Utc>>) -> Self {
+        Self {
+            expires_at,
+            ..self
+        }
     }
 }
 
@@ -159,5 +185,30 @@ mod tests {
     #[test]
     fn accepts_a_valid_name() {
         assert!(ApiTokenName::parse("cargo-publish").is_ok());
+    }
+
+    #[test]
+    fn a_token_without_expiry_is_never_expired() {
+        let token = ApiToken::new(
+            UserId::new(),
+            ApiTokenName::parse("ci").unwrap(),
+            "fb_ab".into(),
+        );
+        assert!(!token.is_expired(Utc::now()));
+    }
+
+    #[test]
+    fn a_token_is_expired_at_or_after_its_deadline() {
+        let deadline = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let token = ApiToken::new(
+            UserId::new(),
+            ApiTokenName::parse("ci").unwrap(),
+            "fb_ab".into(),
+        )
+        .with_expires_at(Some(deadline));
+        assert!(token.is_expired(deadline));
+        assert!(!token.is_expired(deadline - chrono::TimeDelta::seconds(1)));
     }
 }

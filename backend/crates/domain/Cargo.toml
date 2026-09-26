@@ -11,3 +11,4 @@ workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 url.workspace = true
+chrono.workspace = true

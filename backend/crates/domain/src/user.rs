@@ -297,6 +297,7 @@ pub struct User {
     email: Option<Email>,
     role: Role,
     oidc: Option<OidcIdentity>,
+    robot: bool,
 }
 
 impl User {
@@ -311,6 +312,7 @@ impl User {
             email: None,
             role,
             oidc: None,
+            robot: false,
         }
     }
 
@@ -330,6 +332,7 @@ impl User {
             email,
             role,
             oidc: None,
+            robot: false,
         }
     }
 
@@ -389,6 +392,20 @@ impl User {
             oidc: identity,
             ..self
         }
+    }
+
+    /// `true` si es una cuenta robot (CI): no entra con contraseña ni
+    /// `SSO`, solo con tokens de API.
+    #[must_use]
+    pub fn is_robot(&self) -> bool {
+        self.robot
+    }
+
+    /// Marca o desmarca la cuenta como robot. Un robot no puede ser
+    /// [`Role::Admin`].
+    #[must_use]
+    pub fn with_robot(self, robot: bool) -> Self {
+        Self { robot, ..self }
     }
 }
 

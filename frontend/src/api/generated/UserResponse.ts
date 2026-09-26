@@ -13,4 +13,8 @@ email: string | null, role: RoleDto,
 /**
  * `true` si la cuenta está vinculada a un emisor `OIDC`.
  */
-sso: boolean, };
+sso: boolean, 
+/**
+ * `true` si es una cuenta robot (CI).
+ */
+robot: boolean, };

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::user::User;
 use ferrobox_ports::api_token_store::{ApiTokenStore, ApiTokenStoreError};
@@ -66,6 +67,9 @@ impl AuthenticateTokenUseCase {
         let Some(token) = self.api_token_store.find_by_token_hash(&token_hash).await? else {
             return Err(AuthenticateTokenError::InvalidToken);
         };
+        if token.is_expired(Utc::now()) {
+            return Err(AuthenticateTokenError::InvalidToken);
+        }
 
         let Some(user) = self.user_store.find_by_id(token.user_id()).await? else {
             return Err(AuthenticateTokenError::InvalidToken);
@@ -124,6 +128,35 @@ mod tests {
 
         let result = AuthenticateTokenUseCase::new(user_store, api_token_store)
             .execute("fb_deadbeef")
+            .await;
+
+        assert!(matches!(result, Err(AuthenticateTokenError::InvalidToken)));
+    }
+
+    #[tokio::test]
+    async fn rejects_an_expired_secret() {
+        let user_store = Arc::new(InMemoryUserStore::default());
+        let api_token_store = Arc::new(InMemoryApiTokenStore::default());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
+        user_store
+            .save_with_password_hash(&user, &hash_password("admin").unwrap())
+            .await
+            .unwrap();
+
+        let (secret, prefix) = generate_api_token_secret();
+        let token = ApiToken::new(
+            user.id(),
+            ApiTokenName::parse("old").unwrap(),
+            prefix,
+        )
+        .with_expires_at(Some(Utc::now() - chrono::TimeDelta::hours(1)));
+        api_token_store
+            .save(&token, &hash_api_token_secret(&secret))
+            .await
+            .unwrap();
+
+        let result = AuthenticateTokenUseCase::new(user_store, api_token_store)
+            .execute(&secret)
             .await;
 
         assert!(matches!(result, Err(AuthenticateTokenError::InvalidToken)));

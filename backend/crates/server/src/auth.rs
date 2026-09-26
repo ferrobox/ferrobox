@@ -83,6 +83,7 @@ pub(crate) async fn list_tokens(
                 name: record.token.name().to_string(),
                 prefix: record.token.prefix().to_string(),
                 created_at: record.created_at_rfc3339,
+                expires_at: record.expires_at_rfc3339,
             })
             .collect(),
     ))
@@ -96,7 +97,11 @@ pub(crate) async fn create_token(
     let name =
         ApiTokenName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
-    let result = state.create_api_token.execute(user.id(), name).await?;
+    let expires_at = parse_optional_expiry(payload.expires_at.as_deref())?;
+    let result = state
+        .create_api_token
+        .execute(user.id(), name, expires_at)
+        .await?;
 
     crate::audit::record(
         &state,
@@ -115,8 +120,20 @@ pub(crate) async fn create_token(
             name: result.token.name().to_string(),
             prefix: result.token.prefix().to_string(),
             token: result.plaintext_secret,
+            expires_at: result.token.expires_at().map(|at| at.to_rfc3339()),
         }),
     ))
+}
+
+pub(crate) fn parse_optional_expiry(
+    value: Option<&str>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    let Some(value) = value.map(str::trim).filter(|item| !item.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+        .map_err(|err| ApiError::BadRequest(format!("invalid expires_at: {err}")))?;
+    Ok(Some(parsed.with_timezone(&chrono::Utc)))
 }
 
 pub(crate) async fn revoke_token(
