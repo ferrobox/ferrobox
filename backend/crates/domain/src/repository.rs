@@ -1,5 +1,6 @@
 use std::fmt;
 
+use chrono::{DateTime, TimeDelta, Utc};
 use thiserror::Error;
 use url::Url;
 
@@ -155,6 +156,8 @@ pub struct Repository {
     name: RepositoryName,
     kind: RepositoryKind,
     ecosystem: PackageEcosystem,
+    prefetch_interval_hours: Option<u32>,
+    last_prefetch_at: Option<DateTime<Utc>>,
 }
 
 /// Motivos por los que una combinación de nombre y tipo no forma un
@@ -184,6 +187,8 @@ impl Repository {
             name,
             kind,
             ecosystem,
+            prefetch_interval_hours: None,
+            last_prefetch_at: None,
         })
     }
 
@@ -208,6 +213,8 @@ impl Repository {
             name,
             kind,
             ecosystem,
+            prefetch_interval_hours: None,
+            last_prefetch_at: None,
         })
     }
 
@@ -254,6 +261,49 @@ impl Repository {
         Self::validate(&kind)?;
         Ok(Self { kind, ..self })
     }
+
+    /// Horas entre refrescos programados del *upstream*. `None` = no hay
+    /// cron.
+    #[must_use]
+    pub fn prefetch_interval_hours(&self) -> Option<u32> {
+        self.prefetch_interval_hours
+    }
+
+    /// Último refresco programado, si ya corrió alguna vez.
+    #[must_use]
+    pub fn last_prefetch_at(&self) -> Option<DateTime<Utc>> {
+        self.last_prefetch_at
+    }
+
+    /// Intervalo y marca de último refresco. Solo tiene efecto en un
+    /// [`RepositoryKind::Mirror`].
+    #[must_use]
+    pub fn with_prefetch_schedule(
+        self,
+        interval_hours: Option<u32>,
+        last_prefetch_at: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            prefetch_interval_hours: interval_hours,
+            last_prefetch_at,
+            ..self
+        }
+    }
+
+    /// `true` si es un Mirror con intervalo y ya toca refrescar.
+    #[must_use]
+    pub fn prefetch_is_due(&self, now: DateTime<Utc>) -> bool {
+        if !matches!(self.kind, RepositoryKind::Mirror { .. }) {
+            return false;
+        }
+        let Some(hours) = self.prefetch_interval_hours.filter(|hours| *hours > 0) else {
+            return false;
+        };
+        match self.last_prefetch_at {
+            None => true,
+            Some(last) => now >= last + TimeDelta::hours(i64::from(hours)),
+        }
+    }
 }
 
 impl PartialEq for Repository {
@@ -272,6 +322,8 @@ impl std::hash::Hash for Repository {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
+
     use super::*;
 
     #[test]
@@ -391,5 +443,71 @@ mod tests {
 
         let result = original.with_kind(RepositoryKind::Alloy { members: vec![] });
         assert_eq!(result.err(), Some(RepositoryError::EmptyAlloy));
+    }
+
+    fn cargo_mirror() -> Repository {
+        Repository::new(
+            RepositoryName::parse("crates-io").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: url::Url::parse("https://index.example/").unwrap(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn prefetch_is_due_when_a_mirror_has_never_run() {
+        let now = DateTime::parse_from_rfc3339("2026-09-26T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let repository = cargo_mirror().with_prefetch_schedule(Some(1), None);
+
+        assert!(repository.prefetch_is_due(now));
+    }
+
+    #[test]
+    fn prefetch_is_due_after_the_interval_elapses() {
+        let last = DateTime::parse_from_rfc3339("2026-09-26T09:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-09-26T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let repository = cargo_mirror().with_prefetch_schedule(Some(1), Some(last));
+
+        assert!(repository.prefetch_is_due(now));
+    }
+
+    #[test]
+    fn prefetch_is_not_due_before_the_interval() {
+        let last = DateTime::parse_from_rfc3339("2026-09-26T09:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-09-26T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let repository = cargo_mirror().with_prefetch_schedule(Some(1), Some(last));
+
+        assert!(!repository.prefetch_is_due(now));
+    }
+
+    #[test]
+    fn prefetch_is_not_due_without_an_interval() {
+        let now = DateTime::parse_from_rfc3339("2026-09-26T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let forge = Repository::new(
+            RepositoryName::parse("local").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap()
+        .with_prefetch_schedule(Some(1), None);
+        let disabled = cargo_mirror().with_prefetch_schedule(Some(0), None);
+
+        assert!(!forge.prefetch_is_due(now));
+        assert!(!disabled.prefetch_is_due(now));
+        assert!(!cargo_mirror().prefetch_is_due(now));
     }
 }

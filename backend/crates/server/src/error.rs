@@ -23,6 +23,7 @@ use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
 use ferrobox_application::packaging::PackagingError;
+use ferrobox_application::mirror_schedule::SetMirrorScheduleError;
 use ferrobox_application::prefetch_package::PrefetchError;
 use ferrobox_application::promote_package::PromoteError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
@@ -109,6 +110,17 @@ impl From<PublishArtifactError> for ApiError {
             PublishArtifactError::ReadOnlyRepository => Self::BadRequest(err.to_string()),
             PublishArtifactError::Quota(inner) => inner.into(),
             other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<SetMirrorScheduleError> for ApiError {
+    fn from(err: SetMirrorScheduleError) -> Self {
+        match err {
+            SetMirrorScheduleError::NotAMirror(_) | SetMirrorScheduleError::InvalidInterval => {
+                Self::BadRequest(err.to_string())
+            }
+            SetMirrorScheduleError::Repository(inner) => inner.into(),
         }
     }
 }

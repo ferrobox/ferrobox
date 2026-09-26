@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
@@ -43,6 +44,30 @@ fn repository_kind_to_columns(kind: &RepositoryKind) -> (&'static str, serde_jso
     }
 }
 
+fn kind_data_for(repository: &Repository) -> serde_json::Value {
+    let (_, mut data) = repository_kind_to_columns(repository.kind());
+    if let Some(hours) = repository.prefetch_interval_hours() {
+        data["prefetch_interval_hours"] = json!(hours);
+    }
+    if let Some(at) = repository.last_prefetch_at() {
+        data["last_prefetch_at"] = json!(at.to_rfc3339());
+    }
+    data
+}
+
+fn apply_schedule(repository: Repository, kind_data: &serde_json::Value) -> Repository {
+    let hours = kind_data
+        .get("prefetch_interval_hours")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|hours| u32::try_from(hours).ok());
+    let last = kind_data
+        .get("last_prefetch_at")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    repository.with_prefetch_schedule(hours, last)
+}
+
 fn row_to_repository(
     id: Uuid,
     name: String,
@@ -85,6 +110,7 @@ fn row_to_repository(
         crate::ecosystem_column::from_column(ecosystem).map_err(backend_error)?;
 
     Repository::from_parts(RepositoryId::from(id), name, repository_kind, ecosystem)
+        .map(|repository| apply_schedule(repository, kind_data))
         .map_err(|err| backend_error(err.to_string()))
 }
 
@@ -101,7 +127,8 @@ fn translate_save_error(name: &RepositoryName, err: &sqlx::Error) -> RepositoryS
 #[async_trait]
 impl RepositoryStore for PostgresRepositoryStore {
     async fn save(&self, repository: &Repository) -> Result<(), RepositoryStoreError> {
-        let (kind, kind_data) = repository_kind_to_columns(repository.kind());
+        let (kind, _) = repository_kind_to_columns(repository.kind());
+        let kind_data = kind_data_for(repository);
         let ecosystem = crate::ecosystem_column::to_column(repository.ecosystem());
         let id: Uuid = repository.id().into();
 
@@ -194,6 +221,40 @@ mod tests {
     use sqlx::postgres::PgPoolOptions;
 
     use super::*;
+
+    #[test]
+    fn kind_data_round_trips_prefetch_schedule() {
+        let last = DateTime::parse_from_rfc3339("2026-09-26T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let repository = Repository::new(
+            RepositoryName::parse("crates-io").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: Url::parse("https://index.crates.io/").unwrap(),
+            },
+            PackageEcosystem::Cargo,
+        )
+        .unwrap()
+        .with_prefetch_schedule(Some(6), Some(last));
+
+        let data = kind_data_for(&repository);
+        assert_eq!(data["upstream"], "https://index.crates.io/");
+        assert_eq!(data["prefetch_interval_hours"], 6);
+        assert_eq!(data["last_prefetch_at"], last.to_rfc3339());
+
+        let restored = apply_schedule(
+            Repository::from_parts(
+                repository.id(),
+                repository.name().clone(),
+                repository.kind().clone(),
+                repository.ecosystem(),
+            )
+            .unwrap(),
+            &data,
+        );
+        assert_eq!(restored.prefetch_interval_hours(), Some(6));
+        assert_eq!(restored.last_prefetch_at(), Some(last));
+    }
 
     async fn pool_from_env() -> PgPool {
         let database_url =

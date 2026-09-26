@@ -56,6 +56,8 @@ pub enum AuditAction {
     PackagePromoted,
     /// Se cacheó un paquete desde el *upstream* de un `Mirror`.
     PackagePrefetched,
+    /// Se cambió el intervalo de refresco de un `Mirror`.
+    MirrorScheduleChanged,
     /// Se guardó la política de admisión.
     AdmissionPolicyChanged,
     /// Se guardó la política de retención.
@@ -226,6 +228,7 @@ impl AuditAction {
             Self::PackageUnyanked => "package.unyanked",
             Self::PackagePromoted => "package.promoted",
             Self::PackagePrefetched => "package.prefetched",
+            Self::MirrorScheduleChanged => "mirror.schedule_changed",
             Self::AdmissionPolicyChanged => "admission.policy_changed",
             Self::RetentionPolicyChanged => "retention.policy_changed",
             Self::RetentionApplied => "retention.applied",
@@ -266,6 +269,7 @@ impl AuditAction {
             "package.unyanked" => Ok(Self::PackageUnyanked),
             "package.promoted" => Ok(Self::PackagePromoted),
             "package.prefetched" => Ok(Self::PackagePrefetched),
+            "mirror.schedule_changed" => Ok(Self::MirrorScheduleChanged),
             "admission.policy_changed" => Ok(Self::AdmissionPolicyChanged),
             "retention.policy_changed" => Ok(Self::RetentionPolicyChanged),
             "retention.applied" => Ok(Self::RetentionApplied),
@@ -348,6 +352,7 @@ mod tests {
             AuditAction::PackageUnyanked,
             AuditAction::PackagePromoted,
             AuditAction::PackagePrefetched,
+            AuditAction::MirrorScheduleChanged,
             AuditAction::AdmissionPolicyChanged,
             AuditAction::RetentionPolicyChanged,
             AuditAction::RetentionApplied,

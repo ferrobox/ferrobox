@@ -15,4 +15,12 @@ access: RepositoryAccessDto,
  * `true` si hay grupos asignados; entonces solo esos grupos (y
  * los administradores) pueden verlo.
  */
-restricted: boolean, };
+restricted: boolean, 
+/**
+ * Horas entre refrescos programados del *upstream*. `null` = apagado.
+ */
+prefetch_interval_hours: number | null, 
+/**
+ * Último refresco programado, RFC 3339, o `null`.
+ */
+last_prefetch_at: string | null, };

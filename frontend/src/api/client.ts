@@ -21,6 +21,7 @@ import type { PrefetchPackageResponse } from "@/api/generated/PrefetchPackageRes
 import type { PromotePackageRequest } from "@/api/generated/PromotePackageRequest";
 import type { PromotePackageResponse } from "@/api/generated/PromotePackageResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
+import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
 import type { SearchResponse } from "@/api/generated/SearchResponse";
@@ -269,6 +270,16 @@ export function promotePackage(
 ): Promise<PromotePackageResponse> {
   return request<PromotePackageResponse>(`/repositories/${repositoryId}/promote`, {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function setMirrorSchedule(
+  repositoryId: string,
+  payload: SetMirrorScheduleRequest,
+): Promise<RepositoryResponse> {
+  return request<RepositoryResponse>(`/repositories/${repositoryId}/schedule`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

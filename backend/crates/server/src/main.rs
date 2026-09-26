@@ -311,6 +311,10 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             post(artifacts::prefetch_package),
         )
         .route(
+            "/repositories/{repository_id}/schedule",
+            put(repositories::set_mirror_schedule),
+        )
+        .route(
             "/artifacts/{artifact_id}",
             get(artifacts::download_artifact),
         )
@@ -515,6 +519,11 @@ fn build_app_state(
         quota.clone(),
         admission.clone(),
     );
+    spawn_mirror_prefetch_loop(
+        repository_store.clone(),
+        package_index_store.clone(),
+        packaging.clone(),
+    );
     let search_packages =
         SearchPackagesUseCase::new(repository_store.clone(), package_index_store.clone());
     let retention = RetentionService::new(
@@ -593,6 +602,30 @@ fn build_app_state(
             api_token_store,
         ),
     }
+}
+
+fn spawn_mirror_prefetch_loop(
+    repositories: Arc<PostgresRepositoryStore>,
+    package_index: Arc<PostgresPackageIndexStore>,
+    packaging: PackagingRegistry,
+) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(err) = ferrobox_application::mirror_schedule::run_due(
+                repositories.as_ref(),
+                package_index.as_ref(),
+                &packaging,
+                chrono::Utc::now(),
+            )
+            .await
+            {
+                eprintln!("ferrobox: scheduled mirror prefetch failed: {err}");
+            }
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
