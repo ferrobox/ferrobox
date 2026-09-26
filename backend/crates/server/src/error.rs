@@ -25,6 +25,7 @@ use ferrobox_application::manage_users::{
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::mirror_schedule::SetMirrorScheduleError;
 use ferrobox_application::prefetch_package::PrefetchError;
+use ferrobox_application::repository_bundle::BundleError;
 use ferrobox_application::promote_package::PromoteError;
 use ferrobox_application::publish_artifact::PublishArtifactError;
 use ferrobox_application::quota::QuotaError;
@@ -121,6 +122,23 @@ impl From<SetMirrorScheduleError> for ApiError {
                 Self::BadRequest(err.to_string())
             }
             SetMirrorScheduleError::Repository(inner) => inner.into(),
+        }
+    }
+}
+
+impl From<BundleError> for ApiError {
+    fn from(err: BundleError) -> Self {
+        match err {
+            BundleError::Alloy(_)
+            | BundleError::TargetNotForge(_)
+            | BundleError::InvalidBundle(_)
+            | BundleError::EcosystemMismatch { .. } => Self::BadRequest(err.to_string()),
+            BundleError::Repository(inner) => inner.into(),
+            BundleError::Quota(inner) => inner.into(),
+            BundleError::Persistence(_)
+            | BundleError::Artifact(_)
+            | BundleError::Index(_)
+            | BundleError::Storage(_) => Self::Internal(err.to_string()),
         }
     }
 }

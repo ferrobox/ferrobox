@@ -994,6 +994,20 @@ pub(crate) struct PrefetchPackageRequest {
     pub(crate) version: Option<String>,
 }
 
+/// Resultado de importar un archivo portable.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct ImportRepositoryResponse {
+    #[ts(type = "number")]
+    pub(crate) packages_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) artifacts_imported: u32,
+    #[ts(type = "number")]
+    pub(crate) skipped: u32,
+    #[ts(type = "number")]
+    pub(crate) bytes_copied: u64,
+}
+
 /// Resultado del prefetch.
 #[derive(Serialize, TS)]
 #[ts(export)]

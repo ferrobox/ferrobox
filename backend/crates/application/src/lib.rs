@@ -27,6 +27,9 @@ pub mod promote_package;
 /// Caso de uso: calentar la caché de un `Mirror` desde su *upstream*.
 pub mod prefetch_package;
 
+/// Exportar e importar un repositorio como archivo portable.
+pub mod repository_bundle;
+
 /// Intervalo y refresco programado de un `Mirror`.
 pub mod mirror_schedule;
 

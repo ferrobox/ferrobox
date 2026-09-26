@@ -113,6 +113,14 @@
     "membersEmpty": "No hay repositorios Forge o Mirror de este ecosistema. Crea uno primero para poder agregarlo.",
     "membersHint": "El orden de selección es el de resolución: el primer miembro gana si hay la misma versión en varios."
   },
+  "bundle": {
+    "export": "Exportar",
+    "import": "Importar",
+    "exported": "Descargado {{name}}",
+    "exportFailed": "No se pudo exportar el repositorio",
+    "imported": "Importados {{packages}} paquetes y {{artifacts}} artefactos",
+    "importFailed": "No se pudo importar el archivo"
+  },
   "upstream": {
     "npm": "Upstream (registro npm)",
     "pypi": "Upstream (índice simple PyPI)",
@@ -514,6 +522,8 @@
     "package.promoted": "Promovió un paquete",
     "package.prefetched": "Hizo prefetch de un paquete",
     "mirror.schedule_changed": "Cambió el intervalo de refresco del Mirror",
+    "repository.exported": "Exportó un repositorio",
+    "repository.imported": "Importó un repositorio",
     "admission.policy_changed": "Cambió la política de admisión",
     "retention.policy_changed": "Cambió la retención",
     "retention.applied": "Aplicó la retención",

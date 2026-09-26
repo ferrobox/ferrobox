@@ -37,6 +37,7 @@ use aws_sdk_s3::config::{
     BehaviorVersion, Credentials, Region, RequestChecksumCalculation, ResponseChecksumValidation,
 };
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 use config::Config;
@@ -109,6 +110,7 @@ struct AppState {
     delete_repository: DeleteRepositoryUseCase,
     delete_artifact: DeleteArtifactUseCase,
     promote_package: PromotePackageUseCase,
+    repository_bundle: ferrobox_application::repository_bundle::RepositoryBundleService,
     packaging: PackagingRegistry,
     assays: AssayService,
     admission: AdmissionService,
@@ -309,6 +311,15 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         .route(
             "/repositories/{repository_id}/prefetch",
             post(artifacts::prefetch_package),
+        )
+        .route(
+            "/repositories/{repository_id}/export",
+            get(artifacts::export_repository),
+        )
+        .route(
+            "/repositories/{repository_id}/import",
+            post(artifacts::import_repository)
+                .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
         .route(
             "/repositories/{repository_id}/schedule",
@@ -560,6 +571,14 @@ fn build_app_state(
             storage.clone(),
             quota.clone(),
         ),
+        repository_bundle:
+            ferrobox_application::repository_bundle::RepositoryBundleService::new(
+                repository_store.clone(),
+                artifact_store.clone(),
+                package_index_store.clone(),
+                storage.clone(),
+                quota.clone(),
+            ),
         delete_artifact: DeleteArtifactUseCase::new(
             repository_store.clone(),
             artifact_store,
