@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
+use crate::authz::require_token_read;
 use crate::dto::{PackageSearchHitResponse, SearchResponse};
 use crate::error::ApiError;
 
@@ -26,9 +27,10 @@ fn default_limit() -> usize {
 
 pub(crate) async fn search_packages(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, ApiError> {
+    require_token_read(&token)?;
     let visibility = state.groups.visibility(&user).await?;
     let hits = state.search_packages.execute(&query.q, query.limit).await?;
     Ok(Json(SearchResponse {

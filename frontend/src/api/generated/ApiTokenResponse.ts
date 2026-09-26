@@ -7,4 +7,8 @@ export type ApiTokenResponse = { id: string, name: string, prefix: string, creat
 /**
  * Caducidad RFC 3339, o `null` si no caduca.
  */
-expires_at: string | null, };
+expires_at: string | null, 
+/**
+ * Stored scopes. Empty = unrestricted.
+ */
+scopes: Array<string>, };

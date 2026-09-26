@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use ferrobox_domain::api_token::{ApiToken, ApiTokenName};
+use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenScopes};
 use ferrobox_domain::ids::UserId;
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use thiserror::Error;
@@ -42,23 +42,41 @@ impl CreateApiTokenUseCase {
         Self { api_token_store }
     }
 
-    /// Emite un token con el nombre indicado para el usuario dado.
+    /// Issues an unrestricted token (login, robots, existing callers).
     ///
     /// # Errors
     ///
-    /// Devuelve [`CreateApiTokenError::Persistence`] si el backend
-    /// falla.
+    /// [`CreateApiTokenError::Persistence`] if the store fails.
     pub async fn execute(
         &self,
         user_id: UserId,
         name: ApiTokenName,
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<CreateApiTokenResult, CreateApiTokenError> {
+        self.execute_with_scopes(user_id, name, expires_at, TokenScopes::unrestricted())
+            .await
+    }
+
+    /// Issues a token with the given scopes. Empty scopes inherit the
+    /// user's full role.
+    ///
+    /// # Errors
+    ///
+    /// [`CreateApiTokenError::Persistence`] if the store fails.
+    pub async fn execute_with_scopes(
+        &self,
+        user_id: UserId,
+        name: ApiTokenName,
+        expires_at: Option<DateTime<Utc>>,
+        scopes: TokenScopes,
+    ) -> Result<CreateApiTokenResult, CreateApiTokenError> {
         if expires_at.is_some_and(|at| at <= Utc::now()) {
             return Err(CreateApiTokenError::ExpiryInThePast);
         }
         let (plaintext_secret, prefix) = generate_api_token_secret();
-        let token = ApiToken::new(user_id, name, prefix).with_expires_at(expires_at);
+        let token = ApiToken::new(user_id, name, prefix)
+            .with_expires_at(expires_at)
+            .with_scopes(scopes);
         let token_hash = hash_api_token_secret(&plaintext_secret);
         self.api_token_store.save(&token, &token_hash).await?;
 
@@ -197,6 +215,31 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn create_persists_read_scope() {
+        let store = Arc::new(InMemoryApiTokenStore::default());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
+
+        let created = CreateApiTokenUseCase::new(store.clone())
+            .execute_with_scopes(
+                user.id(),
+                ApiTokenName::parse("readonly").unwrap(),
+                None,
+                TokenScopes::parse(["read"]).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(created.token.scopes().allows_read());
+        assert!(!created.token.scopes().allows_write());
+
+        let listed = ListApiTokensUseCase::new(store)
+            .execute(user.id())
+            .await
+            .unwrap();
+        assert_eq!(listed[0].token.scopes().as_stored(), "read");
     }
 
     #[tokio::test]

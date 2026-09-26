@@ -16,23 +16,23 @@ use crate::error::ApiError;
 
 pub(crate) async fn get_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<ReplicaPolicyResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_read(&state.groups, &user, repository_id).await?;
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
     let policy = state.replica.get_policy(repository_id).await?;
     Ok(Json(ReplicaPolicyResponse::from(policy)))
 }
 
 pub(crate) async fn save_policy(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<ReplicaPolicyRequest>,
 ) -> Result<Json<ReplicaPolicyResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let destination_id = payload
         .destination_id
         .as_deref()
@@ -70,11 +70,11 @@ pub(crate) async fn save_policy(
 
 pub(crate) async fn push_now(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<ReplicaPushResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let outcome = state.replica.push_now(repository_id).await?;
     crate::audit::record(
         &state,
@@ -97,11 +97,11 @@ pub(crate) async fn push_now(
 
 pub(crate) async fn pull_now(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<ReplicaPushResponse>, ApiError> {
     let repository_id = RepositoryId::from(repository_id);
-    require_repo_write(&state.groups, &user, repository_id).await?;
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
     let outcome = state.replica.pull_now(repository_id).await?;
     crate::audit::record(
         &state,

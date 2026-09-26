@@ -30,9 +30,9 @@ pub(crate) async fn record(
 
 pub(crate) async fn list_events(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<AuditEventResponse>>, ApiError> {
-    require_manage_users(&user)?;
+    require_manage_users(&user, &token)?;
     let events = state.audit.list().await?;
     Ok(Json(
         events.into_iter().map(AuditEventResponse::from).collect(),

@@ -455,6 +455,10 @@ pub(crate) struct CreateApiTokenRequest {
     /// Caducidad RFC 3339. `null` o ausente = no caduca.
     #[ts(optional)]
     pub(crate) expires_at: Option<String>,
+    /// `read` and/or `write`. Empty or omitted = unrestricted.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) scopes: Option<Vec<String>>,
 }
 
 /// Representación de un token de API (sin secreto) en listados.
@@ -467,6 +471,8 @@ pub(crate) struct ApiTokenResponse {
     pub(crate) created_at: String,
     /// Caducidad RFC 3339, o `null` si no caduca.
     pub(crate) expires_at: Option<String>,
+    /// Stored scopes. Empty = unrestricted.
+    pub(crate) scopes: Vec<String>,
 }
 
 /// Respuesta al crear un token de API: incluye el secreto una sola vez.
@@ -480,6 +486,18 @@ pub(crate) struct ApiTokenCreatedResponse {
     pub(crate) token: String,
     /// Caducidad RFC 3339, o `null` si no caduca.
     pub(crate) expires_at: Option<String>,
+    /// Stored scopes. Empty = unrestricted.
+    pub(crate) scopes: Vec<String>,
+}
+
+/// Labels stored on a token for the API (`read`, `write`).
+pub(crate) fn token_scope_labels(token: &ferrobox_domain::api_token::ApiToken) -> Vec<String> {
+    token
+        .scopes()
+        .as_labels()
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 /// Estado de un ensaye.

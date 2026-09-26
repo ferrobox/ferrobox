@@ -256,11 +256,17 @@ struct SearchResponse {
 /// como lo envía `cargo`) o con esquema `Bearer` / `Token`.
 async fn publish(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
-    require_repo_write(&state.groups, &user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
 
     let repository = state
         .get_repository
@@ -321,29 +327,36 @@ async fn download(
 
 async fn yank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<Json<YankResponse>, ApiError> {
-    set_yanked(&state, &user, repository_id, name, version, true).await
+    set_yanked(&state, user, &token, repository_id, name, version, true).await
 }
 
 async fn unyank(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<Json<YankResponse>, ApiError> {
-    set_yanked(&state, &user, repository_id, name, version, false).await
+    set_yanked(&state, user, &token, repository_id, name, version, false).await
 }
 
 async fn set_yanked(
     state: &AppState,
-    user: &ferrobox_domain::user::User,
+    user: ferrobox_domain::user::User,
+    token: &ferrobox_domain::api_token::ApiToken,
     repository_id: Uuid,
     name: String,
     version: String,
     yanked: bool,
 ) -> Result<Json<YankResponse>, ApiError> {
-    require_repo_write(&state.groups, user, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
 
     let repository = state
         .get_repository
@@ -362,7 +375,7 @@ async fn set_yanked(
 
     crate::audit::record(
         state,
-        user,
+        &user,
         if yanked {
             AuditAction::PackageYanked
         } else {

@@ -35,7 +35,20 @@ export function SecurityPage() {
   const revokeToken = useRevokeApiToken();
   const [name, setName] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [scopeRead, setScopeRead] = useState(false);
+  const [scopeWrite, setScopeWrite] = useState(false);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+
+  function selectedScopes(): string[] | undefined {
+    const scopes: string[] = [];
+    if (scopeRead) {
+      scopes.push("read");
+    }
+    if (scopeWrite) {
+      scopes.push("write");
+    }
+    return scopes.length === 0 ? undefined : scopes;
+  }
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,10 +56,13 @@ export function SecurityPage() {
       const result = await createToken.mutateAsync({
         name: name.trim(),
         expires_at: expiresAt.trim() ? new Date(expiresAt).toISOString() : undefined,
+        scopes: selectedScopes(),
       });
       setCreatedSecret(result.token);
       setName("");
       setExpiresAt("");
+      setScopeRead(false);
+      setScopeWrite(false);
       toast.success(t("security.created"));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("security.createFailed"));
@@ -89,6 +105,26 @@ export function SecurityPage() {
             onChange={(event) => setExpiresAt(event.target.value)}
           />
         </div>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("security.scopes")}</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={scopeRead}
+              onChange={(event) => setScopeRead(event.target.checked)}
+            />
+            {t("security.scopeRead")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={scopeWrite}
+              onChange={(event) => setScopeWrite(event.target.checked)}
+            />
+            {t("security.scopeWrite")}
+          </label>
+          <p className="text-xs text-muted-foreground">{t("security.scopeHint")}</p>
+        </fieldset>
         <Button type="submit" disabled={createToken.isPending || name.trim().length === 0}>
           <KeyRound />
           {createToken.isPending ? t("security.creating") : t("security.createToken")}
@@ -133,6 +169,7 @@ export function SecurityPage() {
                 <TableHead>{t("security.prefix")}</TableHead>
                 <TableHead>{t("security.createdAt")}</TableHead>
                 <TableHead>{t("security.expiresAt")}</TableHead>
+                <TableHead>{t("security.scopes")}</TableHead>
                 <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -148,6 +185,9 @@ export function SecurityPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {token.expires_at ? formatCreatedAt(token.expires_at) : t("security.never")}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {formatScopes(token.scopes, t)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -207,4 +247,21 @@ function formatCreatedAt(value: string): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+function formatScopes(scopes: string[], t: (key: string) => string): string {
+  if (scopes.length === 0) {
+    return t("security.scopeUnrestricted");
+  }
+  return scopes
+    .map((scope) => {
+      if (scope === "read") {
+        return t("security.scopeRead");
+      }
+      if (scope === "write") {
+        return t("security.scopeWrite");
+      }
+      return scope;
+    })
+    .join(", ");
 }

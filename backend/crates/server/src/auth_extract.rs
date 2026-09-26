@@ -177,7 +177,6 @@ pub(crate) fn oci_unauthorized_response(
 #[derive(Clone)]
 pub(crate) struct AuthenticatedUser {
     pub(crate) user: User,
-    #[allow(dead_code)]
     pub(crate) token: ApiToken,
 }
 
