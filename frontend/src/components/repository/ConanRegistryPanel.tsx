@@ -72,10 +72,12 @@ export function ConanRegistryPanel({
       ? t("registry.conanMirrorBody")
       : t("registry.conan");
 
-  const remote = `conan remote add ferrobox ${remoteUrl}`;
+  const remote = `conan remote add ferrobox ${remoteUrl}\nconan remote update ferrobox --url=${remoteUrl}`;
   const login = `conan remote login ferrobox __token__`;
   const upload = `conan new cmake_lib -d name=hello -d version=0.1\nconan create .\nconan upload "hello/0.1" -r ferrobox -c`;
-  const install = `conan install --requires=hello/0.1 -r ferrobox`;
+  const install = isMirror
+    ? `conan install --requires=zlib/1.3.1 -r ferrobox`
+    : `conan install --requires=hello/0.1 -r ferrobox`;
 
   const body = (
     <div className="space-y-5">
