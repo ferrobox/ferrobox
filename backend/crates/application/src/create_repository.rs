@@ -12,9 +12,9 @@ use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 /// Motivos por los que crear un repositorio puede fallar.
 #[derive(Debug, Error)]
 pub enum CreateRepositoryError {
-    /// Un `Mirror` solo está soportado para Cargo, npm, `PyPI`, OCI y Helm.
+    /// Un `Mirror` no está soportado para `generic`.
     #[error(
-        "mirror repositories currently require the cargo, npm, pypi, oci or helm ecosystem"
+        "mirror repositories currently require the cargo, npm, pypi, oci, helm, conan, maven, nuget or go ecosystem"
     )]
     UnsupportedMirrorEcosystem,
 
@@ -117,6 +117,7 @@ impl CreateRepositoryUseCase {
                         | PackageEcosystem::PyPi
                         | PackageEcosystem::Oci
                         | PackageEcosystem::Helm
+                        | PackageEcosystem::Conan
                         | PackageEcosystem::Maven
                         | PackageEcosystem::Nuget
                         | PackageEcosystem::Go
@@ -319,6 +320,32 @@ mod tests {
 
         let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
         assert!(matches!(repository.kind(), RepositoryKind::Forge));
+        assert_eq!(repository.ecosystem(), PackageEcosystem::Conan);
+    }
+
+    #[tokio::test]
+    async fn creates_a_conan_mirror() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let use_case = CreateRepositoryUseCase::new(repository_store.clone());
+
+        let id = use_case
+            .execute(
+                RepositoryName::parse("conan-center").unwrap(),
+                PackageEcosystem::Conan,
+                CreateRepositoryKind::Mirror {
+                    upstream: "https://center2.conan.io".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let repository = repository_store.find_by_id(id).await.unwrap().unwrap();
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => {
+                assert_eq!(upstream.as_str(), "https://center2.conan.io/");
+            }
+            other => panic!("expected mirror, got {other:?}"),
+        }
         assert_eq!(repository.ecosystem(), PackageEcosystem::Conan);
     }
 
