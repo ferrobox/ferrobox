@@ -221,7 +221,9 @@ async fn main() {
     let addr: SocketAddr = config.bind_address.parse().expect("invalid bind address");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .expect("failed to bind to address");
+        .unwrap_or_else(|err| {
+            panic!("failed to bind {addr}: {err}");
+        });
 
     println!("FerroBox escuchando en http://{addr}");
 

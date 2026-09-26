@@ -108,11 +108,13 @@ impl Config {
 
 /// Carga ficheros `.env` y **pisa** variables ya exportadas en el shell.
 ///
-/// El último fichero gana. `backend/.env` (junto al crate del servidor)
-/// se aplica al final para que `cargo run` no se quede con un
-/// `S3_BUCKET` antiguo exportado en la terminal. El bucket no se lee
-/// de la base de datos.
+/// Si `FERROBOX_ENV_FILE` apunta a un fichero (`.env_a`, `.env_b`),
+/// solo se carga ese: dos `cargo run` no se pisan el `.env` compartido.
+/// Si no, el último candidato gana. `backend/.env` (junto al crate del
+/// servidor) se aplica al final para que un `S3_BUCKET` exportado en
+/// la terminal no gane. El bucket no se lee de la base de datos.
 pub fn load_dotenv() -> Vec<PathBuf> {
+    let explicit = optional_env("FERROBOX_ENV_FILE");
     let mut loaded = Vec::new();
     for path in dotenv_candidates() {
         let Ok(canonical) = path.canonicalize() else {
@@ -125,10 +127,22 @@ pub fn load_dotenv() -> Vec<PathBuf> {
             loaded.push(canonical);
         }
     }
+    if let Some(path) = explicit {
+        if loaded.is_empty() {
+            panic!("ferrobox: FERROBOX_ENV_FILE={path} was not found or could not be read");
+        }
+    }
     loaded
 }
 
 fn dotenv_candidates() -> Vec<PathBuf> {
+    dotenv_candidates_from(optional_env("FERROBOX_ENV_FILE").as_deref())
+}
+
+fn dotenv_candidates_from(explicit: Option<&str>) -> Vec<PathBuf> {
+    if let Some(path) = explicit {
+        return vec![PathBuf::from(path)];
+    }
     let mut paths = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         paths.push(cwd.join(".env"));
@@ -189,7 +203,7 @@ mod tests {
 
     #[test]
     fn crate_dotenv_is_backend_env() {
-        let last = dotenv_candidates()
+        let last = dotenv_candidates_from(None)
             .pop()
             .expect("the crate-relative backend/.env is always a candidate");
         assert!(
@@ -197,6 +211,12 @@ mod tests {
             "expected crates/server/../../.env (backend/.env), got {}",
             last.display()
         );
+    }
+
+    #[test]
+    fn explicit_env_file_is_the_only_candidate() {
+        let paths = dotenv_candidates_from(Some(".env_b"));
+        assert_eq!(paths, vec![PathBuf::from(".env_b")]);
     }
 
     #[test]
