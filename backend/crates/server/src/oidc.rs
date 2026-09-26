@@ -123,6 +123,14 @@ pub(crate) async fn start(State(state): State<Arc<AppState>>) -> Result<Redirect
     Ok(Redirect::temporary(&url))
 }
 
+pub(crate) async fn logout(State(state): State<Arc<AppState>>) -> Result<Redirect, ApiError> {
+    let oidc = state.oidc.as_ref().ok_or(ApiError::NotFound(
+        "single sign-on is not configured".to_string(),
+    ))?;
+    let url = oidc.logout_url().await?;
+    Ok(Redirect::temporary(&url))
+}
+
 pub(crate) async fn callback(
     State(state): State<Arc<AppState>>,
     Query(query): Query<OidcCallbackQuery>,

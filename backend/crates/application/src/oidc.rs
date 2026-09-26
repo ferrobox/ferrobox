@@ -232,6 +232,8 @@ struct OidcDiscovery {
     authorization_endpoint: String,
     token_endpoint: String,
     jwks_uri: String,
+    #[serde(default)]
+    end_session_endpoint: Option<String>,
 }
 
 /// Servicio de inicio de sesión federado.
@@ -324,6 +326,38 @@ impl OidcLoginService {
             query.append_pair("code_challenge", &challenge);
             query.append_pair("code_challenge_method", "S256");
             query.append_pair("prompt", "login");
+        }
+        Ok(url.to_string())
+    }
+
+    /// URL de *logout* en el `IdP` (RP-initiated). Si el descubrimiento
+    /// no publica `end_session_endpoint`, devuelve el destino local.
+    ///
+    /// # Errors
+    ///
+    /// [`OidcError`] si el descubrimiento del `IdP` falla.
+    ///
+    /// # Panics
+    ///
+    /// Si el mutex de descubrimiento está envenenado.
+    pub async fn logout_url(&self) -> Result<String, OidcError> {
+        let discovery = self.discovery().await?;
+        let Some(endpoint) = discovery
+            .end_session_endpoint
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(self.settings.success_redirect.clone());
+        };
+        let mut url = Url::parse(&endpoint).map_err(|err| {
+            OidcError::InvalidToken(format!("invalid end_session endpoint: {err}"))
+        })?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("client_id", &self.settings.client_id);
+            query.append_pair(
+                "post_logout_redirect_uri",
+                self.settings.success_redirect(),
+            );
         }
         Ok(url.to_string())
     }
@@ -735,7 +769,7 @@ fn trim_to(value: &str, max: usize) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use ferrobox_domain::group::GroupName;
+    use ferrobox_domain::group::{Group, GroupName};
     use ferrobox_domain::user::Username;
     use serde_json::json;
 
@@ -915,6 +949,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn keeps_locally_granted_groups_that_the_idp_does_not_list() {
+        let users = Arc::new(InMemoryUserStore::default());
+        let groups = Arc::new(InMemoryGroupStore::default());
+        let tokens = Arc::new(InMemoryApiTokenStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        let oidc = service(users.clone(), groups.clone(), tokens, http);
+
+        let first = oidc
+            .provision(&claims(
+                "sub-ada",
+                "ada",
+                "ada@example.com",
+                &["ferrobox-developer"],
+                &["platform"],
+            ))
+            .await
+            .unwrap();
+        let local = Group::new(GroupName::parse("ops").unwrap());
+        groups.save(&local).await.unwrap();
+        groups
+            .add_member(local.id(), first.user.id())
+            .await
+            .unwrap();
+
+        let second = oidc
+            .provision(&claims(
+                "sub-ada",
+                "ada",
+                "ada@example.com",
+                &["ferrobox-developer"],
+                &["platform"],
+            ))
+            .await
+            .unwrap();
+
+        assert!(!second.created);
+        assert_eq!(
+            groups.members(local.id()).await.unwrap(),
+            vec![second.user.id()]
+        );
+        let platform = groups
+            .find_by_name(&GroupName::parse("platform").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            groups.members(platform.id()).await.unwrap(),
+            vec![second.user.id()]
+        );
+    }
+
+    #[tokio::test]
     async fn start_redirects_to_the_authorization_endpoint_with_pkce() {
         let users = Arc::new(InMemoryUserStore::default());
         let groups = Arc::new(InMemoryGroupStore::default());
@@ -927,7 +1013,8 @@ mod tests {
                 "issuer": "https://idp.example/realms/ferrobox",
                 "authorization_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/auth",
                 "token_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/token",
-                "jwks_uri": "https://idp.example/realms/ferrobox/protocol/openid-connect/certs"
+                "jwks_uri": "https://idp.example/realms/ferrobox/protocol/openid-connect/certs",
+                "end_session_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/logout"
             }))
             .unwrap(),
         );
@@ -940,6 +1027,33 @@ mod tests {
         assert!(url.contains("client_id=ferrobox"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("prompt=login"));
+    }
+
+    #[tokio::test]
+    async fn logout_url_uses_the_discovered_end_session_endpoint() {
+        let users = Arc::new(InMemoryUserStore::default());
+        let groups = Arc::new(InMemoryGroupStore::default());
+        let tokens = Arc::new(InMemoryApiTokenStore::default());
+        let http = Arc::new(InMemoryHttpClient::default());
+        http.stub(
+            "https://idp.example/realms/ferrobox/.well-known/openid-configuration",
+            200,
+            serde_json::to_vec(&json!({
+                "issuer": "https://idp.example/realms/ferrobox",
+                "authorization_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/auth",
+                "token_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/token",
+                "jwks_uri": "https://idp.example/realms/ferrobox/protocol/openid-connect/certs",
+                "end_session_endpoint": "https://idp.example/realms/ferrobox/protocol/openid-connect/logout"
+            }))
+            .unwrap(),
+        );
+        let oidc = service(users, groups, tokens, http);
+        let url = oidc.logout_url().await.unwrap();
+        assert!(url.starts_with(
+            "https://idp.example/realms/ferrobox/protocol/openid-connect/logout?"
+        ));
+        assert!(url.contains("client_id=ferrobox"));
+        assert!(url.contains("post_logout_redirect_uri="));
     }
 
     #[tokio::test]

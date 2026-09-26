@@ -83,11 +83,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    const federated = session?.user.sso === true;
     api.setStoredToken(null);
     setSession(null);
     setToken(null);
     setIsLoading(false);
-  }, []);
+    if (federated) {
+      window.location.assign("/api/auth/oidc/logout");
+    }
+  }, [session]);
 
   const updateCurrentUser = useCallback((user: UserResponse) => {
     setSession((current) => (current ? { ...current, user } : current));

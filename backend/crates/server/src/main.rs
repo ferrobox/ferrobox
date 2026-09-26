@@ -388,6 +388,7 @@ fn build_api_router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/auth/oidc", get(oidc::status))
         .route("/auth/oidc/start", get(oidc::start))
         .route("/auth/oidc/callback", get(oidc::callback))
+        .route("/auth/oidc/logout", get(oidc::logout))
         .merge(protocol_public_router());
     let protected = with_auth(
         admin_protected_router().merge(protocol_write_router()),
