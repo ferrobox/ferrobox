@@ -69,7 +69,7 @@ export function ConanRegistryPanel({
   const introBody = isAlloy
     ? t("registry.conanAlloyBody")
     : isMirror
-      ? t("registry.conanMirrorPending")
+      ? t("registry.conanMirrorBody")
       : t("registry.conan");
 
   const remote = `conan remote add ferrobox ${remoteUrl}`;

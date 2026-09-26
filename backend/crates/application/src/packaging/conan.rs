@@ -5,8 +5,8 @@
 //! Referencia: rutas de `conan/internal/rest/rest_routes.py` (Conan 2).
 //!
 //! Cubre **Forge** (subida de receta y binarios, latest, listado de
-//! ficheros, búsqueda y yank) y lecturas en **Alloy**. Un `Mirror`
-//! Conan queda para un corte posterior.
+//! ficheros, búsqueda y yank), **Mirror** (caché *pull-through* de un
+//! remoto Conan v2) y lecturas en **Alloy**.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -21,9 +21,11 @@ use ferrobox_domain::package_coordinate::{
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
+use ferrobox_ports::http_client::HttpClient;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
+use url::Url;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,6 +43,7 @@ pub struct ConanPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
     storage: Arc<dyn StoragePort>,
+    http_client: Arc<dyn HttpClient>,
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
@@ -53,12 +56,14 @@ impl ConanPackagingStrategy {
         artifact_store: Arc<dyn ArtifactStore>,
         package_index_store: Arc<dyn PackageIndexStore>,
         storage: Arc<dyn StoragePort>,
+        http_client: Arc<dyn HttpClient>,
         repository_store: Arc<dyn RepositoryStore>,
     ) -> Self {
         Self {
             artifact_store,
             package_index_store,
             storage,
+            http_client,
             repository_store,
             assays: None,
             quota: None,
@@ -94,6 +99,13 @@ impl ConanPackagingStrategy {
             repository.kind(),
             RepositoryKind::Mirror { .. } | RepositoryKind::Alloy { .. }
         )
+    }
+
+    fn mirror_upstream(repository: &Repository) -> Option<&Url> {
+        match repository.kind() {
+            RepositoryKind::Mirror { upstream } => Some(upstream),
+            _ => None,
+        }
     }
 
     async fn resolve_read_targets(
@@ -165,8 +177,22 @@ impl ConanPackagingStrategy {
         Ok(())
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn metadata_one(
+        &self,
+        repository: &Repository,
+        resource: &ConanResource,
+    ) -> Result<Bytes, PackagingError> {
+        match self.metadata_local(repository, resource).await {
+            Ok(body) => Ok(body),
+            Err(PackagingError::PackageNotFound(_) | PackagingError::VersionNotFound(_)) => {
+                self.pull_metadata_from_upstream(repository, resource).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn metadata_local(
         &self,
         repository: &Repository,
         resource: &ConanResource,
@@ -352,6 +378,20 @@ impl ConanPackagingStrategy {
         repository: &Repository,
         resource: &ConanResource,
     ) -> Result<Bytes, PackagingError> {
+        match self.get_stored_file(repository, resource).await {
+            Ok(body) => Ok(body),
+            Err(PackagingError::FileNotFound(_) | PackagingError::PackageNotFound(_)) => {
+                self.pull_file_from_upstream(repository, resource).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn get_stored_file(
+        &self,
+        repository: &Repository,
+        resource: &ConanResource,
+    ) -> Result<Bytes, PackagingError> {
         let (artifact_id, filename) = match resource {
             ConanResource::RecipeFile {
                 name,
@@ -422,6 +462,109 @@ impl ConanPackagingStrategy {
                 .map_err(|_| PackagingError::FileNotFound(filename.clone()))?,
         );
         Ok(self.storage.get(&storage_key_for(artifact_id)).await?)
+    }
+
+    async fn pull_metadata_from_upstream(
+        &self,
+        repository: &Repository,
+        resource: &ConanResource,
+    ) -> Result<Bytes, PackagingError> {
+        let Some(upstream) = Self::mirror_upstream(repository) else {
+            return Err(PackagingError::PackageNotFound(resource.path_hint()));
+        };
+        let url = join_conan_upstream(upstream, &resource.api_path());
+        let response = self.http_client.get(&url).await?;
+        if !response.is_success() {
+            return Err(PackagingError::PackageNotFound(resource.path_hint()));
+        }
+        Ok(response.body)
+    }
+
+    async fn pull_file_from_upstream(
+        &self,
+        repository: &Repository,
+        resource: &ConanResource,
+    ) -> Result<Bytes, PackagingError> {
+        let Some(upstream) = Self::mirror_upstream(repository) else {
+            return Err(PackagingError::FileNotFound(resource.path_hint()));
+        };
+        let url = join_conan_upstream(upstream, &resource.api_path());
+        let response = self.http_client.get(&url).await?;
+        if !response.is_success() {
+            return Err(PackagingError::FileNotFound(resource.path_hint()));
+        }
+        let body = response.body;
+        self.cache_upstream_file(repository, resource, body.clone())
+            .await?;
+        Ok(body)
+    }
+
+    async fn cache_upstream_file(
+        &self,
+        repository: &Repository,
+        resource: &ConanResource,
+        body: Bytes,
+    ) -> Result<(), PackagingError> {
+        let checksum = sha256_checksum(&body);
+        let artifact = Artifact::new(repository.id(), checksum, body.len() as u64);
+        ensure_quota(self.quota.as_ref(), repository.id(), body.len() as u64).await?;
+        self.storage
+            .put(&storage_key_for(artifact.id()), body)
+            .await?;
+        self.artifact_store.save(&artifact).await?;
+        let artifact_id = artifact.id().to_string();
+        let time = now_stamp();
+        match resource {
+            ConanResource::RecipeFile {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                filename,
+            } => {
+                self.put_recipe_file(
+                    repository,
+                    name.clone(),
+                    version.clone(),
+                    user.clone(),
+                    channel.clone(),
+                    rrev.clone(),
+                    filename.clone(),
+                    artifact_id,
+                    time,
+                    artifact.id(),
+                )
+                .await
+            }
+            ConanResource::PackageFile {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                pkgid,
+                prev,
+                filename,
+            } => {
+                self.put_package_file(
+                    repository,
+                    name.clone(),
+                    version.clone(),
+                    user.clone(),
+                    channel.clone(),
+                    rrev.clone(),
+                    pkgid.clone(),
+                    prev.clone(),
+                    filename.clone(),
+                    artifact_id,
+                    time,
+                    artifact.id(),
+                )
+                .await
+            }
+            _ => Ok(()),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -763,6 +906,104 @@ impl ConanResource {
 
     fn is_file(&self) -> bool {
         matches!(self, Self::RecipeFile { .. } | Self::PackageFile { .. })
+    }
+
+    fn api_path(&self) -> String {
+        match self {
+            Self::RecipeLatest {
+                name,
+                version,
+                user,
+                channel,
+            } => format!("{name}/{version}/{user}/{channel}/latest"),
+            Self::RecipeRevisions {
+                name,
+                version,
+                user,
+                channel,
+            } => format!("{name}/{version}/{user}/{channel}/revisions"),
+            Self::RecipeFiles {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+            } => format!("{name}/{version}/{user}/{channel}/revisions/{rrev}/files"),
+            Self::RecipeFile {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                filename,
+            } => format!("{name}/{version}/{user}/{channel}/revisions/{rrev}/files/{filename}"),
+            Self::PackageLatest {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                pkgid,
+            } => format!(
+                "{name}/{version}/{user}/{channel}/revisions/{rrev}/packages/{pkgid}/latest"
+            ),
+            Self::PackageRevisions {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                pkgid,
+            } => format!(
+                "{name}/{version}/{user}/{channel}/revisions/{rrev}/packages/{pkgid}/revisions"
+            ),
+            Self::PackageFiles {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                pkgid,
+                prev,
+            } => format!(
+                "{name}/{version}/{user}/{channel}/revisions/{rrev}/packages/{pkgid}/revisions/{prev}/files"
+            ),
+            Self::PackageFile {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+                pkgid,
+                prev,
+                filename,
+            } => format!(
+                "{name}/{version}/{user}/{channel}/revisions/{rrev}/packages/{pkgid}/revisions/{prev}/files/{filename}"
+            ),
+            Self::RecipeSearch {
+                name,
+                version,
+                user,
+                channel,
+            } => format!("{name}/{version}/{user}/{channel}/search"),
+            Self::RecipeRevisionSearch {
+                name,
+                version,
+                user,
+                channel,
+                rrev,
+            } => format!("{name}/{version}/{user}/{channel}/revisions/{rrev}/search"),
+        }
+    }
+}
+
+fn join_conan_upstream(upstream: &Url, rest: &str) -> String {
+    let base = upstream.as_str().trim_end_matches('/');
+    let rest = rest.trim_matches('/');
+    if base.ends_with("/v2/conans") {
+        format!("{base}/{rest}")
+    } else {
+        format!("{base}/v2/conans/{rest}")
     }
 }
 
@@ -1368,10 +1609,12 @@ mod tests {
     use ferrobox_domain::package_coordinate::PackageEcosystem;
     use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
     use ferrobox_ports::repository_store::RepositoryStore;
+    use url::Url;
 
     use super::*;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryPackageIndexStore, InMemoryRepositoryStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryHttpClient, InMemoryPackageIndexStore,
+        InMemoryRepositoryStore, InMemoryStorage,
     };
 
     fn strategy() -> ConanPackagingStrategy {
@@ -1379,6 +1622,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
             Arc::new(InMemoryRepositoryStore::default()),
         )
     }
@@ -1498,6 +1742,7 @@ mod tests {
             artifact_store,
             index,
             storage,
+            Arc::new(InMemoryHttpClient::default()),
             Arc::new(InMemoryRepositoryStore::default()),
         );
         let source = conan_forge("conan-dev");
@@ -1662,6 +1907,7 @@ mod tests {
             artifact_store,
             package_index_store,
             storage,
+            Arc::new(InMemoryHttpClient::default()),
             repository_store.clone(),
         );
         let forge = conan_forge("conan-member");
@@ -1711,5 +1957,76 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, PackagingError::ReadOnlyRepository));
+    }
+
+    #[test]
+    fn join_conan_upstream_adds_v2_prefix_unless_already_present() {
+        let host = Url::parse("https://center.conan.io").unwrap();
+        assert_eq!(
+            join_conan_upstream(&host, "hello/0.1/_/_/latest"),
+            "https://center.conan.io/v2/conans/hello/0.1/_/_/latest"
+        );
+        let prefixed = Url::parse("https://center.conan.io/v2/conans/").unwrap();
+        assert_eq!(
+            join_conan_upstream(&prefixed, "hello/0.1/_/_/latest"),
+            "https://center.conan.io/v2/conans/hello/0.1/_/_/latest"
+        );
+    }
+
+    #[tokio::test]
+    async fn mirror_caches_upstream_recipe_file() {
+        let http = InMemoryHttpClient::default();
+        http.stub(
+            "https://center.conan.io/v2/conans/hello/0.1/_/_/latest",
+            200,
+            Bytes::from_static(br#"{"revision":"rrev1","time":"2026-01-01T00:00:00Z"}"#),
+        );
+        http.stub(
+            "https://center.conan.io/v2/conans/hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+            200,
+            Bytes::from_static(b"from-upstream"),
+        );
+        let strategy = ConanPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(http),
+            Arc::new(InMemoryRepositoryStore::default()),
+        );
+        let repository = Repository::new(
+            RepositoryName::parse("conan-center").unwrap(),
+            RepositoryKind::Mirror {
+                upstream: "https://center.conan.io".parse().unwrap(),
+            },
+            PackageEcosystem::Conan,
+        )
+        .unwrap();
+
+        let latest: serde_json::Value = serde_json::from_slice(
+            &strategy
+                .protocol_metadata(&repository, "hello/0.1/_/_/latest")
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(latest["revision"], "rrev1");
+
+        let body = strategy
+            .get_protocol_file(
+                &repository,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+            )
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), b"from-upstream");
+
+        let cached = strategy
+            .get_protocol_file(
+                &repository,
+                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
+            )
+            .await
+            .unwrap();
+        assert_eq!(cached.as_ref(), b"from-upstream");
     }
 }

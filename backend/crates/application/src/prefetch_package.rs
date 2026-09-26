@@ -30,7 +30,7 @@ pub enum PrefetchError {
     #[error("cannot prefetch into a {0} repository")]
     NotAMirror(&'static str),
 
-    /// El ecosistema no tiene pull-through (genérico, Conan).
+    /// El ecosistema no soporta prefetch (genérico, Conan).
     #[error("prefetch is not supported for the '{0}' ecosystem")]
     UnsupportedEcosystem(&'static str),
 
