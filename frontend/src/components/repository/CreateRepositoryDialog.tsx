@@ -37,6 +37,7 @@ const MIRROR_ECOSYSTEMS: readonly PackageEcosystemDto[] = [
   "pypi",
   "oci",
   "helm",
+  "conan",
   "maven",
   "nuget",
   "go",
@@ -47,6 +48,7 @@ const DEFAULT_UPSTREAM = {
   pypi: "https://pypi.org/simple/",
   oci: "https://registry-1.docker.io",
   helm: "https://registry-1.docker.io",
+  conan: "https://center2.conan.io",
   maven: "https://repo1.maven.org/maven2/",
   nuget: "https://api.nuget.org/v3/index.json",
   go: "https://proxy.golang.org",
@@ -56,7 +58,7 @@ type KindChoice = "forge" | "mirror" | "alloy";
 
 function isMirrorEcosystem(
   ecosystem: PackageEcosystemDto,
-): ecosystem is "cargo" | "npm" | "pypi" | "oci" | "helm" | "maven" | "nuget" | "go" {
+): ecosystem is "cargo" | "npm" | "pypi" | "oci" | "helm" | "conan" | "maven" | "nuget" | "go" {
   return MIRROR_ECOSYSTEMS.includes(ecosystem);
 }
 
@@ -72,6 +74,9 @@ function defaultUpstreamFor(ecosystem: PackageEcosystemDto): string {
   }
   if (ecosystem === "helm") {
     return DEFAULT_UPSTREAM.helm;
+  }
+  if (ecosystem === "conan") {
+    return DEFAULT_UPSTREAM.conan;
   }
   if (ecosystem === "maven") {
     return DEFAULT_UPSTREAM.maven;
@@ -94,6 +99,7 @@ function isKnownDefaultUpstream(value: string): boolean {
     trimmed === DEFAULT_UPSTREAM.pypi ||
     trimmed === DEFAULT_UPSTREAM.oci ||
     trimmed === DEFAULT_UPSTREAM.helm ||
+    trimmed === DEFAULT_UPSTREAM.conan ||
     trimmed === DEFAULT_UPSTREAM.maven ||
     trimmed === DEFAULT_UPSTREAM.nuget ||
     trimmed === DEFAULT_UPSTREAM.go
@@ -288,13 +294,15 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                         ? t("upstream.oci")
                         : ecosystem === "helm"
                           ? t("upstream.helm")
-                          : ecosystem === "maven"
-                            ? t("upstream.maven")
-                            : ecosystem === "nuget"
-                              ? t("upstream.nuget")
-                              : ecosystem === "go"
-                                ? t("upstream.go")
-                                : t("upstream.cargo")}
+                          : ecosystem === "conan"
+                            ? t("upstream.conan")
+                            : ecosystem === "maven"
+                              ? t("upstream.maven")
+                              : ecosystem === "nuget"
+                                ? t("upstream.nuget")
+                                : ecosystem === "go"
+                                  ? t("upstream.go")
+                                  : t("upstream.cargo")}
                 </Label>
                 <Input
                   id="repository-upstream"
@@ -311,13 +319,15 @@ export function CreateRepositoryDialog({ compact = false }: { compact?: boolean 
                         ? t("upstream.ociHint")
                         : ecosystem === "helm"
                           ? t("upstream.helmHint")
-                          : ecosystem === "maven"
-                            ? t("upstream.mavenHint")
-                            : ecosystem === "nuget"
-                              ? t("upstream.nugetHint")
-                              : ecosystem === "go"
-                                ? t("upstream.goHint")
-                                : t("upstream.cargoHint")}
+                          : ecosystem === "conan"
+                            ? t("upstream.conanHint")
+                            : ecosystem === "maven"
+                              ? t("upstream.mavenHint")
+                              : ecosystem === "nuget"
+                                ? t("upstream.nugetHint")
+                                : ecosystem === "go"
+                                  ? t("upstream.goHint")
+                                  : t("upstream.cargoHint")}
                 </p>
               </div>
             ) : null}
