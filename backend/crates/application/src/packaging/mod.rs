@@ -642,6 +642,7 @@ mod tests {
             Arc::new(InMemoryArtifactStore::default()),
             Arc::new(InMemoryPackageIndexStore::default()),
             Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
             Arc::new(InMemoryRepositoryStore::default()),
         ))
     }

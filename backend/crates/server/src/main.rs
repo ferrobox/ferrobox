@@ -726,6 +726,7 @@ fn packaging_registry(
                 artifact_store.clone(),
                 package_index_store.clone(),
                 storage.clone(),
+                http_client.clone(),
                 repository_store.clone(),
             )
             .with_assays(assays.clone())
