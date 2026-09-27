@@ -1,28 +1,65 @@
 name: Release
 
-# Any tag matching vMAJOR.MINOR.PATCH[-prerelease] builds and publishes
-# three artifacts from a single source of truth (the tag): the container
-# image, its Cosign signature and provenance attestation, and the Helm
-# chart. No secrets need to be configured: GHCR auth uses the default
-# GITHUB_TOKEN, and Cosign signs keyless via GitHub's OIDC token
-# (Fulcio/Rekor), so this also works unmodified once the repository
-# moves to the `ferrobox` org.
+# Builds and publishes a release of FerroBox: a signed, attested container
+# image on GHCR and a Helm chart on the same registry (OCI), then a GitHub
+# Release. Runs on every `vX.Y.Z` tag push. Can also be run by hand
+# (workflow_dispatch) with an arbitrary version, without creating a tag or
+# a release, to debug the pipeline itself.
 #
-# `workflow_dispatch` lets you re-run against an existing tag from the
-# Actions UI without pushing a new one -- pick the tag in the "Use
-# workflow from" ref selector.
+# The image and chart are pushed under `ghcr.io/<repository_owner>/...`
+# rather than a hardcoded `ferrobox` namespace, so this workflow keeps
+# working unchanged before and after the repository moves to the
+# `ferrobox` GitHub organization.
+
 on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, without a leading v (e.g. 0.1.0)"
+        required: true
+      create_release:
+        description: "Also create a GitHub Release for this run"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+env:
+  IMAGE_NAME: ferrobox
+  CHART_PATH: infra/chart
+  CHART_NAME: ferrobox
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      owner: ${{ steps.vars.outputs.owner }}
+      create_release: ${{ steps.vars.outputs.create_release }}
+    steps:
+      - name: Compute version, registry owner, and release flag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            create_release=true
+          else
+            version="${{ inputs.version }}"
+            create_release="${{ inputs.create_release }}"
+          fi
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "version=$version"
+            echo "owner=$owner"
+            echo "create_release=$create_release"
+          } >> "$GITHUB_OUTPUT"
+
   image:
-    name: Build, sign, and attest the image
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,22 +67,15 @@ jobs:
       id-token: write
       attestations: write
     outputs:
-      image: ${{ steps.vars.outputs.image }}
+      ref: ${{ steps.image_ref.outputs.ref }}
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Compute image name and version from the tag
-        id: vars
-        run: |
-          # ghcr.io scopes packages to the *current* repository owner, not
-          # to a name we pick. Using github.repository_owner here (instead
-          # of hardcoding `ferrobox`) means the exact same workflow pushes
-          # to ghcr.io/raulcmz/ferrobox today and to ghcr.io/ferrobox/ferrobox
-          # once the repo is transferred -- no edit needed either way.
-          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${owner}/ferrobox" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Compute image ref
+        id: image_ref
+        run: echo "ref=ghcr.io/${{ needs.prepare.outputs.owner }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -54,121 +84,96 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags and OCI labels
+      - name: Docker metadata (tags and OCI labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.vars.outputs.image }}
-          # v0.1.0 -> tag 0.1.0 (matches infra/chart/values.yaml's default
-          # image.tag). latest=auto skips `latest` for prerelease tags
-          # such as v0.1.0-rc1.
+          images: ${{ steps.image_ref.outputs.ref }}
           tags: |
-            type=semver,pattern={{version}}
-          flavor: |
-            latest=auto
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.create_release }}
           labels: |
             org.opencontainers.image.title=FerroBox
-            org.opencontainers.image.description=Self-hosted artifact registry for Cargo, npm, PyPI, OCI images, Helm charts, Conan, Maven, NuGet, Go modules, and generic files.
+            org.opencontainers.image.description=Self-hosted artifact registry for Cargo, npm, PyPI, OCI, Helm, Conan, Maven, NuGet, and Go
             org.opencontainers.image.licenses=FSL-1.1-Apache-2.0
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build and push
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
-          # linux/amd64 only for now: cross-compiling the Rust backend for
-          # arm64 under QEMU is a lot slower and nobody has asked for it
-          # yet. Add linux/arm64 here (and a cross toolchain in the
-          # Dockerfile) when that changes.
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      - name: Install Cosign
+      - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign the image (keyless)
-        run: cosign sign --yes "${{ steps.vars.outputs.image }}@${{ steps.build.outputs.digest }}"
+        run: cosign sign --yes "${{ steps.image_ref.outputs.ref }}@${{ steps.build.outputs.digest }}"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: ${{ steps.vars.outputs.image }}
+          subject-name: ${{ steps.image_ref.outputs.ref }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  chart:
-    name: Package and push the Helm chart
-    needs: image
+  helm:
+    needs: [prepare, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Compute chart destination and version
-        id: vars
-        run: |
-          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          echo "repo=oci://ghcr.io/${owner}/charts" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          # OCI chart registries need Helm >= 3.8.
+          # >= 3.8 is required for OCI support (`helm push`, `oci://`).
           version: "v3.16.4"
 
-      - name: Log in to GHCR (Helm OCI)
+      - name: Log in to GHCR
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" |
-            helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
 
-      - name: Package the chart at the tag's version
+      - name: Package chart
         run: |
-          helm package infra/chart \
-            --version "${{ steps.vars.outputs.version }}" \
-            --app-version "${{ steps.vars.outputs.version }}" \
+          helm package "${{ env.CHART_PATH }}" \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --app-version "${{ needs.prepare.outputs.version }}" \
             --destination .
 
-      - name: Push the chart
+      - name: Push chart
         run: |
-          helm push "ferrobox-${{ steps.vars.outputs.version }}.tgz" "${{ steps.vars.outputs.repo }}"
+          helm push "${{ env.CHART_NAME }}-${{ needs.prepare.outputs.version }}.tgz" \
+            "oci://ghcr.io/${{ needs.prepare.outputs.owner }}/charts"
 
   release:
-    name: Create the GitHub Release
-    needs: [image, chart]
+    needs: [prepare, image, helm]
+    if: needs.prepare.outputs.create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Compute release metadata
-        id: vars
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          prerelease=false
-          # v0.1.0-rc1 -> prerelease; v0.1.0 -> stable.
-          if [[ "$version" == *-* ]]; then
-            prerelease=true
-          fi
-          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
-
-      - name: Create the release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: FerroBox ${{ github.ref_name }}
-          prerelease: ${{ steps.vars.outputs.prerelease }}
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: FerroBox v${{ needs.prepare.outputs.version }}
           generate_release_notes: true
           body: |
-            Image: `${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}`, signed with [Cosign](https://github.com/sigstore/cosign) (keyless) and published with a [build provenance attestation](https://github.com/${{ github.repository }}/attestations).
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes.
 
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for what changed.
+            - Container image: `ghcr.io/${{ needs.prepare.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}`
+            - Helm chart: `oci://ghcr.io/${{ needs.prepare.outputs.owner }}/charts/${{ env.CHART_NAME }}` (`--version ${{ needs.prepare.outputs.version }}`)
