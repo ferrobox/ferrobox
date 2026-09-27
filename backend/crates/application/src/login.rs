@@ -12,37 +12,37 @@ use crate::auth_crypto::{
     generate_api_token_secret, hash_api_token_secret, verify_password,
 };
 
-/// Motivos por los que el inicio de sesión puede fallar.
+/// Reasons sign-in can fail.
 #[derive(Debug, Error)]
 pub enum LoginError {
-    /// Usuario inexistente o contraseña incorrecta. Se usa un único
-    /// mensaje para no filtrar si el nombre de usuario existe.
+    /// Nonexistent user or incorrect password. A single message is used
+    /// so as not to leak whether the username exists.
     #[error("invalid username or password")]
     InvalidCredentials,
 
-    /// Fallo al persistir el token de sesión emitido.
+    /// Failed to persist the issued session token.
     #[error(transparent)]
     TokenPersistence(#[from] ApiTokenStoreError),
 
-    /// Fallo al consultar el almacén de usuarios.
+    /// Failed to query the user store.
     #[error(transparent)]
     UserPersistence(#[from] UserStoreError),
 }
 
-/// Resultado de un inicio de sesión exitoso: el usuario autenticado y
-/// el secreto del token de sesión (mostrado una sola vez).
+/// Result of a successful sign-in: the authenticated user and the
+/// session token secret (shown only once).
 #[derive(Debug, Clone)]
 pub struct LoginResult {
-    /// Usuario autenticado.
+    /// Authenticated user.
     pub user: User,
-    /// Token de API recién emitido (secreto en claro).
+    /// Newly issued API token (plaintext secret).
     pub token: ApiToken,
-    /// Secreto en claro del token. Solo se expone aquí.
+    /// Plaintext token secret. Exposed only here.
     pub plaintext_secret: String,
 }
 
-/// Caso de uso: autenticar con usuario y contraseña, emitiendo un
-/// token de API de sesión.
+/// Use case: authenticate with username and password, issuing a session
+/// API token.
 pub struct LoginUseCase {
     user_store: Arc<dyn UserStore>,
     api_token_store: Arc<dyn ApiTokenStore>,
@@ -50,14 +50,14 @@ pub struct LoginUseCase {
 }
 
 impl LoginUseCase {
-    /// Construye el caso de uso a partir de sus puertos. La sesión
-    /// caduca a las 12 horas.
+    /// Builds the use case from its ports. The session expires after
+    /// 12 hours.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>, api_token_store: Arc<dyn ApiTokenStore>) -> Self {
         Self::with_session_ttl(user_store, api_token_store, Duration::from_hours(12))
     }
 
-    /// Igual que [`Self::new`] con un TTL de sesión configurable.
+    /// Same as [`Self::new`] with a configurable session TTL.
     #[must_use]
     pub fn with_session_ttl(
         user_store: Arc<dyn UserStore>,
@@ -71,19 +71,19 @@ impl LoginUseCase {
         }
     }
 
-    /// Verifica las credenciales y, si son válidas, emite un token de
-    /// sesión llamado `session`.
+    /// Verifies the credentials and, if they are valid, issues a
+    /// session token named `session`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`LoginError::InvalidCredentials`] si el usuario no
-    /// existe o la contraseña no coincide, o un error de persistencia
-    /// si falla el almacén.
+    /// Returns [`LoginError::InvalidCredentials`] if the user does not
+    /// exist or the password does not match, or a persistence error if
+    /// the store fails.
     ///
     /// # Panics
     ///
-    /// En la práctica, nunca entra en pánico: el literal `"session"`
-    /// siempre es un [`ApiTokenName`] válido.
+    /// In practice this never panics: the `"session"` literal is always
+    /// a valid [`ApiTokenName`].
     pub async fn execute(
         &self,
         username: Username,

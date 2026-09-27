@@ -16,16 +16,16 @@ pub const MIN_INTERVAL_MINUTES: u32 = 1;
 /// Maximum minutes between scheduled replica runs (one week).
 pub const MAX_INTERVAL_MINUTES: u32 = 10_080;
 
-/// Sentido de la réplica.
+/// Direction of the replica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplicaDirection {
-    /// Esta instancia exporta y hace `POST` al import remoto.
+    /// This instance exports and `POST`s to the remote import.
     Push,
-    /// Esta instancia pide el export remoto y lo importa aquí.
+    /// This instance requests the remote export and imports it here.
     Pull,
 }
 
-/// Destino de un push o pull de réplica.
+/// Target of a replica push or pull.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaTarget {
     remote_url: Url,
@@ -34,7 +34,7 @@ pub struct ReplicaTarget {
     direction: ReplicaDirection,
 }
 
-/// Resultado de la última réplica.
+/// Result of the last replica.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaRun {
     occurred_at: String,
@@ -52,28 +52,28 @@ pub struct ReplicaPolicy {
     interval_minutes: Option<u32>,
 }
 
-/// Motivos por los que una política de réplica no es válida.
+/// Reasons why a replica policy is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ReplicaPolicyError {
-    /// La URL no es `http` ni `https`, o no tiene host.
+    /// The URL is neither `http` nor `https`, or it has no host.
     #[error("replica URL must be an absolute http or https URL")]
     InvalidUrl,
 
-    /// La URL supera el máximo permitido.
+    /// The URL exceeds the allowed maximum.
     #[error("replica URL must be at most {max} characters")]
     UrlTooLong {
-        /// Máximo permitido.
+        /// Maximum allowed.
         max: usize,
     },
 
-    /// El token supera el máximo permitido.
+    /// The token exceeds the allowed maximum.
     #[error("replica token must be at most {max} characters")]
     TokenTooLong {
-        /// Máximo permitido.
+        /// Maximum allowed.
         max: usize,
     },
 
-    /// El destino es el mismo repositorio.
+    /// The destination is the same repository.
     #[error("replica destination cannot be the source repository")]
     SameRepository,
 
@@ -89,12 +89,12 @@ pub enum ReplicaPolicyError {
 }
 
 impl ReplicaTarget {
-    /// Construye un destino a partir de URL, UUID y token opcional.
+    /// Builds a target from a URL, UUID, and optional token.
     ///
     /// # Errors
     ///
-    /// [`ReplicaPolicyError`] si la URL no es HTTP(S) o el destino es
-    /// el propio origen.
+    /// [`ReplicaPolicyError`] if the URL is not HTTP(S) or the destination is
+    /// the source itself.
     pub fn new(
         remote_url: impl AsRef<str>,
         destination_id: RepositoryId,
@@ -114,26 +114,26 @@ impl ReplicaTarget {
         })
     }
 
-    /// URL de la instancia remota (origen, sin `/api`).
+    /// URL of the remote instance (origin, without `/api`).
     #[must_use]
     pub fn remote_url(&self) -> &Url {
         &self.remote_url
     }
 
-    /// Forge destino en la instancia remota.
+    /// Destination Forge on the remote instance.
     #[must_use]
     pub fn destination_id(&self) -> RepositoryId {
         self.destination_id
     }
 
-    /// Token de API con escritura en el destino. `None` si aún no se
-    /// guardó (o se borró).
+    /// API token with write access on the destination. `None` if it has not
+    /// been saved yet (or was deleted).
     #[must_use]
     pub fn token(&self) -> Option<&str> {
         self.token.as_deref()
     }
 
-    /// Sustituye el token. `None` conserva el anterior.
+    /// Replaces the token. `None` keeps the previous one.
     #[must_use]
     pub fn with_token(mut self, token: Option<String>) -> Self {
         if token.is_some() {
@@ -142,23 +142,23 @@ impl ReplicaTarget {
         self
     }
 
-    /// Sentido guardado. Por defecto, push.
+    /// Stored direction. Defaults to push.
     #[must_use]
     pub fn direction(&self) -> ReplicaDirection {
         self.direction
     }
 
-    /// Sustituye el sentido.
+    /// Replaces the direction.
     #[must_use]
     pub fn with_direction(mut self, direction: ReplicaDirection) -> Self {
         self.direction = direction;
         self
     }
 
-    /// URLs del `POST` de import en la instancia remota.
+    /// URLs of the import `POST` on the remote instance.
     ///
-    /// Primero `{origen}/api/repositories/{id}/import` (compose / `FRONTEND_DIR`).
-    /// Después `{origen}/repositories/{id}/import` (`cargo run` + Vite).
+    /// First `{origin}/api/repositories/{id}/import` (compose / `FRONTEND_DIR`).
+    /// Then `{origin}/repositories/{id}/import` (`cargo run` + Vite).
     #[must_use]
     pub fn import_urls(&self) -> [String; 2] {
         let origin = replica_origin(&self.remote_url);
@@ -169,7 +169,7 @@ impl ReplicaTarget {
         ]
     }
 
-    /// URLs del `GET` de export en la instancia remota.
+    /// URLs of the export `GET` on the remote instance.
     #[must_use]
     pub fn export_urls(&self) -> [String; 2] {
         let origin = replica_origin(&self.remote_url);
@@ -182,7 +182,7 @@ impl ReplicaTarget {
 }
 
 impl ReplicaDirection {
-    /// Etiqueta persistida (`push` / `pull`).
+    /// Persisted label (`push` / `pull`).
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -191,11 +191,11 @@ impl ReplicaDirection {
         }
     }
 
-    /// Interpreta la etiqueta. Vacío = push.
+    /// Interprets the label. Empty = push.
     ///
     /// # Errors
     ///
-    /// [`ReplicaPolicyError::InvalidDirection`] si no es `push` ni `pull`.
+    /// [`ReplicaPolicyError::InvalidDirection`] if it is neither `push` nor `pull`.
     pub fn parse(raw: impl AsRef<str>) -> Result<Self, ReplicaPolicyError> {
         match raw.as_ref().trim().to_ascii_lowercase().as_str() {
             "" | "push" => Ok(Self::Push),
@@ -206,7 +206,7 @@ impl ReplicaDirection {
 }
 
 impl ReplicaRun {
-    /// Construye el recuento de un push.
+    /// Builds the counts of a push.
     #[must_use]
     pub fn new(
         occurred_at: impl Into<String>,
@@ -224,37 +224,37 @@ impl ReplicaRun {
         }
     }
 
-    /// Instante RFC 3339.
+    /// RFC 3339 timestamp.
     #[must_use]
     pub fn occurred_at(&self) -> &str {
         &self.occurred_at
     }
 
-    /// Coordenadas nuevas en el destino.
+    /// New coordinates on the destination.
     #[must_use]
     pub fn packages_imported(&self) -> u32 {
         self.packages_imported
     }
 
-    /// Binarios nuevos en el destino.
+    /// New binaries on the destination.
     #[must_use]
     pub fn artifacts_imported(&self) -> u32 {
         self.artifacts_imported
     }
 
-    /// Paquetes o binarios que ya estaban.
+    /// Packages or binaries that were already present.
     #[must_use]
     pub fn skipped(&self) -> u32 {
         self.skipped
     }
 
-    /// Error del remoto, si la réplica falló.
+    /// Remote error, if the replica failed.
     #[must_use]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
-    /// `true` si el remoto o el import local aceptaron el bundle.
+    /// `true` if the remote or the local import accepted the bundle.
     #[must_use]
     pub fn succeeded(&self) -> bool {
         self.error.is_none()

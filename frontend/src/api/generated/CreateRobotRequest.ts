@@ -2,10 +2,10 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Cuerpo de la petición para crear una cuenta robot.
+ * Request body to create a robot account.
  */
 export type CreateRobotRequest = { username: string, role: RoleDto, token_name: string, 
 /**
- * Caducidad RFC 3339 del token inicial. `null` = no caduca.
+ * RFC 3339 expiry of the initial token. `null` = does not expire.
  */
 expires_at?: string, };

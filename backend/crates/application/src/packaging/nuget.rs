@@ -1,11 +1,11 @@
-//! Estrategia de empaquetado para NuGet: API V3 que `dotnet nuget push`,
-//! `dotnet restore` y `nuget.exe` necesitan contra un repositorio
-//! `FerroBox`.
+//! Packaging strategy for NuGet: V3 API that `dotnet nuget push`,
+//! `dotnet restore`, and `nuget.exe` need against a
+//! `FerroBox` repository.
 //!
-//! Cubre **Forge** (push, flat container, registration, search, unlist),
-//! **Mirror** (caché *pull-through* de un origen V3) y lecturas en
-//! **Alloy**. Las versiones son inmutables; el *unlist* (yank) las oculta
-//! de la búsqueda y las marca `listed: false` en el registration.
+//! Covers **Forge** (push, flat container, registration, search, unlist),
+//! **Mirror** (*pull-through* cache of a V3 origin), and reads on
+//! **Alloy**. Versions are immutable; *unlist* (yank) hides them
+//! from search and marks them `listed: false` in registration.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -39,7 +39,7 @@ use crate::content_hash::sha256_checksum;
 use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema `NuGet`.
+/// Packaging strategy for the `NuGet` ecosystem.
 pub struct NugetPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -52,7 +52,7 @@ pub struct NugetPackagingStrategy {
 }
 
 impl NugetPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Builds the strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -74,14 +74,14 @@ impl NugetPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un paquete.
+    /// Connects automatic assay when publishing or caching a package.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -843,7 +843,7 @@ fn nuget_service_index_url(upstream: &Url) -> String {
     }
 }
 
-/// Id y versión de un `.nupkg`. El índice y el `.nuspec` no disparan.
+/// Id and version of a `.nupkg`. The index and `.nuspec` do not trigger.
 #[must_use]
 pub fn admission_download_target(path: &str) -> Option<(String, String)> {
     match parse_nuget_path(path).ok()? {
@@ -968,12 +968,12 @@ fn percent_decode(value: &str) -> String {
     out
 }
 
-/// Extrae el `.nupkg` de un cuerpo crudo o `multipart/form-data`.
+/// Extracts the `.nupkg` from a raw body or `multipart/form-data`.
 ///
 /// # Errors
 ///
-/// Devuelve [`PackagingError::InvalidPayload`] si el cuerpo es
-/// `multipart` y no se puede extraer la primera parte.
+/// Returns [`PackagingError::InvalidPayload`] if the body is
+/// `multipart` and the first part cannot be extracted.
 pub fn extract_nupkg_bytes(content_type: Option<&str>, body: Bytes) -> Result<Bytes, PackagingError> {
     let Some(content_type) = content_type else {
         return Ok(body);
@@ -1120,18 +1120,18 @@ fn xml_text(body: &str, tag: &str) -> Option<String> {
     None
 }
 
-/// `true` si la versión `NuGet` es una prerelease `SemVer` (`1.0.0-beta`).
+/// `true` if the `NuGet` version is a `SemVer` prerelease (`1.0.0-beta`).
 #[must_use]
 pub fn is_prerelease_version(version: &str) -> bool {
     let core = version.split_once('+').map_or(version, |(core, _)| core);
     core.contains('-')
 }
 
-/// Construye un `.nupkg` mínimo (zip + `.nuspec`) para pruebas.
+/// Builds a minimal `.nupkg` (zip + `.nuspec`) for tests.
 ///
 /// # Panics
 ///
-/// Entra en pánico si no se puede escribir el zip en memoria.
+/// Panics if the zip cannot be written in memory.
 #[must_use]
 pub fn build_nupkg(id: &str, version: &str) -> Bytes {
     let mut cursor = Cursor::new(Vec::new());

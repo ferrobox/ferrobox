@@ -1,4 +1,4 @@
-//! Rutas HTTP de avisos (`webhooks`) por repositorio.
+//! HTTP routes for per-repository webhook notifications.
 
 use std::sync::Arc;
 

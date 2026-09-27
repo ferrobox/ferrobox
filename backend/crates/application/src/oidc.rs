@@ -1,8 +1,8 @@
-//! Inicio de sesión federado (`OIDC` Authorization Code + PKCE).
+//! Federated sign-in (`OIDC` Authorization Code + PKCE).
 //!
-//! Descubre el `IdP`, intercambia el código, valida el `id_token` contra
-//! JWKS, aprovisiona la cuenta (JIT), sincroniza el rol y los grupos
-//! mapeados, y emite un token de sesión de `FerroBox`.
+//! Discovers the `IdP`, exchanges the code, validates the `id_token`
+//! against JWKS, provisions the account (JIT), syncs the role and the
+//! mapped groups, and issues a `FerroBox` session token.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -42,7 +42,7 @@ const PENDING_TTL: Duration = Duration::from_mins(10);
 const DEFAULT_SCOPES: &str = "openid profile email";
 const DEFAULT_GROUP_CLAIM: &str = "groups";
 
-/// Configuración de un cliente `OIDC` confidencial o público (PKCE).
+/// Configuration of a confidential or public `OIDC` client (PKCE).
 #[derive(Debug, Clone)]
 pub struct OidcSettings {
     issuer: String,
@@ -58,7 +58,7 @@ pub struct OidcSettings {
 }
 
 impl OidcSettings {
-    /// Construye la configuración. El emisor se guarda sin barra final.
+    /// Builds the configuration. The issuer is stored without a trailing slash.
     #[must_use]
     pub fn new(
         issuer: impl Into<String>,
@@ -88,21 +88,21 @@ impl OidcSettings {
         }
     }
 
-    /// Sustituye el mapeo de roles.
+    /// Replaces the role mapping.
     #[must_use]
     pub fn with_role_mapping(mut self, mapping: OidcRoleMapping) -> Self {
         self.role_mapping = mapping;
         self
     }
 
-    /// *Claim* adicional de roles (además de `realm_access` / `roles`).
+    /// Extra role *claim* (in addition to `realm_access` / `roles`).
     #[must_use]
     pub fn with_extra_role_claim(mut self, claim: Option<String>) -> Self {
         self.extra_role_claim = claim.filter(|value| !value.trim().is_empty());
         self
     }
 
-    /// *Claim* de grupos. Vacío → `groups`.
+    /// Group *claim*. Empty → `groups`.
     #[must_use]
     pub fn with_group_claim(mut self, claim: impl Into<String>) -> Self {
         let claim = claim.into();
@@ -114,14 +114,14 @@ impl OidcSettings {
         self
     }
 
-    /// Si `false`, solo se asignan grupos que ya existen en `FerroBox`.
+    /// If `false`, only groups that already exist in `FerroBox` are assigned.
     #[must_use]
     pub fn with_auto_create_groups(mut self, auto_create: bool) -> Self {
         self.auto_create_groups = auto_create;
         self
     }
 
-    /// Ámbitos enviados al `IdP`.
+    /// Scopes sent to the `IdP`.
     #[must_use]
     pub fn with_scopes(mut self, scopes: impl Into<String>) -> Self {
         let scopes = scopes.into();
@@ -131,94 +131,94 @@ impl OidcSettings {
         self
     }
 
-    /// Emisor (`iss`), sin barra final.
+    /// Issuer (`iss`), without a trailing slash.
     #[must_use]
     pub fn issuer(&self) -> &str {
         &self.issuer
     }
 
-    /// Identificador del cliente.
+    /// Client identifier.
     #[must_use]
     pub fn client_id(&self) -> &str {
         &self.client_id
     }
 
-    /// URL de retorno registrada en el `IdP`.
+    /// Return URL registered with the `IdP`.
     #[must_use]
     pub fn redirect_uri(&self) -> &str {
         &self.redirect_uri
     }
 
-    /// Destino de la UI tras un login correcto (`#sso_token=`).
+    /// UI destination after a successful login (`#sso_token=`).
     #[must_use]
     pub fn success_redirect(&self) -> &str {
         &self.success_redirect
     }
 }
 
-/// Motivos por los que el flujo `OIDC` puede fallar.
+/// Reasons the `OIDC` flow can fail.
 #[derive(Debug, Error)]
 pub enum OidcError {
-    /// El `IdP` no está configurado en esta instancia.
+    /// The `IdP` is not configured on this instance.
     #[error("single sign-on is not configured")]
     Disabled,
 
-    /// El `state` no existe, expiró o ya se usó.
+    /// The `state` does not exist, expired, or was already used.
     #[error("invalid or expired sign-on state")]
     InvalidState,
 
-    /// El `IdP` devolvió un error en el retorno.
+    /// The `IdP` returned an error on the callback.
     #[error("identity provider error: {0}")]
     Provider(String),
 
-    /// El `id_token` no es válido (firma, emisor, audiencia o nonce).
+    /// The `id_token` is not valid (signature, issuer, audience, or nonce).
     #[error("invalid identity token: {0}")]
     InvalidToken(String),
 
-    /// Falta `sub` u otro campo obligatorio.
+    /// `sub` or another required field is missing.
     #[error("identity token is missing required claims")]
     MissingClaims,
 
-    /// No se pudo construir un nombre de usuario válido.
+    /// A valid username could not be built.
     #[error("could not derive a username from the identity token")]
     InvalidUsername,
 
-    /// Fallo al descubrir o hablar con el `IdP`.
+    /// Failed to discover or talk to the `IdP`.
     #[error(transparent)]
     Http(#[from] HttpClientError),
 
-    /// Fallo al persistir el usuario.
+    /// Failed to persist the user.
     #[error(transparent)]
     Users(#[from] UserStoreError),
 
-    /// Fallo al persistir grupos.
+    /// Failed to persist groups.
     #[error(transparent)]
     Groups(#[from] GroupStoreError),
 
-    /// Fallo al emitir el token de sesión.
+    /// Failed to issue the session token.
     #[error(transparent)]
     Tokens(#[from] ApiTokenStoreError),
 
-    /// Fallo al hashear la contraseña aleatoria de una cuenta JIT.
+    /// Failed to hash the random password of a JIT account.
     #[error("failed to hash generated password")]
     PasswordHash,
 }
 
-/// Estado público: si el botón SSO debe mostrarse.
+/// Public status: whether the SSO button should be shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcStatus {
-    /// `true` si hay emisor y cliente configurados.
+    /// `true` if issuer and client are configured.
     pub enabled: bool,
-    /// Emisor, si está habilitado.
+    /// Issuer, if enabled.
     pub issuer: Option<String>,
 }
 
-/// Resultado del aprovisionamiento, antes de emitir el token de sesión.
+/// Result of provisioning, before issuing the session token.
 #[derive(Debug, Clone)]
 pub struct OidcProvision {
-    /// Usuario ya persistido (rol y vínculo `OIDC` al día).
+    /// Already persisted user (role and `OIDC` link up to date).
     pub user: User,
-    /// `true` si la cuenta no existía.
+    /// `true` if the account did not exist.
     pub created: bool,
 }
 
@@ -238,7 +238,7 @@ struct OidcDiscovery {
     end_session_endpoint: Option<String>,
 }
 
-/// Servicio de inicio de sesión federado.
+/// Federated sign-in service.
 pub struct OidcLoginService {
     settings: OidcSettings,
     http_client: std::sync::Arc<dyn HttpClient>,
@@ -251,7 +251,7 @@ pub struct OidcLoginService {
 }
 
 impl OidcLoginService {
-    /// Construye el servicio.
+    /// Builds the service.
     #[must_use]
     pub fn new(
         settings: OidcSettings,
@@ -272,14 +272,14 @@ impl OidcLoginService {
         }
     }
 
-    /// TTL del token de sesión emitido tras el callback.
+    /// TTL of the session token issued after the callback.
     #[must_use]
     pub fn with_session_ttl(mut self, session_ttl: Duration) -> Self {
         self.session_ttl = session_ttl;
         self
     }
 
-    /// Si el SSO está listo para usarse.
+    /// Whether SSO is ready to use.
     #[must_use]
     pub fn status(&self) -> OidcStatus {
         OidcStatus {
@@ -288,21 +288,21 @@ impl OidcLoginService {
         }
     }
 
-    /// Ajustes (emisor, redirecciones) para la capa HTTP.
+    /// Settings (issuer, redirects) for the HTTP layer.
     #[must_use]
     pub fn settings(&self) -> &OidcSettings {
         &self.settings
     }
 
-    /// Construye la URL de autorización y guarda `state` + PKCE.
+    /// Builds the authorization URL and stores `state` + PKCE.
     ///
     /// # Errors
     ///
-    /// [`OidcError`] si el descubrimiento del `IdP` falla.
+    /// [`OidcError`] if `IdP` discovery fails.
     ///
     /// # Panics
     ///
-    /// Si el mutex de estados pendientes está envenenado.
+    /// If the pending-state mutex is poisoned.
     pub async fn start(&self) -> Result<String, OidcError> {
         let discovery = self.discovery().await?;
         let state = random_urlsafe(24);
@@ -341,16 +341,16 @@ impl OidcLoginService {
         Ok(url.to_string())
     }
 
-    /// URL de *logout* en el `IdP` (RP-initiated). Si el descubrimiento
-    /// no publica `end_session_endpoint`, devuelve el destino local.
+    /// *Logout* URL at the `IdP` (RP-initiated). If discovery does not
+    /// publish `end_session_endpoint`, returns the local destination.
     ///
     /// # Errors
     ///
-    /// [`OidcError`] si el descubrimiento del `IdP` falla.
+    /// [`OidcError`] if `IdP` discovery fails.
     ///
     /// # Panics
     ///
-    /// Si el mutex de descubrimiento está envenenado.
+    /// If the discovery mutex is poisoned.
     pub async fn logout_url(&self) -> Result<String, OidcError> {
         let discovery = self.discovery().await?;
         let Some(endpoint) = discovery
@@ -373,16 +373,16 @@ impl OidcLoginService {
         Ok(url.to_string())
     }
 
-    /// Intercambia el código, valida el token, aprovisiona y emite sesión.
+    /// Exchanges the code, validates the token, provisions, and issues a session.
     ///
     /// # Errors
     ///
-    /// [`OidcError`] si el `state` es inválido, el `IdP` falla o las
-    /// *claims* no bastan para crear la cuenta.
+    /// [`OidcError`] if the `state` is invalid, the `IdP` fails, or the
+    /// *claims* are not enough to create the account.
     ///
     /// # Panics
     ///
-    /// Si el mutex de estados pendientes está envenenado.
+    /// If the pending-state mutex is poisoned.
     pub async fn finish(&self, code: &str, state: &str) -> Result<LoginResult, OidcError> {
         let pending = {
             let mut pending = self.pending.lock().expect("oidc pending lock");
@@ -401,13 +401,13 @@ impl OidcLoginService {
         self.issue_session(provision.user).await
     }
 
-    /// Aprovisiona o actualiza una cuenta a partir de *claims* ya
-    /// validadas. Visible para tests y para reutilizar el JIT sin HTTP.
+    /// Provisions or updates an account from already validated *claims*.
+    /// Visible for tests and to reuse JIT without HTTP.
     ///
     /// # Errors
     ///
-    /// [`OidcError`] si faltan *claims*, el nombre no es válido o falla
-    /// la persistencia.
+    /// [`OidcError`] if *claims* are missing, the name is not valid, or
+    /// persistence fails.
     pub async fn provision(&self, claims: &Value) -> Result<OidcProvision, OidcError> {
         let subject = claims
             .get("sub")

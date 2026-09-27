@@ -2,41 +2,41 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
 
-/// Motivos por los que una petición HTTP saliente puede fallar.
+/// Reasons an outbound HTTP request can fail.
 #[derive(Debug, Error)]
 pub enum HttpClientError {
-    /// El servidor remoto respondió con un código de error HTTP.
+    /// The remote server responded with an HTTP error status.
     #[error("upstream HTTP {status} for {url}")]
     Status {
-        /// Código de estado HTTP recibido.
+        /// HTTP status code received.
         status: u16,
-        /// URL solicitada.
+        /// Requested URL.
         url: String,
     },
 
-    /// Fallo de red, TLS o de la librería HTTP concreta.
+    /// Network, TLS, or concrete HTTP library failure.
     #[error("HTTP transport failure for {url}: {message}")]
     Transport {
-        /// URL solicitada.
+        /// Requested URL.
         url: String,
-        /// Detalle del fallo.
+        /// Failure detail.
         message: String,
     },
 }
 
-/// Respuesta HTTP mínima que necesita la capa de aplicación.
+/// Minimal HTTP response needed by the application layer.
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
-    /// Código de estado HTTP.
+    /// HTTP status code.
     pub status: u16,
-    /// Cuerpo de la respuesta.
+    /// Response body.
     pub body: Bytes,
-    /// Cabeceras de respuesta. Los nombres se guardan en minúsculas.
+    /// Response headers. Names are stored in lowercase.
     pub headers: Vec<(String, String)>,
 }
 
 impl HttpResponse {
-    /// Construye una respuesta sin cabeceras.
+    /// Builds a response with no headers.
     #[must_use]
     pub fn new(status: u16, body: Bytes) -> Self {
         Self {
@@ -46,13 +46,13 @@ impl HttpResponse {
         }
     }
 
-    /// `true` si el código de estado está en el rango 2xx.
+    /// `true` if the status code is in the 2xx range.
     #[must_use]
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
 
-    /// Primera cabecera cuyo nombre coincide sin distinguir mayúsculas.
+    /// First header whose name matches case-insensitively.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find_map(|(key, value)| {
@@ -61,39 +61,39 @@ impl HttpResponse {
     }
 }
 
-/// Puerto de cliente HTTP saliente (por ejemplo, para consultar el
-/// *upstream* de un repositorio `Mirror`).
+/// Outbound HTTP client port (for example, to query the *upstream* of
+/// a `Mirror` repository).
 #[async_trait]
 pub trait HttpClient: Send + Sync {
-    /// Realiza una petición `GET` a `url`.
+    /// Performs a `GET` request to `url`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`HttpClientError`] si la red falla o el remoto
-    /// responde fuera de 2xx (según la política del adaptador).
+    /// Returns [`HttpClientError`] if the network fails or the remote
+    /// responds outside 2xx (according to the adapter policy).
     async fn get(&self, url: &str) -> Result<HttpResponse, HttpClientError>;
 
-    /// `GET` con cabeceras extra. A diferencia de [`get`], devuelve el
-    /// cuerpo y las cabeceras también fuera de 2xx (hace falta para el
-    /// desafío `Bearer` de un registro OCI). Solo falla de transporte.
+    /// `GET` with extra headers. Unlike [`get`], returns the body and
+    /// headers even outside 2xx (needed for the `Bearer` challenge of
+    /// an OCI registry). Only transport failures.
     ///
     /// # Errors
     ///
-    /// Devuelve [`HttpClientError::Transport`] si la red o TLS fallan.
+    /// Returns [`HttpClientError::Transport`] if the network or TLS fail.
     async fn get_with_headers(
         &self,
         url: &str,
         headers: &[(&str, &str)],
     ) -> Result<HttpResponse, HttpClientError>;
 
-    /// Realiza una petición `POST` con cuerpo y `Content-Type`.
+    /// Performs a `POST` request with a body and `Content-Type`.
     ///
-    /// Como [`get`], solo devuelve `Ok` en el rango 2xx.
+    /// Like [`get`], only returns `Ok` in the 2xx range.
     ///
     /// # Errors
     ///
-    /// Devuelve [`HttpClientError`] si la red falla o el remoto responde
-    /// fuera de 2xx.
+    /// Returns [`HttpClientError`] if the network fails or the remote
+    /// responds outside 2xx.
     async fn post(
         &self,
         url: &str,
@@ -113,13 +113,13 @@ pub trait HttpClient: Send + Sync {
         }
     }
 
-    /// `POST` con cabeceras extra. Como [`get_with_headers`], devuelve
-    /// el cuerpo también fuera de 2xx: hace falta para registrar el
-    /// resultado de un aviso HTTP. Solo falla de transporte.
+    /// `POST` with extra headers. Like [`get_with_headers`], returns
+    /// the body even outside 2xx: needed to record the result of an
+    /// HTTP webhook. Only transport failures.
     ///
     /// # Errors
     ///
-    /// Devuelve [`HttpClientError::Transport`] si la red o TLS fallan.
+    /// Returns [`HttpClientError::Transport`] if the network or TLS fail.
     async fn post_with_headers(
         &self,
         url: &str,

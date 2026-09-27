@@ -8,13 +8,13 @@ use sqlx::{PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`AdmissionStore`] contra `PostgreSQL`.
+/// [`AdmissionStore`] adapter against `PostgreSQL`.
 pub struct PostgresAdmissionStore {
     pool: PgPool,
 }
 
 impl PostgresAdmissionStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

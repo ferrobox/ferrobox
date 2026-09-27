@@ -4,64 +4,64 @@ use ferrobox_domain::ids::{AssayId, RepositoryId};
 use ferrobox_domain::package_coordinate::PackageCoordinate;
 use thiserror::Error;
 
-/// Motivos por los que una operación sobre ensayes puede fallar.
+/// Reasons an Assay operation can fail.
 #[derive(Debug, Error)]
 pub enum AssayStoreError {
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la entidad [`Assay`].
+/// Persistence port for the [`Assay`] entity.
 #[async_trait]
 pub trait AssayStore: Send + Sync {
-    /// Inserta o reemplaza el ensaye de una coordenada en un repositorio.
+    /// Inserts or replaces the Assay of a coordinate in a repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn upsert(&self, assay: &Assay) -> Result<(), AssayStoreError>;
 
-    /// Busca un ensaye por identificador.
+    /// Looks up an Assay by identifier.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn find_by_id(&self, id: AssayId) -> Result<Option<Assay>, AssayStoreError>;
 
-    /// Busca el ensaye de una coordenada en un repositorio.
+    /// Looks up the Assay of a coordinate in a repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn find_by_coordinate(
         &self,
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
     ) -> Result<Option<Assay>, AssayStoreError>;
 
-    /// Lista los ensayes de un repositorio.
+    /// Lists the Assays of a repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<Assay>, AssayStoreError>;
 
-    /// Lista todos los ensayes de la instancia.
+    /// Lists every Assay on the instance.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn find_all(&self) -> Result<Vec<Assay>, AssayStoreError>;
 
-    /// Elimina el ensaye de una coordenada. No es un error si no existe.
+    /// Deletes the Assay of a coordinate. It is not an error if none exists.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`AssayStoreError::Backend`] if the underlying backend fails.
     async fn delete_by_coordinate(
         &self,
         repository_id: RepositoryId,

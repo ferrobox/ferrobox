@@ -23,64 +23,64 @@ use uuid::Uuid;
 use crate::get_repository::{GetRepositoryError, GetRepositoryUseCase};
 use crate::repository_bundle::{BundleError, RepositoryBundleService};
 
-/// Recuento que devuelve el import remoto.
+/// Count returned by the remote import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaPushOutcome {
-    /// Coordenadas nuevas en el destino.
+    /// New coordinates in the destination.
     pub packages_imported: u32,
-    /// Binarios nuevos en el destino.
+    /// New binaries in the destination.
     pub artifacts_imported: u32,
-    /// Paquetes o binarios que ya estaban.
+    /// Packages or binaries that were already there.
     pub skipped: u32,
 }
 
-/// Motivos por los que configurar o empujar una réplica puede fallar.
+/// Reasons configuring or pushing a replica can fail.
 #[derive(Debug, Error)]
 pub enum ReplicaError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// Un `Alloy` no se replica: no guarda binarios propios.
+    /// An `Alloy` is not replicated: it does not store its own binaries.
     #[error("replica does not apply to Alloy repositories")]
     AlloyRepository,
 
-    /// Falta la migración SQL.
+    /// Missing SQL migration.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_replica is missing)"
     )]
     MissingSchema,
 
-    /// No hay destino guardado.
+    /// No destination is saved.
     #[error("replica target is not configured")]
     NotConfigured,
 
-    /// Hay destino pero no hay token.
+    /// There is a destination but no token.
     #[error("replica token is required")]
     MissingToken,
 
-    /// La política pedida no es válida.
+    /// The requested policy is not valid.
     #[error(transparent)]
     Invalid(#[from] ReplicaPolicyError),
 
-    /// El remoto rechazó el bundle o no respondió.
+    /// The remote rejected the bundle or did not respond.
     #[error("replica failed: {0}")]
     Remote(String),
 
-    /// Fallo al consultar el repositorio.
+    /// Failed to query the repository.
     #[error(transparent)]
     Repository(#[from] GetRepositoryError),
 
-    /// Fallo al listar repositorios.
+    /// Failed to list repositories.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 
-    /// Fallo al persistir la política.
+    /// Failed to persist the policy.
     #[error(transparent)]
     Store(#[from] ReplicaStoreError),
 
-    /// Fallo al exportar el bundle.
+    /// Failed to export the bundle.
     #[error(transparent)]
     Bundle(#[from] BundleError),
 }
@@ -95,7 +95,7 @@ pub struct ReplicaService {
 }
 
 impl ReplicaService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         store: Arc<dyn ReplicaStore>,
@@ -111,11 +111,11 @@ impl ReplicaService {
         }
     }
 
-    /// Devuelve la política, o «sin destino» si nunca se configuró.
+    /// Returns the policy, or "no destination" if it was never configured.
     ///
     /// # Errors
     ///
-    /// [`ReplicaError::AlloyRepository`] o fallo de persistencia.
+    /// [`ReplicaError::AlloyRepository`] or a persistence failure.
     pub async fn get_policy(
         &self,
         repository_id: RepositoryId,
@@ -124,11 +124,11 @@ impl ReplicaService {
         Ok(self.load_policy(repository_id).await?)
     }
 
-    /// Guarda el destino. Un token vacío conserva el anterior.
+    /// Saves the destination. An empty token keeps the previous one.
     ///
     /// # Errors
     ///
-    /// [`ReplicaError::Invalid`] o el repositorio no admite réplica.
+    /// [`ReplicaError::Invalid`] or the repository does not support replica.
     pub async fn save_policy(
         &self,
         repository_id: RepositoryId,
@@ -174,12 +174,12 @@ impl ReplicaService {
         Ok(policy)
     }
 
-    /// Exporta el repositorio y lo importa en el Forge remoto.
+    /// Exports the repository and imports it into the remote Forge.
     ///
     /// # Errors
     ///
     /// [`ReplicaError::NotConfigured`], [`ReplicaError::MissingToken`]
-    /// o el remoto rechaza el bundle.
+    /// or the remote rejects the bundle.
     pub async fn push_now(
         &self,
         repository_id: RepositoryId,
@@ -231,12 +231,12 @@ impl ReplicaService {
         })
     }
 
-    /// Pide el export remoto y lo importa en este repositorio.
+    /// Requests the remote export and imports it into this repository.
     ///
     /// # Errors
     ///
     /// [`ReplicaError::NotConfigured`], [`ReplicaError::MissingToken`]
-    /// o el remoto / el import local fallan.
+    /// or the remote / the local import fail.
     pub async fn pull_now(
         &self,
         repository_id: RepositoryId,

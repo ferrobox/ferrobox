@@ -1,81 +1,81 @@
-//! Configuración del servidor, leída desde variables de entorno.
+//! Server configuration, read from environment variables.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use thiserror::Error;
 
-/// Motivos por los que la configuración del servidor es inválida.
+/// Reasons the server configuration is invalid.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// Falta una variable de entorno obligatoria.
+    /// A required environment variable is missing.
     #[error("missing required environment variable: {0}")]
     MissingVar(&'static str),
 }
 
-/// Configuración del servidor, ensamblada una sola vez al arrancar.
+/// Server configuration, assembled once at startup.
 pub struct Config {
-    /// Cadena de conexión a `PostgreSQL`.
+    /// `PostgreSQL` connection string.
     pub database_url: String,
-    /// URL del *endpoint* S3 (Garage en desarrollo, AWS S3 en producción).
+    /// S3 *endpoint* URL (Garage in development, AWS S3 in production).
     pub s3_endpoint_url: String,
-    /// Región S3 a usar.
+    /// S3 region to use.
     pub s3_region: String,
-    /// Identificador de la clave de acceso S3.
+    /// S3 access-key identifier.
     pub s3_access_key_id: String,
-    /// Secreto de la clave de acceso S3.
+    /// S3 access-key secret.
     pub s3_secret_access_key: String,
-    /// Nombre del *bucket* S3 donde se almacenan los artefactos.
+    /// Name of the S3 *bucket* where artifacts are stored.
     pub s3_bucket: String,
-    /// Dirección y puerto en los que escucha el servidor HTTP.
+    /// Address and port the HTTP server listens on.
     pub bind_address: String,
-    /// URL pública (esquema + host + puerto, sin barra final) bajo la
-    /// que este servidor es alcanzable. Se usa para construir URLs
-    /// absolutas en protocolos que las requieren, como el `config.json`
-    /// del índice disperso de Cargo.
+    /// Public URL (scheme + host + port, no trailing slash) at which
+    /// this server is reachable. Used to build absolute URLs in
+    /// protocols that require them, such as Cargo sparse-index
+    /// `config.json`.
     pub public_base_url: String,
-    /// Nombre del administrador inicial (solo se usa si no hay usuarios).
+    /// Initial administrator username (used only if there are no users).
     pub admin_username: String,
-    /// Contraseña del administrador inicial (solo se usa si no hay usuarios).
+    /// Initial administrator password (used only if there are no users).
     pub admin_password: String,
-    /// Directorio de la UI estática. Si está, el servidor anida la API
-    /// en `/api` y sirve el SPA en el resto de rutas.
+    /// Static UI directory. When set, the server nests the API under
+    /// `/api` and serves the SPA on the remaining routes.
     pub frontend_dir: Option<String>,
-    /// Emisor `OIDC` (URL del realm). Vacío = SSO desactivado.
+    /// `OIDC` issuer (realm URL). Empty = SSO disabled.
     pub oidc_issuer: Option<String>,
-    /// `client_id` del cliente en el `IdP`.
+    /// `client_id` of the client in the `IdP`.
     pub oidc_client_id: Option<String>,
-    /// Secreto del cliente. Opcional si el cliente es público + PKCE.
+    /// Client secret. Optional if the client is public + PKCE.
     pub oidc_client_secret: Option<String>,
-    /// URL de retorno. Si falta, se deriva de `PUBLIC_BASE_URL`.
+    /// Return URL. If missing, it is derived from `PUBLIC_BASE_URL`.
     pub oidc_redirect_uri: Option<String>,
-    /// Destino de la UI tras el login. Si falta, `{PUBLIC_BASE_URL}/login`.
+    /// UI destination after login. If missing, `{PUBLIC_BASE_URL}/login`.
     pub oidc_success_redirect: Option<String>,
-    /// Ámbitos (`openid profile email` por defecto).
+    /// Scopes (`openid profile email` by default).
     pub oidc_scopes: Option<String>,
-    /// Roles del `IdP` que conceden Admin, separados por coma.
+    /// `IdP` roles that grant Admin, comma-separated.
     pub oidc_admin_roles: Option<String>,
-    /// Roles del `IdP` que conceden Developer, separados por coma.
+    /// `IdP` roles that grant Developer, comma-separated.
     pub oidc_developer_roles: Option<String>,
-    /// Roles del `IdP` que conceden Reader, separados por coma.
+    /// `IdP` roles that grant Reader, comma-separated.
     pub oidc_reader_roles: Option<String>,
-    /// *Claim* extra de roles (además de `realm_access` / `roles`).
+    /// Extra roles *claim* (in addition to `realm_access` / `roles`).
     pub oidc_role_claim: Option<String>,
-    /// *Claim* de grupos (`groups` por defecto).
+    /// Groups *claim* (`groups` by default).
     pub oidc_group_claim: Option<String>,
-    /// Si `false`, no se crean grupos que aún no existan.
+    /// If `false`, groups that do not yet exist are not created.
     pub oidc_auto_create_groups: bool,
-    /// Caducidad de los tokens de sesión (login y SSO).
+    /// Session token expiry (login and SSO).
     pub session_ttl: Duration,
 }
 
 impl Config {
-    /// Lee la configuración completa desde variables de entorno.
+    /// Reads the full configuration from environment variables.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ConfigError::MissingVar`] si falta alguna variable
-    /// obligatoria.
+    /// Returns [`ConfigError::MissingVar`] if a required variable is
+    /// missing.
     pub fn from_env() -> Result<Self, ConfigError> {
         Ok(Self {
             database_url: require_env("DATABASE_URL")?,
@@ -106,13 +106,14 @@ impl Config {
     }
 }
 
-/// Carga ficheros `.env` y **pisa** variables ya exportadas en el shell.
+/// Loads `.env` files and **overrides** variables already exported in the shell.
 ///
-/// Si `FERROBOX_ENV_FILE` apunta a un fichero (`.env_a`, `.env_b`),
-/// solo se carga ese: dos `cargo run` no se pisan el `.env` compartido.
-/// Si no, el último candidato gana. `backend/.env` (junto al crate del
-/// servidor) se aplica al final para que un `S3_BUCKET` exportado en
-/// la terminal no gane. El bucket no se lee de la base de datos.
+/// If `FERROBOX_ENV_FILE` points to a file (`.env_a`, `.env_b`),
+/// only that one is loaded: two `cargo run` processes do not overwrite
+/// each other's shared `.env`. Otherwise the last candidate wins.
+/// `backend/.env` (next to the server crate) is applied last so an
+/// `S3_BUCKET` exported in the terminal does not win. The bucket is
+/// not read from the database.
 pub fn load_dotenv() -> Vec<PathBuf> {
     let explicit = optional_env("FERROBOX_ENV_FILE");
     let mut loaded = Vec::new();

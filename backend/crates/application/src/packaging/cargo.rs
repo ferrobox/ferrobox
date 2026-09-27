@@ -1,12 +1,12 @@
-//! Estrategia de empaquetado para el ecosistema Cargo: implementa el
-//! subconjunto del protocolo de índice disperso (*sparse index*) que
-//! `cargo` necesita para publicar paquetes (`cargo publish`) y resolver
-//! sus dependencias (`cargo build`, `cargo add`) contra un repositorio
-//! `FerroBox`.
+//! Packaging strategy for the Cargo ecosystem: implements the
+//! subset of the sparse index protocol that
+//! `cargo` needs to publish packages (`cargo publish`) and resolve
+//! their dependencies (`cargo build`, `cargo add`) against a
+//! `FerroBox` repository.
 //!
-//! Referencia del protocolo:
+//! Protocol reference:
 //! <https://doc.rust-lang.org/cargo/reference/registry-index.html>
-//! y <https://doc.rust-lang.org/cargo/reference/registries.html>.
+//! and <https://doc.rust-lang.org/cargo/reference/registries.html>.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -35,7 +35,7 @@ use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema Cargo.
+/// Packaging strategy for the Cargo ecosystem.
 pub struct CargoPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -47,7 +47,7 @@ pub struct CargoPackagingStrategy {
 }
 
 impl CargoPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Builds the strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -67,14 +67,14 @@ impl CargoPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un crate.
+    /// Connects automatic assay when publishing or caching a crate.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -644,14 +644,14 @@ impl PackagingStrategy for CargoPackagingStrategy {
     }
 }
 
-/// Calcula la ruta relativa -- bajo la raíz del índice disperso -- en la
-/// que `cargo` espera encontrar las entradas de índice de un paquete,
-/// siguiendo las reglas oficiales de fragmentación (*sharding*) del
-/// protocolo de índice disperso: nombres de 1 y 2 caracteres viven en
-/// `1/` y `2/` respectivamente; los de 3 caracteres, en `3/{primera
-/// letra}/`; y el resto, en `{dos primeras letras}/{siguientes dos
-/// letras}/`. `cargo` siempre normaliza el nombre a minúsculas al
-/// calcular esta ruta.
+/// Computes the relative path -- under the sparse index root -- where
+/// `cargo` expects to find a package's index entries,
+/// following the official sharding rules of the
+/// sparse index protocol: 1- and 2-character names live in
+/// `1/` and `2/` respectively; 3-character names live in `3/{first
+/// letter}/`; and the rest live in `{first two letters}/{next two
+/// letters}/`. `cargo` always lowercases the name when
+/// computing this path.
 #[must_use]
 pub fn cargo_index_shard_path(name: &PackageName) -> String {
     let lower = name.as_str().to_ascii_lowercase();
@@ -690,10 +690,10 @@ fn expand_dl_template(template: &str, crate_name: &str, version: &str) -> String
         _ => format!("{}/{}", &lower[0..2], &lower[2..4]),
     };
 
-    // Misma regla que Cargo: si `dl` no trae marcadores, se añade
-    // `/{crate}/{version}/download`. crates.io (índice disperso) publica
-    // `https://static.crates.io/crates` sin plantilla; sin este paso el
-    // Mirror pediría el directorio y crates.io responde 403.
+    // Same rule as Cargo: if `dl` has no placeholders, append
+    // `/{crate}/{version}/download`. crates.io (sparse index) publishes
+    // `https://static.crates.io/crates` without a template; without this step the
+    // Mirror would request the directory and crates.io responds 403.
     // https://doc.rust-lang.org/cargo/reference/registry-index.html
     let has_markers = ["{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"]
         .iter()
@@ -715,12 +715,12 @@ struct UpstreamRegistryConfig {
     dl: String,
 }
 
-/// Cuerpo JSON que `cargo publish` envía como primer bloque de la
-/// petición de publicación. Solo se modelan los campos que
-/// `FerroBox` necesita para construir la entrada de índice; el resto
-/// (autores, descripción, licencia...) se ignoran silenciosamente
-/// gracias al comportamiento por defecto de `serde` ante campos
-/// desconocidos.
+/// JSON body that `cargo publish` sends as the first block of the
+/// publish request. Only the fields that
+/// `FerroBox` needs to build the index entry are modeled; the rest
+/// (authors, description, license...) are silently ignored
+/// thanks to `serde`'s default behavior for unknown
+/// fields.
 #[derive(Debug, Deserialize)]
 struct PublishMetadata {
     name: String,
@@ -752,10 +752,10 @@ struct PublishDependency {
     explicit_name_in_toml: Option<String>,
 }
 
-/// Una entrada del índice disperso de Cargo: una línea JSON que describe
-/// una versión publicada de un paquete.
+/// A Cargo sparse-index entry: a JSON line that describes
+/// a published version of a package.
 ///
-/// Formato oficial:
+/// Official format:
 /// <https://doc.rust-lang.org/cargo/reference/registry-index.html#json-schema>
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IndexEntry {
@@ -772,7 +772,7 @@ pub struct IndexEntry {
     links: Option<String>,
     #[serde(default = "default_index_schema_version")]
     v: u32,
-    /// Licencia declarada en el publish; `cargo` ignora campos extra.
+    /// License declared at publish time; `cargo` ignores extra fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     license: Option<String>,
 }
@@ -820,11 +820,11 @@ impl IndexEntry {
             yanked: false,
             links: metadata.links.clone(),
             license: metadata.license.clone(),
-            // Se fija deliberadamente en 1: esta versión de esquema le
-            // indica a `cargo` que no busque un campo `features2`, que
-            // esta estrategia nunca genera (solo es necesario para
-            // "weak dependency features", fuera del alcance de esta
-            // primera implementación).
+            // Deliberately set to 1: this schema version tells
+            // `cargo` not to look for a `features2` field, which
+            // this strategy never generates (it is only needed for
+            // "weak dependency features", which are out of scope for this
+            // first implementation).
             v: 1,
         }
     }
@@ -832,11 +832,11 @@ impl IndexEntry {
 
 impl From<&PublishDependency> for IndexDependency {
     fn from(dep: &PublishDependency) -> Self {
-        // Si la dependencia se renombró en el `Cargo.toml` del
-        // publicador (`foo = { package = "bar", version = "1" }`), el
-        // índice debe reflejar el nombre local bajo `name` y el nombre
-        // real del paquete bajo `package` -- así es como `cargo`
-        // distingue un alias de un nombre de paquete real al resolver.
+        // If the dependency was renamed in the publisher's `Cargo.toml`
+        // (`foo = { package = "bar", version = "1" }`), the
+        // index must reflect the local name under `name` and the
+        // real package name under `package` -- that is how `cargo`
+        // distinguishes an alias from a real package name when resolving.
         let (name, package) = match &dep.explicit_name_in_toml {
             Some(local_alias) => (local_alias.clone(), Some(dep.name.clone())),
             None => (dep.name.clone(), None),
@@ -856,26 +856,26 @@ impl From<&PublishDependency> for IndexDependency {
     }
 }
 
-/// Resultado de descomponer una petición `cargo publish`: metadatos,
-/// contenido del `.crate` y el SHA-256 de ese contenido, ya listo para
-/// persistirse tanto en el artefacto como en la entrada de índice.
+/// Result of splitting a `cargo publish` request: metadata,
+/// `.crate` contents, and the SHA-256 of those contents, ready to
+/// persist both on the artifact and in the index entry.
 struct ParsedPublishPayload {
     metadata: PublishMetadata,
     crate_bytes: Bytes,
     checksum: Sha256Checksum,
 }
 
-/// Descompone el cuerpo binario de una petición `cargo publish` en sus
-/// dos partes: los metadatos JSON y el contenido del archivo `.crate`.
-/// El checksum SHA-256 se calcula aquí, sobre los bytes del `.crate`,
-/// para que la entrada de índice (`cksum`) y los metadatos del artefacto
-/// compartan exactamente el mismo valor.
+/// Splits the binary body of a `cargo publish` request into its
+/// two parts: the JSON metadata and the `.crate` file contents.
+/// The SHA-256 checksum is computed here, over the `.crate` bytes,
+/// so that the index entry (`cksum`) and the artifact metadata
+/// share exactly the same value.
 ///
-/// Formato (todos los enteros en *little-endian*):
-/// `[u32 longitud de metadatos][metadatos JSON][u32 longitud del
-/// `.crate`][contenido del `.crate`]`. Cualquier dato adicional a
-/// continuación (extensiones de versiones recientes de `cargo`, como el
-/// archivo `.crate` firmado) se ignora.
+/// Format (all integers little-endian):
+/// `[u32 metadata length][JSON metadata][u32 `.crate`
+/// length][`.crate` contents]`. Any additional data
+/// afterward (extensions in recent `cargo` versions, such as a
+/// signed `.crate` file) is ignored.
 fn parse_publish_payload(mut payload: Bytes) -> Result<ParsedPublishPayload, PackagingError> {
     let metadata_len = read_u32_le(&mut payload, "metadata length prefix")?;
     let metadata_bytes = split_prefix(&mut payload, metadata_len, "metadata")?;
@@ -1476,9 +1476,9 @@ mod tests {
         let downloaded = strategy.download(&repository, &coordinate).await.unwrap();
         assert_eq!(downloaded, crate_bytes);
 
-        // Segunda descarga: debe servirse desde la caché local sin
-        // volver a pedir el `.crate` al upstream (el stub sigue ahí,
-        // pero el artefacto ya está asociado en el índice).
+        // Second download: must be served from the local cache without
+        // requesting the `.crate` from upstream again (the stub is still there,
+        // but the artifact is already associated in the index).
         let downloaded_again = strategy.download(&repository, &coordinate).await.unwrap();
         assert_eq!(downloaded_again, crate_bytes);
     }

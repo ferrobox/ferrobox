@@ -6,13 +6,13 @@ use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`QuotaStore`] contra `PostgreSQL`.
+/// [`QuotaStore`] adapter against `PostgreSQL`.
 pub struct PostgresQuotaStore {
     pool: PgPool,
 }
 
 impl PostgresQuotaStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

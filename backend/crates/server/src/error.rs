@@ -1,4 +1,4 @@
-//! Traducción de los errores de la capa de aplicación a respuestas HTTP.
+//! Translation of application-layer errors into HTTP responses.
 
 use axum::Json;
 use axum::http::StatusCode;
@@ -43,7 +43,7 @@ use ferrobox_ports::repository_store::RepositoryStoreError;
 
 use crate::dto::ErrorResponse;
 
-/// Un error de la API HTTP, ya traducido a un código de estado.
+/// An HTTP API error, already translated to a status code.
 pub(crate) enum ApiError {
     BadRequest(String),
     Unauthorized(String),

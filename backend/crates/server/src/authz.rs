@@ -31,7 +31,7 @@ pub(crate) fn require_token_write(token: &ApiToken) -> Result<(), ApiError> {
     }
 }
 
-/// Exige que el usuario pueda gestionar otros usuarios (`Admin`).
+/// Requires the user to be able to manage other users (`Admin`).
 pub(crate) fn require_manage_users(user: &User, token: &ApiToken) -> Result<(), ApiError> {
     require_token_write(token)?;
     if user.role().can_manage_users() {
@@ -43,7 +43,7 @@ pub(crate) fn require_manage_users(user: &User, token: &ApiToken) -> Result<(), 
     }
 }
 
-/// Exige que el usuario pueda gestionar grupos (`Admin`).
+/// Requires the user to be able to manage groups (`Admin`).
 pub(crate) fn require_manage_groups(user: &User, token: &ApiToken) -> Result<(), ApiError> {
     require_token_write(token)?;
     if user.role().can_manage_users() {
@@ -55,8 +55,8 @@ pub(crate) fn require_manage_groups(user: &User, token: &ApiToken) -> Result<(),
     }
 }
 
-/// Exige que el usuario pueda crear repositorios y publicar artefactos
-/// (`Admin` o `Developer`) a nivel de instancia.
+/// Requires the user to be able to create repositories and publish
+/// artifacts (`Admin` or `Developer`) at instance level.
 pub(crate) fn require_write_artifacts(user: &User, token: &ApiToken) -> Result<(), ApiError> {
     require_token_write(token)?;
     if user.role().can_write_artifacts() {
@@ -68,7 +68,7 @@ pub(crate) fn require_write_artifacts(user: &User, token: &ApiToken) -> Result<(
     }
 }
 
-/// Exige lectura del repositorio (rol de instancia o membresía de grupo).
+/// Requires repository read access (instance role or group membership).
 pub(crate) async fn require_repo_read(
     groups: &GroupService,
     user: &User,
@@ -82,7 +82,7 @@ pub(crate) async fn require_repo_read(
         .ok_or_else(|| ApiError::Forbidden("you do not have access to this repository".to_string()))
 }
 
-/// Exige escritura en el repositorio.
+/// Requires write access to the repository.
 pub(crate) async fn require_repo_write(
     groups: &GroupService,
     user: &User,
@@ -100,8 +100,8 @@ pub(crate) async fn require_repo_write(
     }
 }
 
-/// Lectura pública de un registro: si el repositorio está restringido,
-/// exige un token con acceso de lectura.
+/// Public registry read: if the repository is restricted, requires a
+/// token with read access.
 pub(crate) async fn require_public_repo_read(
     groups: &GroupService,
     authenticate: &AuthenticateTokenUseCase,

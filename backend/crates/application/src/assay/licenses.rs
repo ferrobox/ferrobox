@@ -1,9 +1,9 @@
-//! Licencias declaradas en manifiestos e índices.
+//! Licenses declared in manifests and indexes.
 
 use ferrobox_domain::assay::{AssayComponent, AssayComponentKind};
 use serde_json::Value;
 
-/// Separa una declaración en etiquetas SPDX (u otras) sin inventar.
+/// Splits a declaration into SPDX (or other) labels without inventing any.
 #[must_use]
 pub fn split_declared(raw: &str) -> Vec<String> {
     let raw = raw
@@ -67,7 +67,7 @@ fn push_part(parts: &mut Vec<String>, part: &str) {
     parts.push(part.to_string());
 }
 
-/// Licencias del manifiesto npm (`license`, `licenses` o `{ type }`).
+/// Licenses from the npm manifest (`license`, `licenses`, or `{ type }`).
 #[must_use]
 pub fn from_npm_manifest(manifest: &Value) -> Vec<String> {
     let licenses = from_npm_value(manifest.get("license"));
@@ -102,7 +102,7 @@ fn from_npm_value(value: Option<&Value>) -> Vec<String> {
     }
 }
 
-/// Licencia del índice o del `Cargo.toml` (`license = "…"`).
+/// License from the index or from `Cargo.toml` (`license = "…"`).
 #[must_use]
 pub fn from_cargo_index(entry: &Value) -> Vec<String> {
     entry
@@ -112,7 +112,7 @@ pub fn from_cargo_index(entry: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Licencia de la sección `[package]` de un `Cargo.toml`.
+/// License from the `[package]` section of a `Cargo.toml`.
 #[must_use]
 pub fn from_cargo_toml(text: &str) -> (Option<String>, Vec<String>) {
     let mut in_package = false;
@@ -149,7 +149,7 @@ fn toml_quoted(rest: &str) -> Option<String> {
     }
 }
 
-/// Licencias de `METADATA` / `PKG-INFO` de Python.
+/// Licenses from Python `METADATA` / `PKG-INFO`.
 #[must_use]
 pub fn from_python_metadata(text: &str) -> (Option<String>, Vec<String>) {
     let mut name = None;
@@ -187,7 +187,7 @@ pub fn from_python_metadata(text: &str) -> (Option<String>, Vec<String>) {
     (name.filter(|value| !value.is_empty()), licenses)
 }
 
-/// Licencia de `Chart.yaml` (campo `license:`).
+/// License from `Chart.yaml` (`license:` field).
 #[must_use]
 pub fn from_chart_yaml(text: &str) -> Vec<String> {
     if let Ok(value) = serde_json::from_str::<Value>(text)
@@ -204,7 +204,7 @@ pub fn from_chart_yaml(text: &str) -> Vec<String> {
     Vec::new()
 }
 
-/// Licencia de `conanfile.py` (`license = "…"`).
+/// License from `conanfile.py` (`license = "…"`).
 #[must_use]
 pub fn from_conanfile_py(text: &str) -> Vec<String> {
     for line in text.lines() {
@@ -223,7 +223,7 @@ pub fn from_conanfile_py(text: &str) -> Vec<String> {
     Vec::new()
 }
 
-/// Añade licencias al componente del mismo nombre, o al raíz si no hay nombre.
+/// Adds licenses to the component of the same name, or to the root if there is no name.
 pub fn attach(
     components: &mut [AssayComponent],
     name: Option<&str>,

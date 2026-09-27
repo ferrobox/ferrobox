@@ -2,6 +2,6 @@
 import type { AdmissionEffectDto } from "./AdmissionEffectDto";
 
 /**
- * Un aviso o una denegación registrados en un pull.
+ * A warning or a denial recorded on a pull.
  */
 export type AdmissionEventResponse = { id: string, name: string, reference: string, effect: AdmissionEffectDto, reason: string, created_at: string, };

@@ -1,5 +1,5 @@
-//! Punto de composición de `FerroBox`: el único lugar del proyecto que
-//! conoce todas las implementaciones concretas de cada puerto.
+//! Composition root of `FerroBox`: the only place in the project that
+//! knows every concrete implementation of each port.
 
 mod admission;
 mod artifacts;
@@ -104,7 +104,7 @@ use ferrobox_domain::user::Username;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::services::{ServeDir, ServeFile};
 
-/// Estado compartido por todos los manejadores de rutas.
+/// State shared by every route handler.
 struct AppState {
     create_repository: CreateRepositoryUseCase,
     list_repositories: ListRepositoriesUseCase,

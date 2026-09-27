@@ -1,14 +1,14 @@
-//! Rutas HTTP que implementan el subconjunto del protocolo de `PyPI` que
-//! `twine upload` y `pip install` necesitan.
+//! HTTP routes that implement the subset of the `PyPI` protocol that
+//! `twine upload` and `pip install` need.
 //!
-//! Referencias:
-//! - índice simple: <https://peps.python.org/pep-0503/>
-//! - índice JSON: <https://peps.python.org/pep-0691/>
-//! - subida *legacy*: <https://docs.pypi.org/api/upload/>
+//! References:
+//! - simple index: <https://peps.python.org/pep-0503/>
+//! - JSON index: <https://peps.python.org/pep-0691/>
+//! - *legacy* upload: <https://docs.pypi.org/api/upload/>
 //!
-//! Las lecturas (`/simple/` y `/packages/`) son públicas. Las escrituras
-//! (`POST` de subida y yank) exigen `Authorization` (`Bearer`, `Token` o
-//! Basic) y rol de escritura.
+//! Reads (`/simple/` and `/packages/`) are public. Writes (upload
+//! `POST` and yank) require `Authorization` (`Bearer`, `Token`, or
+//! Basic) and a write role.
 
 use std::sync::Arc;
 
@@ -36,10 +36,10 @@ use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
-/// Tamaño máximo de una subida `twine` (sdist o wheel).
+/// Maximum size of a `twine` upload (sdist or wheel).
 const PYPI_UPLOAD_LIMIT: usize = 100 * 1024 * 1024;
 
-/// Rutas de solo lectura del protocolo de `PyPI`.
+/// Read-only `PyPI` protocol routes.
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/pypi/{repository_id}/simple/", get(simple_root))
@@ -52,7 +52,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura del protocolo de `PyPI`.
+/// Write routes for the `PyPI` protocol.
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/pypi/{repository_id}/", post(upload))
@@ -372,8 +372,8 @@ fn simple_index_response(
     (StatusCode::OK, headers, body)
 }
 
-/// Elige JSON PEP 691 si el cliente lo prefiere sobre HTML (como `pip` y `uv`).
-/// Sin `Accept`, o con solo `*/*`, se sirve HTML PEP 503.
+/// Chooses PEP 691 JSON if the client prefers it over HTML (as `pip` and `uv` do).
+/// With no `Accept`, or with only `*/*`, PEP 503 HTML is served.
 fn prefers_simple_json(headers: &HeaderMap) -> bool {
     let Some(accept) = headers
         .get(header::ACCEPT)

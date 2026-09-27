@@ -4,66 +4,63 @@ use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use thiserror::Error;
 
-/// Motivos por los que una operación sobre el índice de paquetes puede
-/// fallar.
+/// Reasons a package-index operation can fail.
 #[derive(Debug, Error)]
 pub enum PackageIndexStoreError {
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Relación entre un artefacto almacenado y la coordenada de paquete
-/// (ecosistema, nombre y versión) que lo publicó.
+/// Relationship between a stored artifact and the package coordinate
+/// (ecosystem, name, and version) that published it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedArtifact {
-    /// Identificador del binario persistido.
+    /// Identifier of the persisted binary.
     pub artifact_id: ArtifactId,
-    /// Coordenada de paquete asociada.
+    /// Associated package coordinate.
     pub coordinate: PackageCoordinate,
-    /// Entrada de índice ya serializada por la estrategia de
-    /// empaquetado (una línea JSON para Cargo). Permite leer flags
-    /// como `yanked` sin que este puerto conozca el ecosistema.
+    /// Index entry already serialized by the packaging strategy (one
+    /// JSON line for Cargo). Lets callers read flags such as `yanked`
+    /// without this port knowing the ecosystem.
     pub entry: Bytes,
 }
 
-/// Fila del índice de paquetes, con o sin binario cacheado.
+/// Package-index row, with or without a cached binary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageIndexRecord {
-    /// Identificador del binario persistido, si ya se cacheó.
+    /// Identifier of the persisted binary, if it has already been cached.
     pub artifact_id: Option<ArtifactId>,
-    /// Coordenada de paquete asociada.
+    /// Associated package coordinate.
     pub coordinate: PackageCoordinate,
-    /// Entrada de índice ya serializada por la estrategia de empaquetado.
+    /// Index entry already serialized by the packaging strategy.
     pub entry: Bytes,
-    /// Momento en que se insertó la fila, en RFC 3339.
+    /// Time the row was inserted, in RFC 3339.
     pub created_at_rfc3339: String,
 }
 
-/// Puerto de persistencia del índice de paquetes: la lista, por
-/// repositorio y coordenada, de las entradas que cada estrategia de
-/// empaquetado (`PackagingStrategy`) necesita para responder al
-/// protocolo de índice de su ecosistema (por ejemplo, el índice disperso
-/// de `cargo`).
+/// Persistence port for the package index: the list, by repository and
+/// coordinate, of the entries each packaging strategy
+/// (`PackagingStrategy`) needs to answer its ecosystem index protocol
+/// (for example, the Cargo sparse index).
 ///
-/// Este puerto es deliberadamente agnóstico del formato de cada
-/// ecosistema: `entry` es un bloque de bytes ya serializado por la
-/// estrategia correspondiente (una línea JSON para `cargo`, y
-/// potencialmente otro formato para futuros ecosistemas). El puerto solo
-/// se encarga de guardarlo y devolverlo en el orden de publicación,
-/// igual que `ArtifactStore` no entiende el contenido binario que
-/// almacena.
+/// This port is deliberately agnostic of each ecosystem's format:
+/// `entry` is a byte block already serialized by the corresponding
+/// strategy (one JSON line for Cargo, and potentially another format
+/// for future ecosystems). The port only stores it and returns it in
+/// publication order, just as `ArtifactStore` does not understand the
+/// binary content it stores.
 #[async_trait]
 pub trait PackageIndexStore: Send + Sync {
-    /// Inserta o reemplaza la entrada de índice de una coordenada de
-    /// paquete concreta. `artifact_id` puede ser `None` cuando la
-    /// entrada proviene del *upstream* de un `Mirror` y el binario
-    /// todavía no se ha cacheado localmente.
+    /// Inserts or replaces the index entry of a specific package
+    /// coordinate. `artifact_id` may be `None` when the entry comes
+    /// from the *upstream* of a `Mirror` and the binary has not been
+    /// cached locally yet.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn upsert_entry(
         &self,
         repository_id: RepositoryId,
@@ -72,13 +69,13 @@ pub trait PackageIndexStore: Send + Sync {
         entry: Bytes,
     ) -> Result<(), PackageIndexStoreError>;
 
-    /// Lista las entradas de índice de todas las versiones publicadas de
-    /// un paquete, en el orden en que se publicaron.
+    /// Lists the index entries of every published version of a package,
+    /// in the order they were published.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn entries_for_package(
         &self,
         repository_id: RepositoryId,
@@ -86,88 +83,88 @@ pub trait PackageIndexStore: Send + Sync {
         name: &PackageName,
     ) -> Result<Vec<Bytes>, PackageIndexStoreError>;
 
-    /// Busca el identificador del artefacto binario asociado a una
-    /// coordenada de paquete ya publicada. Devuelve `None` si esa
-    /// coordenada nunca se publicó en ese repositorio.
+    /// Looks up the identifier of the binary artifact associated with
+    /// an already published package coordinate. Returns `None` if that
+    /// coordinate was never published in that repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn artifact_for(
         &self,
         repository_id: RepositoryId,
         coordinate: &PackageCoordinate,
     ) -> Result<Option<ArtifactId>, PackageIndexStoreError>;
 
-    /// Elimina las entradas de índice asociadas a un artefacto. No es un
-    /// error si no hay ninguna.
+    /// Deletes the index entries associated with an artifact. It is not
+    /// an error if there are none.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn delete_by_artifact(
         &self,
         artifact_id: ArtifactId,
     ) -> Result<(), PackageIndexStoreError>;
 
-    /// Elimina todas las entradas de índice de un repositorio. No es un
-    /// error si el repositorio no tiene ninguna.
+    /// Deletes every index entry of a repository. It is not an error if
+    /// the repository has none.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn delete_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<(), PackageIndexStoreError>;
 
-    /// Lista las entradas de índice de todos los paquetes de un
-    /// repositorio, en el orden en que se publicaron.
+    /// Lists the index entries of every package in a repository, in the
+    /// order they were published.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn entries_for_repository(
         &self,
         repository_id: RepositoryId,
         ecosystem: PackageEcosystem,
     ) -> Result<Vec<Bytes>, PackageIndexStoreError>;
 
-    /// Lista las coordenadas de paquete de un repositorio que ya tienen
-    /// un artefacto binario asociado (nombre, versión e identificador).
+    /// Lists the package coordinates of a repository that already have
+    /// an associated binary artifact (name, version, and identifier).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn find_indexed_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<IndexedArtifact>, PackageIndexStoreError>;
 
-    /// Lista todas las entradas de índice de un repositorio, incluidas
-    /// las que todavía no tienen binario cacheado.
+    /// Lists every index entry of a repository, including those that
+    /// do not yet have a cached binary.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn list_entries(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<PackageIndexRecord>, PackageIndexStoreError>;
 
-    /// Elimina la entrada de índice de una coordenada. No es un error si
-    /// no existe.
+    /// Deletes the index entry of a coordinate. It is not an error if
+    /// it does not exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageIndexStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`PackageIndexStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn delete_by_coordinate(
         &self,
         repository_id: RepositoryId,

@@ -1,24 +1,25 @@
-//! Rutas HTTP del Distribution Spec v2 (`docker push` / `docker pull`).
+//! HTTP routes for Distribution Spec v2 (`docker push` / `docker pull`).
 //!
-//! Referencia: <https://github.com/opencontainers/distribution-spec>.
+//! Reference: <https://github.com/opencontainers/distribution-spec>.
 //!
-//! Las lecturas de manifiestos, blobs y etiquetas son públicas. `GET /v2/`
-//! desafía a Docker (`401` + Bearer): el motor (overlay2) decide si el
-//! registro pide auth solo con ese ping; un `200` hace que el push salga
-//! sin `Authorization` y muera con `missing Authorization credentials`.
-//! Helm/ORAS (3.18+) son la excepción: si el ping es 401 cachean el token
-//! anónimo de `/v2/token` y lo reutilizan en `helm push` sin reintentar.
-//! Las escrituras (subida de blobs y manifiestos, yank) exigen un token
-//! de API (`Bearer`, `Token` o Basic) y rol de escritura. Un `scope` con
-//! `push` en `/v2/token` no emite el token anónimo.
+//! Manifest, blob, and tag reads are public. `GET /v2/` challenges
+//! Docker (`401` + Bearer): the engine (overlay2) decides whether the
+//! registry requires auth from that ping alone; a `200` makes the push
+//! leave without `Authorization` and die with
+//! `missing Authorization credentials`. Helm/ORAS (3.18+) are the
+//! exception: if the ping is 401 they cache the anonymous token from
+//! `/v2/token` and reuse it on `helm push` without retrying.
+//! Writes (blob and manifest upload, yank) require an API token
+//! (`Bearer`, `Token`, or Basic) and a write role. A `scope` with
+//! `push` on `/v2/token` does not issue the anonymous token.
 //!
-//! El registro vive en la raíz del host (`/v2/`). El primer componente
-//! del nombre de imagen es el UUID del repositorio `FerroBox`; el resto
-//! puede incluir barras: `127.0.0.1:3000/<UUID>/demo:latest` o
+//! The registry lives at the host root (`/v2/`). The first component
+//! of the image name is the `FerroBox` repository UUID; the rest may
+//! include slashes: `127.0.0.1:3000/<UUID>/demo:latest` or
 //! `127.0.0.1:3000/<UUID>/bitnami/nginx:latest`.
 //!
-//! Los repositorios **Helm** usan las mismas rutas: los charts son
-//! artefactos OCI (`helm push` / `helm pull`).
+//! **Helm** repositories use the same routes: charts are OCI artifacts
+//! (`helm push` / `helm pull`).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -48,7 +49,7 @@ use crate::auth_extract::{
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
-/// Tamaño máximo de un blob o manifiesto OCI.
+/// Maximum size of an OCI blob or manifest.
 const OCI_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 
 static DOCKER_CONTENT_DIGEST: HeaderName = HeaderName::from_static("docker-content-digest");
@@ -56,7 +57,7 @@ static DOCKER_DISTRIBUTION_API_VERSION: HeaderName =
     HeaderName::from_static("docker-distribution-api-version");
 static DOCKER_UPLOAD_UUID: HeaderName = HeaderName::from_static("docker-upload-uuid");
 
-/// Rutas de solo lectura del protocolo OCI.
+/// Read-only OCI protocol routes.
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v2/", get(version_check))
@@ -69,7 +70,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura del protocolo OCI.
+/// Write routes for the OCI protocol.
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -319,9 +320,9 @@ async fn version_check(State(state): State<Arc<AppState>>, headers: HeaderMap) -
     )
 }
 
-/// Helm/ORAS cachean el token anónimo tras un ping 401 y no reintentan
-/// en el push. Docker (overlay2) solo adjunta credenciales si el ping
-/// ya dejó un desafío Bearer.
+/// Helm/ORAS cache the anonymous token after a 401 ping and do not
+/// retry on push. Docker (overlay2) only attaches credentials if the
+/// ping already left a Bearer challenge.
 fn oci_client_skips_version_challenge(headers: &HeaderMap) -> bool {
     let user_agent = headers
         .get(header::USER_AGENT)
@@ -369,9 +370,9 @@ async fn issue_token(
     Ok(oci_json(StatusCode::OK, &body))
 }
 
-/// `scope=repository:<name>:<actions>` puede repetirse. `push` exige
-/// credenciales reales: un token anónimo aquí es lo que Helm/ORAS cachea
-/// tras el ping y reutiliza en el POST de blobs.
+/// `scope=repository:<name>:<actions>` may repeat. `push` requires real
+/// credentials: an anonymous token here is what Helm/ORAS cache after
+/// the ping and reuse on the blob POST.
 fn token_query_requests_push(query: &str) -> bool {
     query.split('&').any(|pair| {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -873,7 +874,7 @@ fn uploads() -> &'static UploadStore {
     })
 }
 
-/// Error HTTP con el JSON de errores del Distribution Spec.
+/// HTTP error with the Distribution Spec error JSON.
 struct OciApiError {
     status: StatusCode,
     body: Bytes,

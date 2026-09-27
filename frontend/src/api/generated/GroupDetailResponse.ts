@@ -3,6 +3,6 @@ import type { GroupRepositoryGrantResponse } from "./GroupRepositoryGrantRespons
 import type { UserResponse } from "./UserResponse";
 
 /**
- * Detalle de un grupo: miembros y repositorios.
+ * Group detail: members and repositories.
  */
 export type GroupDetailResponse = { id: string, name: string, members: Array<UserResponse>, repositories: Array<GroupRepositoryGrantResponse>, };

@@ -2,6 +2,6 @@
 import type { WebhookEventDto } from "./WebhookEventDto";
 
 /**
- * Cuerpo para crear un aviso HTTP.
+ * Body to create an HTTP notification.
  */
 export type CreateWebhookRequest = { name: string, url: string, secret?: string, events: Array<WebhookEventDto>, enabled: boolean, };

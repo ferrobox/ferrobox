@@ -1,17 +1,17 @@
-//! Estrategia de empaquetado para Maven: layout HTTP clásico
-//! (`/{group}/{artifact}/{version}/{file}`) que `mvn deploy`,
-//! `mvn dependency:get` y Gradle necesitan contra un repositorio
-//! `FerroBox`.
+//! Packaging strategy for Maven: classic HTTP layout
+//! (`/{group}/{artifact}/{version}/{file}`) that `mvn deploy`,
+//! `mvn dependency:get`, and Gradle need against a
+//! `FerroBox` repository.
 //!
-//! Una sola URL sirve *releases* y *SNAPSHOT*. La versión se clasifica
-//! por el sufijo `-SNAPSHOT` o por marcas de tiempo únicas
-//! (`yyyyMMdd.HHmmss-N`). Los ficheros de *release* y las marcas de
-//! tiempo son inmutables; el nombre flotante `-SNAPSHOT` se puede
-//! sobrescribir.
+//! A single URL serves *releases* and *SNAPSHOT*. The version is classified
+//! by the `-SNAPSHOT` suffix or by unique timestamps
+//! (`yyyyMMdd.HHmmss-N`). *Release* files and timestamped
+//! files are immutable; the floating `-SNAPSHOT` name can be
+//! overwritten.
 //!
-//! Cubre **Forge** (PUT/GET, `maven-metadata.xml`, checksums, yank),
-//! **Mirror** (caché *pull-through* de un repositorio Maven) y lecturas
-//! en **Alloy**.
+//! Covers **Forge** (PUT/GET, `maven-metadata.xml`, checksums, yank),
+//! **Mirror** (*pull-through* cache of a Maven repository), and reads
+//! on **Alloy**.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ use crate::content_hash::sha256_checksum;
 use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema Maven.
+/// Packaging strategy for the Maven ecosystem.
 pub struct MavenPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -58,7 +58,7 @@ pub struct MavenPackagingStrategy {
 }
 
 impl MavenPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Builds the strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -78,14 +78,14 @@ impl MavenPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un fichero.
+    /// Connects automatic assay when publishing or caching a file.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -913,7 +913,7 @@ struct UniqueSnapshot {
     value: String,
 }
 
-/// `groupId:artifactId` y versión de un jar/pom, no de metadatos ni checksums.
+/// `groupId:artifactId` and version of a jar/pom, not of metadata or checksums.
 #[must_use]
 pub fn admission_download_target(path: &str) -> Option<(String, String)> {
     match parse_maven_path(path.trim_matches('/')).ok()? {
@@ -1025,7 +1025,7 @@ fn looks_like_version(segment: &str) -> bool {
         .is_some_and(|character| character.is_ascii_digit())
 }
 
-/// `true` si la versión es un SNAPSHOT flotante (`1.0-SNAPSHOT`).
+/// `true` if the version is a floating SNAPSHOT (`1.0-SNAPSHOT`).
 #[must_use]
 pub fn is_snapshot_version(version: &str) -> bool {
     version.ends_with("-SNAPSHOT")

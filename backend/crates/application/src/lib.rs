@@ -1,104 +1,104 @@
-//! Capa de aplicación de `FerroBox`.
+//! Application layer of `FerroBox`.
 //!
-//! Contiene los casos de uso (interactores) que orquestan las entidades
-//! de dominio a través de los puertos definidos en `ferrobox-ports`.
+//! Contains the use cases (interactors) that orchestrate domain entities
+//! through the ports defined in `ferrobox-ports`.
 
-/// Deriva claves de almacenamiento para artefactos.
+/// Derives storage keys for artifacts.
 mod storage_key;
 
-/// Calcula checksums SHA-256 de contenidos binarios.
+/// Computes SHA-256 checksums of binary contents.
 mod content_hash;
 
-/// Caso de uso: crear un nuevo repositorio.
+/// Use case: create a new repository.
 pub mod create_repository;
 
-/// Validación compartida de los miembros de un `Alloy`.
+/// Shared validation of `Alloy` members.
 pub mod alloy_members;
 
-/// Caso de uso: actualizar los miembros de un repositorio `Alloy`.
+/// Use case: update the members of an `Alloy` repository.
 pub mod update_alloy_members;
 
-/// Caso de uso: publicar un artefacto en un repositorio existente.
+/// Use case: publish an artifact to an existing repository.
 pub mod publish_artifact;
 
-/// Caso de uso: copiar una versión publicada de un Forge a otro Forge.
+/// Use case: copy a published version from one Forge to another Forge.
 pub mod promote_package;
 
-/// Caso de uso: calentar la caché de un `Mirror` desde su *upstream*.
+/// Use case: warm a `Mirror` cache from its *upstream*.
 pub mod prefetch_package;
 
-/// Exportar e importar un repositorio como archivo portable.
+/// Export and import a repository as a portable archive.
 pub mod repository_bundle;
 
-/// Intervalo y refresco programado de un `Mirror`.
+/// Interval and scheduled refresh of a `Mirror`.
 pub mod mirror_schedule;
 
-/// Caso de uso: eliminar un repositorio y todo su contenido.
+/// Use case: delete a repository and all of its content.
 pub mod delete_repository;
 
-/// Caso de uso: eliminar un artefacto (y su entrada de índice, si la hay).
+/// Use case: delete an artifact (and its index entry, if any).
 pub mod delete_artifact;
 
-/// Caso de uso: descargar un artefacto ya publicado.
+/// Use case: download an already published artifact.
 pub mod download_artifact;
 
-/// Caso de uso: listar los artefactos de un repositorio.
+/// Use case: list the artifacts of a repository.
 pub mod list_repository_artifacts;
 
-/// Caso de uso: listar todos los repositorios existentes.
+/// Use case: list every existing repository.
 pub mod list_repositories;
 
-/// Caso de uso: consultar el detalle de un repositorio existente.
+/// Use case: look up the details of an existing repository.
 pub mod get_repository;
 
-/// El patrón Strategy para publicar, indexar y descargar paquetes según
-/// su ecosistema (Cargo, npm, `PyPI`, ...).
+/// Strategy pattern for publishing, indexing, and downloading packages
+/// according to their ecosystem (Cargo, npm, `PyPI`, ...).
 pub mod packaging;
 
-/// Hashing de contraseñas y secretos de tokens de API.
+/// Hashing of passwords and API token secrets.
 pub mod auth_crypto;
 
-/// Caso de uso: crear el administrador inicial si no hay usuarios.
+/// Use case: create the initial administrator if there are no users.
 pub mod bootstrap_admin;
 
-/// Caso de uso: autenticar con usuario y contraseña.
+/// Use case: authenticate with username and password.
 pub mod login;
 
-/// Inicio de sesión federado (`OIDC`): PKCE, JIT y mapeo de grupos.
+/// Federated sign-in (`OIDC`): PKCE, JIT, and group mapping.
 pub mod oidc;
 
-/// Caso de uso: el usuario autenticado cambia su propia contraseña.
+/// Use case: the authenticated user changes their own password.
 pub mod change_password;
 
-/// Casos de uso: crear, listar y revocar tokens de API.
+/// Use cases: create, list, and revoke API tokens.
 pub mod manage_api_tokens;
 
-/// Casos de uso: crear, listar, cambiar el rol, restablecer la
-/// contraseña y eliminar usuarios.
+/// Use cases: create, list, change the role of, reset the password of,
+/// and delete users.
 pub mod manage_users;
 
-/// Casos de uso: grupos de usuarios y acceso a repositorios.
+/// Use cases: user groups and repository access.
 pub mod manage_groups;
 
-/// Casos de uso: avisos HTTP por repositorio.
+/// Use cases: HTTP notifications per repository.
 pub mod webhooks;
 
-/// Caso de uso: resolver un secreto Bearer a un principal autenticado.
+/// Use case: resolve a Bearer secret to an authenticated principal.
 pub mod authenticate_token;
 
-/// Ensaye de paquetes: inventario y vulnerabilidades conocidas.
+/// Package assay: inventory and known vulnerabilities.
 pub mod assay;
 
-/// Retención de versiones y recolección de basura.
+/// Version retention and garbage collection.
 pub mod retention;
 
-/// Política de admisión al bajar o publicar.
+/// Admission policy when pulling or publishing.
 pub mod admission;
 
-/// Registro de auditoría de escrituras de negocio.
+/// Audit log of business writes.
 pub mod audit;
 
-/// Cuota de almacenamiento por repositorio.
+/// Per-repository storage quota.
 pub mod quota;
 
 /// Write-once / read-many lock per repository.
@@ -107,7 +107,7 @@ pub mod worm;
 /// Replica push, pull, and scheduled runs to another FerroBox instance.
 pub mod replica;
 
-/// Búsqueda de paquetes en el catálogo de la instancia.
+/// Search packages in the instance catalog.
 pub mod search_packages;
 
 #[cfg(any(test, feature = "test-utils"))]

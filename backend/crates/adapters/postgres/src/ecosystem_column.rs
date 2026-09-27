@@ -1,13 +1,13 @@
-//! Conversión entre [`PackageEcosystem`] y su representación como
-//! columna de texto en `PostgreSQL`. Es una convención interna
-//! compartida por más de un adaptador (`repositories.ecosystem`,
-//! `package_index_entries.ecosystem`), así que vive en un único lugar en
-//! vez de duplicarse.
+//! Conversion between [`PackageEcosystem`] and its text-column
+//! representation in `PostgreSQL`. This is an internal convention
+//! shared by more than one adapter (`repositories.ecosystem`,
+//! `package_index_entries.ecosystem`), so it lives in a single place
+//! instead of being duplicated.
 
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 
-/// Traduce un [`PackageEcosystem`] a la cadena que se persiste en
-/// columnas de texto.
+/// Translates a [`PackageEcosystem`] to the string persisted in
+/// text columns.
 #[must_use]
 pub(crate) fn to_column(ecosystem: PackageEcosystem) -> &'static str {
     match ecosystem {
@@ -24,14 +24,14 @@ pub(crate) fn to_column(ecosystem: PackageEcosystem) -> &'static str {
     }
 }
 
-/// Traduce la cadena persistida en una columna de texto de vuelta a un
+/// Translates the string persisted in a text column back to a
 /// [`PackageEcosystem`].
 ///
 /// # Errors
 ///
-/// Devuelve un mensaje de error legible si `ecosystem` no corresponde a
-/// ningún valor conocido -- por ejemplo, si el esquema evolucionó y esta
-/// versión del código todavía no conoce un ecosistema nuevo.
+/// Returns a readable error message if `ecosystem` does not match any
+/// known value -- for example, if the schema evolved and this version
+/// of the code does not yet know a new ecosystem.
 pub(crate) fn from_column(ecosystem: &str) -> Result<PackageEcosystem, String> {
     match ecosystem {
         "generic" => Ok(PackageEcosystem::Generic),

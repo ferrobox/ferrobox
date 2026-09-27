@@ -1,12 +1,12 @@
-//! Estrategia de empaquetado para Conan: el subconjunto de la API v2
-//! (revisiones) que `conan upload` y `conan install` necesitan contra un
-//! repositorio `FerroBox`.
+//! Packaging strategy for Conan: the subset of the v2 API
+//! (revisions) that `conan upload` and `conan install` need against a
+//! `FerroBox` repository.
 //!
-//! Referencia: rutas de `conan/internal/rest/rest_routes.py` (Conan 2).
+//! Reference: routes in `conan/internal/rest/rest_routes.py` (Conan 2).
 //!
-//! Cubre **Forge** (subida de receta y binarios, latest, listado de
-//! ficheros, búsqueda y yank), **Mirror** (caché *pull-through* de un
-//! remoto Conan v2) y lecturas en **Alloy**.
+//! Covers **Forge** (recipe and binary upload, latest, file
+//! listing, search, and yank), **Mirror** (*pull-through* cache of a
+//! Conan v2 remote), and reads on **Alloy**.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema Conan.
+/// Packaging strategy for the Conan ecosystem.
 pub struct ConanPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -50,7 +50,7 @@ pub struct ConanPackagingStrategy {
 }
 
 impl ConanPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Builds the strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -70,14 +70,14 @@ impl ConanPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al subir una receta.
+    /// Connects automatic assay when uploading a recipe.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al subir.
+    /// Applies the storage quota when uploading.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -1159,7 +1159,7 @@ fn push_search_hit(
     hits.push(PackageSearchHit { name, max_version });
 }
 
-/// Receta o binario (`…/files/…`). Los listados JSON no disparan.
+/// Recipe or binary (`…/files/…`). JSON listings do not trigger.
 #[must_use]
 pub fn admission_download_target(path: &str) -> Option<(String, String)> {
     match parse_conan_path(path).ok()? {

@@ -1,5 +1,5 @@
-//! Rutas HTTP para gestionar repositorios: creación, listado, detalle y
-//! eliminación.
+//! HTTP routes to manage repositories: create, list, detail, and
+//! delete.
 
 use std::sync::Arc;
 

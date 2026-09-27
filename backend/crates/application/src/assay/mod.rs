@@ -1,4 +1,4 @@
-//! Ensaye (`Assay`) de una versión de paquete: inventario y vulnerabilidades.
+//! Assay of a package version: inventory and vulnerabilities.
 
 mod cyclonedx;
 mod extract;
@@ -34,43 +34,43 @@ use self::osv::query_findings;
 pub use self::cyclonedx::to_cyclonedx;
 pub use self::extract::{is_exact_version, purl_for};
 
-/// Motivos por los que un ensaye puede fallar.
+/// Reasons an assay can fail.
 #[derive(Debug, Error)]
 pub enum AssayError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// El ensaye no existe.
+    /// The assay does not exist.
     #[error("assay {0} was not found")]
     AssayNotFound(AssayId),
 
-    /// No hay ninguna versión publicada con esa coordenada.
+    /// There is no published version with that coordinate.
     #[error("{0} was not found")]
     PackageNotFound(PackageCoordinate),
 
-    /// El nombre o la versión no son válidos.
+    /// The name or the version is not valid.
     #[error("invalid package coordinate: {0}")]
     InvalidCoordinate(String),
 
-    /// Fallo al persistir el ensaye.
+    /// Failed to persist the assay.
     #[error(transparent)]
     Persistence(#[from] AssayStoreError),
 
-    /// Fallo al leer el índice de paquetes.
+    /// Failed to read the package index.
     #[error(transparent)]
     Index(#[from] PackageIndexStoreError),
 
-    /// Fallo al leer repositorios.
+    /// Failed to read repositories.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 
-    /// Fallo al leer blobs o manifiestos del almacenamiento.
+    /// Failed to read blobs or manifests from storage.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-/// Caso de uso: listar, obtener y ejecutar ensayes.
+/// Use case: list, get, and run assays.
 #[derive(Clone)]
 pub struct AssayService {
     assays: Arc<dyn AssayStore>,
@@ -82,7 +82,7 @@ pub struct AssayService {
 }
 
 impl AssayService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         assays: Arc<dyn AssayStore>,
@@ -101,29 +101,29 @@ impl AssayService {
         }
     }
 
-    /// Conecta el envío de avisos HTTP. Un fallo del destino no afecta
-    /// al ensaye ni al publish.
+    /// Connects HTTP webhook delivery. A destination failure does not
+    /// affect the assay or the publish.
     #[must_use]
     pub fn with_webhooks(mut self, webhooks: WebhookService) -> Self {
         self.webhooks = Some(webhooks);
         self
     }
 
-    /// Lista todos los ensayes de la instancia.
+    /// Lists every assay of the instance.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::Persistence`] si falla el almacén.
+    /// Returns [`AssayError::Persistence`] if the store fails.
     pub async fn list_all(&self) -> Result<Vec<Assay>, AssayError> {
         Ok(self.assays.find_all().await?)
     }
 
-    /// Lista los ensayes de un repositorio. En un `Alloy`, une los de
-    /// sus miembros.
+    /// Lists the assays of a repository. In an `Alloy`, unions those of
+    /// its members.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::RepositoryNotFound`] si no existe.
+    /// Returns [`AssayError::RepositoryNotFound`] if it does not exist.
     pub async fn list_for_repository(
         &self,
         repository_id: RepositoryId,
@@ -138,12 +138,12 @@ impl AssayService {
         Ok(assays)
     }
 
-    /// Devuelve el ensaye de una coordenada. Si no existe, lo ejecuta.
+    /// Returns the assay of a coordinate. If it does not exist, runs it.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::PackageNotFound`] si el paquete no está
-    /// indexado, o [`AssayError::RepositoryNotFound`].
+    /// Returns [`AssayError::PackageNotFound`] if the package is not
+    /// indexed, or [`AssayError::RepositoryNotFound`].
     pub async fn get_or_run(
         &self,
         repository_id: RepositoryId,
@@ -164,12 +164,12 @@ impl AssayService {
         self.run_on(source.id(), &coordinate).await
     }
 
-    /// Vuelve a ensayar una coordenada, sustituyendo el resultado previo.
+    /// Re-assays a coordinate, replacing the previous result.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::PackageNotFound`] si el paquete no está
-    /// indexado.
+    /// Returns [`AssayError::PackageNotFound`] if the package is not
+    /// indexed.
     pub async fn run(
         &self,
         repository_id: RepositoryId,
@@ -183,12 +183,12 @@ impl AssayService {
         self.run_on(source.id(), &coordinate).await
     }
 
-    /// Busca un ensaye por identificador.
+    /// Looks up an assay by identifier.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::PackageNotFound`] si no existe (se reutiliza
-    /// el mismo código HTTP 404).
+    /// Returns [`AssayError::PackageNotFound`] if it does not exist
+    /// (the same HTTP 404 is reused).
     pub async fn get_by_id(&self, id: AssayId) -> Result<Assay, AssayError> {
         self.assays
             .find_by_id(id)
@@ -196,8 +196,8 @@ impl AssayService {
             .ok_or(AssayError::AssayNotFound(id))
     }
 
-    /// Lanza un ensaye en segundo plano. No bloquea `publish` ni
-    /// `install`: un fallo queda persistido como estado `Failed`.
+    /// Starts an assay in the background. Does not block `publish` or
+    /// `install`: a failure is persisted as `Failed`.
     pub fn schedule(&self, repository_id: RepositoryId, coordinate: PackageCoordinate) {
         if !should_auto_assay(&coordinate) {
             return;
@@ -215,8 +215,8 @@ impl AssayService {
         });
     }
 
-    /// Como [`schedule`], y además avisa `package.published` sin esperar
-    /// al destino.
+    /// Like [`schedule`], and also notifies `package.published` without
+    /// waiting for the destination.
     pub fn schedule_after_publish(
         &self,
         repository_id: RepositoryId,
@@ -228,9 +228,9 @@ impl AssayService {
         self.schedule(repository_id, coordinate);
     }
 
-    /// Vuelve a ensayar las coordenadas de una imagen OCI/Helm tras
-    /// cachear una capa. Sirve para pasar de `unsupported` (manifiesto
-    /// sin blobs) a un inventario real sin bloquear el `pull`.
+    /// Re-assays the coordinates of an OCI/Helm image after caching a
+    /// layer. Used to go from `unsupported` (manifest without blobs) to
+    /// a real inventory without blocking the `pull`.
     pub fn reschedule_for_name(&self, repository_id: RepositoryId, name: &str) {
         let name = name.to_string();
         let service = self.clone();
@@ -247,11 +247,11 @@ impl AssayService {
         });
     }
 
-    /// Reensaya en segundo plano todas las coordenadas ya ensayadas.
+    /// Re-assays in the background every coordinate already assayed.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AssayError::Persistence`] si falla el almacén.
+    /// Returns [`AssayError::Persistence`] if the store fails.
     pub async fn rerun_all(&self) -> Result<u32, AssayError> {
         let assays = self.assays.find_all().await?;
         let mut seen = HashSet::new();
@@ -428,8 +428,8 @@ impl AssayService {
     }
 }
 
-/// Omite blobs OCI y manifiestos indexados por digest: no son una
-/// versión que la UI ensaye.
+/// Skips OCI blobs and manifests indexed by digest: they are not a
+/// version the UI assays.
 pub(crate) fn should_auto_assay(coordinate: &PackageCoordinate) -> bool {
     let name = coordinate.name().as_str();
     let version = coordinate.version().as_str();
@@ -472,8 +472,8 @@ fn entry_version_matches(entry: &Bytes, version: &str) -> bool {
     {
         return true;
     }
-    // Conan indexa `version`/`user`/`channel` por separado; la UI manda
-    // la coordenada `0.1@_:_`.
+    // Conan indexes `version`/`user`/`channel` separately; the UI sends
+    // the `0.1@_:_` coordinate.
     match (
         value.get("version").and_then(serde_json::Value::as_str),
         value.get("user").and_then(serde_json::Value::as_str),

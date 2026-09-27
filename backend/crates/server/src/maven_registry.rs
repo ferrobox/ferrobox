@@ -1,9 +1,9 @@
-//! Rutas HTTP del layout Maven (`mvn deploy` / `mvn dependency:get` /
+//! HTTP routes for the Maven layout (`mvn deploy` / `mvn dependency:get` /
 //! Gradle).
 //!
-//! El remoto se monta en `/maven/<UUID>/`. Las lecturas son públicas;
-//! las escrituras (`PUT`) exigen token de API (Bearer, Token o Basic)
-//! y rol de escritura. *Releases* y *SNAPSHOT* comparten la misma URL.
+//! The remote is mounted at `/maven/<UUID>/`. Reads are public;
+//! writes (`PUT`) require an API token (Bearer, Token, or Basic)
+//! and a write role. *Releases* and *SNAPSHOT* share the same URL.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::error::ApiError;
 
 const MAVEN_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 
-/// Rutas de solo lectura (artefactos, metadatos y checksums).
+/// Read-only routes (artifacts, metadata, and checksums).
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new().route(
         "/maven/{repository_id}/{*path}",
@@ -36,7 +36,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
     )
 }
 
-/// Rutas de escritura (`PUT` de ficheros y yank).
+/// Write routes (file `PUT` and yank).
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/maven/{repository_id}/{*path}", put(maven_put))

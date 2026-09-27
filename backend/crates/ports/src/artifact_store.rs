@@ -3,54 +3,53 @@ use ferrobox_domain::artifact::Artifact;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use thiserror::Error;
 
-/// Motivos por los que una operación de persistencia de artefactos puede
-/// fallar.
+/// Reasons an artifact persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum ArtifactStoreError {
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la entidad [`Artifact`].
+/// Persistence port for the [`Artifact`] entity.
 #[async_trait]
 pub trait ArtifactStore: Send + Sync {
-    /// Guarda un artefacto, insertándolo si es nuevo o actualizando sus
-    /// datos si ya existía uno con el mismo identificador.
+    /// Saves an artifact, inserting it if new or updating its data if one
+    /// with the same identifier already existed.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`ArtifactStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn save(&self, artifact: &Artifact) -> Result<(), ArtifactStoreError>;
 
-    /// Busca un artefacto por su identificador. Devuelve `None` si no
-    /// existe.
+    /// Looks up an artifact by identifier. Returns `None` if it does not
+    /// exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`ArtifactStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_id(&self, id: ArtifactId) -> Result<Option<Artifact>, ArtifactStoreError>;
 
-    /// Lista todos los artefactos de un repositorio.
+    /// Lists every artifact in a repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`ArtifactStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_repository_id(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<Artifact>, ArtifactStoreError>;
 
-    /// Elimina un artefacto. No es un error eliminar un identificador que
-    /// no existe.
+    /// Deletes an artifact. Deleting a missing identifier is not an
+    /// error.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`ArtifactStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn delete(&self, id: ArtifactId) -> Result<(), ArtifactStoreError>;
 
     /// Sum of every stored binary on the instance, including blobs that

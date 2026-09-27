@@ -1,4 +1,4 @@
-# Imagen construida con el Dockerfile de la raíz (`ferrobox:local` en compose).
+# Image built from the repo-root Dockerfile (`ferrobox:local` in compose).
 image:
   repository: ferrobox
   tag: local
@@ -21,15 +21,15 @@ ingress:
   host: ferrobox.local
   tls: []
 
-# URL pública (sin barra final). Úsala en el Ingress o en port-forward.
+# Public URL (no trailing slash). Use it on the Ingress or with port-forward.
 publicBaseUrl: http://127.0.0.1:3000
 
 admin:
   username: admin
-  # Vacío: se genera y se reutiliza en upgrades.
+  # Empty: generated and reused across upgrades.
   password: ""
 
-# Inicio de sesión federado. issuer y clientId vacíos = desactivado.
+# Federated login. Empty issuer and clientId = disabled.
 oidc:
   issuer: ""
   clientId: ""
@@ -44,7 +44,7 @@ oidc:
   groupClaim: ""
   autoCreateGroups: true
 
-# Postgres del chart (como compose). Si lo apagas, pon externalUrl.
+# Chart Postgres (same as compose). If you turn it off, set externalUrl.
 postgresql:
   enabled: true
   image: postgres:18-alpine
@@ -54,14 +54,14 @@ postgresql:
   persistence:
     size: 8Gi
     storageClass: ""
-  # DATABASE_URL completa cuando enabled=false
+  # Full DATABASE_URL when enabled=false
   externalUrl: ""
 
-# Garage de un nodo (como compose). Si lo apagas, rellena s3.external.
+# Single-node Garage (same as compose). If you turn it off, fill s3.external.
 garage:
   enabled: true
   image: dxflrs/garage:v2.2.0
-  # 64 hex chars (openssl rand -hex 32). Vacío: se genera.
+  # 64 hex chars (openssl rand -hex 32). Empty: generated.
   rpcSecret: ""
   adminToken: ""
   metricsToken: ""
@@ -75,7 +75,7 @@ s3:
   bucket: ferrobox
   accessKeyId: ""
   secretAccessKey: ""
-  # Obligatorio si garage.enabled=false
+  # Required when garage.enabled=false
   externalEndpointUrl: ""
 
 resources: {}

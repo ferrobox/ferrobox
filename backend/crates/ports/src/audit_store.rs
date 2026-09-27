@@ -2,37 +2,35 @@ use async_trait::async_trait;
 use ferrobox_domain::audit::AuditEvent;
 use thiserror::Error;
 
-/// Motivos por los que una operación sobre el registro de auditoría
-/// puede fallar.
+/// Reasons an audit-log operation can fail.
 #[derive(Debug, Error)]
 pub enum AuditStoreError {
-    /// No existe la tabla: falta ejecutar la migración SQL.
+    /// The table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table audit_events is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia del registro de auditoría.
+/// Persistence port for the audit log.
 #[async_trait]
 pub trait AuditStore: Send + Sync {
-    /// Inserta un evento y recorta el historial a las 200 filas más
-    /// recientes.
+    /// Inserts an event and trims history to the 200 most recent rows.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AuditStoreError::Backend`] si el backend falla.
+    /// Returns [`AuditStoreError::Backend`] if the backend fails.
     async fn record(&self, event: &AuditEvent) -> Result<(), AuditStoreError>;
 
-    /// Últimos eventos de la instancia, más recientes primero.
+    /// Latest events for the instance, newest first.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AuditStoreError::Backend`] si el backend falla.
+    /// Returns [`AuditStoreError::Backend`] if the backend fails.
     async fn list(&self, limit: usize) -> Result<Vec<AuditEvent>, AuditStoreError>;
 }

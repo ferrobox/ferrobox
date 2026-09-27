@@ -1,8 +1,8 @@
-//! Cuerpos de petición y de respuesta de la API HTTP.
+//! HTTP API request and response bodies.
 //!
-//! Todos derivan [`ts_rs::TS`] con `#[ts(export)]`: `cargo test -p
-//! ferrobox-server` regenera automáticamente los tipos de TypeScript
-//! equivalentes en `frontend/src/api/generated/`.
+//! All derive [`ts_rs::TS`] with `#[ts(export)]`: `cargo test -p
+//! ferrobox-server` automatically regenerates the equivalent TypeScript
+//! types in `frontend/src/api/generated/`.
 
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::repository::{Repository, RepositoryKind};
@@ -10,38 +10,37 @@ use ferrobox_domain::user::{Role, User};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Cuerpo de una respuesta de error.
+/// Body of an error response.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ErrorResponse {
     pub(crate) error: String,
 }
 
-/// Ecosistema de paquetes de un repositorio, tal y como viaja en la API
-/// HTTP.
+/// Package ecosystem of a repository, as it travels in the HTTP API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum PackageEcosystemDto {
-    /// Artefactos binarios sin ningún formato de paquete específico.
+    /// Binary artifacts with no specific package format.
     Generic,
-    /// Crates de Rust.
+    /// Rust crates.
     Cargo,
-    /// Paquetes de Node.js.
+    /// Node.js packages.
     Npm,
-    /// Paquetes de Python.
+    /// Python packages.
     Pypi,
-    /// Artefactos conformes a la especificación OCI.
+    /// Artifacts conforming to the OCI specification.
     Oci,
     /// Helm Charts.
     Helm,
-    /// Paquetes C/C++ de Conan.
+    /// Conan C/C++ packages.
     Conan,
-    /// Artefactos Maven.
+    /// Maven artifacts.
     Maven,
-    /// Paquetes `NuGet`.
+    /// `NuGet` packages.
     Nuget,
-    /// Módulos `Go`.
+    /// `Go` modules.
     Go,
 }
 
@@ -79,24 +78,24 @@ impl From<PackageEcosystemDto> for PackageEcosystem {
     }
 }
 
-/// Estrategia de origen y almacenamiento de un repositorio, tal y como
-/// viaja en la API HTTP. Se serializa como una unión discriminada por el
-/// campo `type`, para que el cliente de TypeScript generado obtenga un
-/// tipo de unión exhaustivo en vez de una cadena de texto opaca.
+/// Origin and storage strategy of a repository, as it travels in the
+/// HTTP API. Serialized as a union discriminated by the `type` field,
+/// so the generated TypeScript client gets an exhaustive union type
+/// instead of an opaque string.
 #[derive(Serialize, TS)]
 #[ts(export)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(crate) enum RepositoryKindDto {
-    /// Almacenamiento propio.
+    /// Own storage.
     Forge,
-    /// Réplica cacheada de una fuente externa.
+    /// Cached replica of an external source.
     Mirror {
-        /// URL base del repositorio externo replicado.
+        /// Base URL of the replicated external repository.
         upstream: String,
     },
-    /// Agregación de otros repositorios.
+    /// Aggregation of other repositories.
     Alloy {
-        /// Identificadores de los repositorios agregados.
+        /// Identifiers of the aggregated repositories.
         members: Vec<String>,
     },
 }
@@ -115,14 +114,14 @@ impl From<&RepositoryKind> for RepositoryKindDto {
     }
 }
 
-/// Acceso efectivo de un usuario a un repositorio.
+/// Effective access of a user to a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum RepositoryAccessDto {
-    /// Puede listar y descargar.
+    /// Can list and download.
     Read,
-    /// Puede publicar, borrar y configurar el repositorio.
+    /// Can publish, delete, and configure the repository.
     Write,
 }
 
@@ -135,7 +134,7 @@ impl From<ferrobox_domain::group::RepositoryAccess> for RepositoryAccessDto {
     }
 }
 
-/// Representación de un repositorio en las respuestas de la API.
+/// Representation of a repository in API responses.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct RepositoryResponse {
@@ -143,15 +142,15 @@ pub(crate) struct RepositoryResponse {
     pub(crate) name: String,
     pub(crate) kind: RepositoryKindDto,
     pub(crate) ecosystem: PackageEcosystemDto,
-    /// Acceso del usuario autenticado a este repositorio.
+    /// Access of the authenticated user to this repository.
     pub(crate) access: RepositoryAccessDto,
-    /// `true` si hay grupos asignados; entonces solo esos grupos (y
-    /// los administradores) pueden verlo.
+    /// `true` if groups are assigned; then only those groups (and
+    /// administrators) can see it.
     pub(crate) restricted: bool,
-    /// Horas entre refrescos programados del *upstream*. `null` = apagado.
+    /// Hours between scheduled *upstream* refreshes. `null` = off.
     #[ts(type = "number | null")]
     pub(crate) prefetch_interval_hours: Option<u32>,
-    /// Último refresco programado, RFC 3339, o `null`.
+    /// Last scheduled refresh, RFC 3339, or `null`.
     pub(crate) last_prefetch_at: Option<String>,
 }
 
@@ -174,90 +173,90 @@ impl RepositoryResponse {
     }
 }
 
-/// Cuerpo para el intervalo de refresco de un `Mirror`.
+/// Body for a `Mirror` refresh interval.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SetMirrorScheduleRequest {
-    /// Horas entre refrescos. `null` o `0` apaga el cron.
+    /// Hours between refreshes. `null` or `0` turns the cron off.
     #[serde(default)]
     #[ts(optional)]
     #[ts(type = "number")]
     pub(crate) prefetch_interval_hours: Option<u32>,
 }
 
-/// Cuerpo de la petición para crear un repositorio.
+/// Request body to create a repository.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateRepositoryRequest {
     pub(crate) name: String,
     pub(crate) ecosystem: PackageEcosystemDto,
-    /// Tipo de repositorio. Si se omite, se crea un `Forge`.
+    /// Repository type. If omitted, a `Forge` is created.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) kind: Option<CreateRepositoryKindDto>,
 }
 
-/// Tipo de repositorio solicitado al crearlo.
+/// Repository type requested at creation.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(crate) enum CreateRepositoryKindDto {
-    /// Almacenamiento propio.
+    /// Own storage.
     #[default]
     Forge,
-    /// Réplica cacheada de un *upstream*.
+    /// Cached replica of an *upstream*.
     Mirror {
-        /// URL base del índice disperso remoto (p. ej. `https://index.crates.io/`).
+        /// Base URL of the remote sparse index (e.g. `https://index.crates.io/`).
         upstream: String,
     },
-    /// Agregación de otros repositorios `Forge` o `Mirror`.
+    /// Aggregation of other `Forge` or `Mirror` repositories.
     Alloy {
-        /// Identificadores de los repositorios miembro, en orden de
-        /// resolución.
+        /// Identifiers of the member repositories, in resolution
+        /// order.
         members: Vec<String>,
     },
 }
 
-/// Respuesta al crear un repositorio correctamente.
+/// Response after creating a repository successfully.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateRepositoryResponse {
     pub(crate) id: String,
 }
 
-/// Cuerpo de la petición para actualizar los miembros de un `Alloy`.
+/// Request body to update the members of an `Alloy`.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct UpdateAlloyMembersRequest {
-    /// Identificadores de los repositorios miembro, en orden de
-    /// resolución.
+    /// Identifiers of the member repositories, in resolution
+    /// order.
     pub(crate) members: Vec<String>,
 }
 
-/// Representación de un artefacto en las respuestas de la API.
+/// Representation of an artifact in API responses.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ArtifactResponse {
     pub(crate) id: String,
-    /// Nombre del paquete (crate, etc.) si el índice lo conoce.
+    /// Package name (crate, etc.) if the index knows it.
     pub(crate) name: Option<String>,
-    /// Versión del paquete si el índice la conoce.
+    /// Package version if the index knows it.
     pub(crate) version: Option<String>,
-    /// Nombre de fichero en el índice, si el ecosistema lo distingue
-    /// (receta `Conan`, sdist/wheel de `PyPI`, etc.).
+    /// Filename in the index, if the ecosystem distinguishes it
+    /// (`Conan` recipe, `PyPI` sdist/wheel, etc.).
     pub(crate) filename: Option<String>,
     pub(crate) checksum: String,
     #[ts(type = "number")]
     pub(crate) size_bytes: u64,
-    /// `true` si el índice marca esta versión como *yanked*.
+    /// `true` if the index marks this version as *yanked*.
     pub(crate) yanked: bool,
-    /// `true` si hay una firma Cosign / Notation enlazada a este artefacto.
+    /// `true` if a Cosign / Notation signature is linked to this artifact.
     pub(crate) signed: bool,
-    /// `true` si alguna firma Cosign verifica contra las claves del
-    /// repositorio.
+    /// `true` if some Cosign signature verifies against the repository
+    /// keys.
     pub(crate) verified: bool,
-    /// Repositorio que almacena el binario. En un `Alloy` es el
-    /// miembro del que proviene el paquete.
+    /// Repository that stores the binary. In an `Alloy` this is the
+    /// member the package came from.
     pub(crate) repository_id: String,
 }
 
@@ -278,14 +277,14 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
     }
 }
 
-/// Respuesta al publicar un artefacto correctamente.
+/// Response after publishing an artifact successfully.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PublishResponse {
     pub(crate) id: String,
 }
 
-/// Cuerpo de la petición de inicio de sesión.
+/// Sign-in request body.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct LoginRequest {
@@ -293,19 +292,19 @@ pub(crate) struct LoginRequest {
     pub(crate) password: String,
 }
 
-/// Representación de un usuario en las respuestas de la API.
+/// Representation of a user in API responses.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct UserResponse {
     pub(crate) id: String,
     pub(crate) username: String,
-    /// Correo de la cuenta, o `null` si el administrador de arranque
-    /// no tiene uno.
+    /// Account email, or `null` if the bootstrap administrator has
+    /// none.
     pub(crate) email: Option<String>,
     pub(crate) role: RoleDto,
-    /// `true` si la cuenta está vinculada a un emisor `OIDC`.
+    /// `true` if the account is linked to an `OIDC` issuer.
     pub(crate) sso: bool,
-    /// `true` si es una cuenta robot (CI).
+    /// `true` if this is a robot account (CI).
     pub(crate) robot: bool,
 }
 
@@ -322,16 +321,16 @@ impl From<&User> for UserResponse {
     }
 }
 
-/// Rol de autorización, tal y como viaja en la API HTTP.
+/// Authorization role, as it travels in the HTTP API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum RoleDto {
-    /// Gestión completa.
+    /// Full management.
     Admin,
-    /// Puede escribir repositorios y artefactos.
+    /// Can write repositories and artifacts.
     Developer,
-    /// Solo lectura.
+    /// Read only.
     Reader,
 }
 
@@ -355,7 +354,7 @@ impl From<RoleDto> for Role {
     }
 }
 
-/// Cuerpo de la petición para crear un usuario.
+/// Request body to create a user.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateUserRequest {
@@ -365,19 +364,19 @@ pub(crate) struct CreateUserRequest {
     pub(crate) role: RoleDto,
 }
 
-/// Cuerpo de la petición para crear una cuenta robot.
+/// Request body to create a robot account.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateRobotRequest {
     pub(crate) username: String,
     pub(crate) role: RoleDto,
     pub(crate) token_name: String,
-    /// Caducidad RFC 3339 del token inicial. `null` = no caduca.
+    /// RFC 3339 expiry of the initial token. `null` = does not expire.
     #[ts(optional)]
     pub(crate) expires_at: Option<String>,
 }
 
-/// Respuesta al crear un robot: la cuenta y el secreto del token inicial.
+/// Response after creating a robot: the account and the initial token secret.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateRobotResponse {
@@ -385,74 +384,72 @@ pub(crate) struct CreateRobotResponse {
     pub(crate) token: ApiTokenCreatedResponse,
 }
 
-/// Cuerpo de la petición para que un Admin restablezca la contraseña de
-/// otra cuenta.
+/// Request body for an Admin to reset another account's password.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ResetUserPasswordRequest {
     pub(crate) password: String,
 }
 
-/// Cuerpo de la petición para cambiar el rol de un usuario.
+/// Request body to change a user's role.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct UpdateUserRoleRequest {
     pub(crate) role: RoleDto,
 }
 
-/// Cuerpo de la petición para cambiar la contraseña del usuario
-/// autenticado.
+/// Request body to change the authenticated user's password.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ChangePasswordRequest {
-    /// Contraseña actual, para comprobar que quien pide el cambio es
-    /// el titular de la cuenta.
+    /// Current password, to check that the requester is the account
+    /// holder.
     pub(crate) current_password: String,
-    /// Nueva contraseña en claro. El servidor la hashea antes de
-    /// persistirla.
+    /// New password in clear text. The server hashes it before
+    /// persisting it.
     pub(crate) new_password: String,
 }
 
-/// Información de la instancia que consume la página de configuración.
+/// Instance information consumed by the settings page.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SettingsResponse {
-    /// URL pública (esquema + host + puerto, sin barra final) con la
-    /// que los clientes deben hablar con esta instancia.
+    /// Public URL (scheme + host + port, no trailing slash) that
+    /// clients should use to talk to this instance.
     pub(crate) public_base_url: String,
-    /// Versión del servidor (`CARGO_PKG_VERSION`).
+    /// Server version (`CARGO_PKG_VERSION`).
     pub(crate) version: String,
-    /// `true` si hay un `IdP` `OIDC` configurado.
+    /// `true` if an `OIDC` `IdP` is configured.
     pub(crate) oidc_enabled: bool,
-    /// Emisor `OIDC`, si el SSO está activo.
+    /// `OIDC` issuer, if SSO is active.
     pub(crate) oidc_issuer: Option<String>,
 }
 
-/// Estado público del inicio de sesión federado (no exige sesión).
+/// Public status of federated sign-in (does not require a session).
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct OidcStatusResponse {
-    /// `true` si el botón SSO debe mostrarse.
+    /// `true` if the SSO button should be shown.
     pub(crate) enabled: bool,
-    /// Emisor, si está habilitado.
+    /// Issuer, if enabled.
     pub(crate) issuer: Option<String>,
 }
 
-/// Respuesta al iniciar sesión correctamente.
+/// Response after a successful sign-in.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct LoginResponse {
-    /// Secreto del token de sesión (mostrado una sola vez).
+    /// Session token secret (shown only once).
     pub(crate) token: String,
     pub(crate) user: UserResponse,
 }
 
-/// Cuerpo de la petición para crear un token de API.
+/// Request body to create an API token.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateApiTokenRequest {
     pub(crate) name: String,
-    /// Caducidad RFC 3339. `null` o ausente = no caduca.
+    /// RFC 3339 expiry. `null` or absent = does not expire.
     #[ts(optional)]
     pub(crate) expires_at: Option<String>,
     /// `read` and/or `write`. Empty or omitted = unrestricted.
@@ -461,7 +458,7 @@ pub(crate) struct CreateApiTokenRequest {
     pub(crate) scopes: Option<Vec<String>>,
 }
 
-/// Representación de un token de API (sin secreto) en listados.
+/// Representation of an API token (without the secret) in listings.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ApiTokenResponse {
@@ -469,22 +466,22 @@ pub(crate) struct ApiTokenResponse {
     pub(crate) name: String,
     pub(crate) prefix: String,
     pub(crate) created_at: String,
-    /// Caducidad RFC 3339, o `null` si no caduca.
+    /// RFC 3339 expiry, or `null` if it does not expire.
     pub(crate) expires_at: Option<String>,
     /// Stored scopes. Empty = unrestricted.
     pub(crate) scopes: Vec<String>,
 }
 
-/// Respuesta al crear un token de API: incluye el secreto una sola vez.
+/// Response after creating an API token: includes the secret only once.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ApiTokenCreatedResponse {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) prefix: String,
-    /// Secreto en claro. Solo se expone en esta respuesta.
+    /// Secret in clear text. Exposed only in this response.
     pub(crate) token: String,
-    /// Caducidad RFC 3339, o `null` si no caduca.
+    /// RFC 3339 expiry, or `null` if it does not expire.
     pub(crate) expires_at: Option<String>,
     /// Stored scopes. Empty = unrestricted.
     pub(crate) scopes: Vec<String>,
@@ -500,18 +497,18 @@ pub(crate) fn token_scope_labels(token: &ferrobox_domain::api_token::ApiToken) -
         .collect()
 }
 
-/// Estado de un ensaye.
+/// Status of an assay.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AssayStatusDto {
-    /// Inventario y consulta completados.
+    /// Inventory and lookup completed.
     Ready,
-    /// Falló la consulta de vulnerabilidades.
+    /// Vulnerability lookup failed.
     Failed,
-    /// El ecosistema todavía no admite ensaye.
+    /// The ecosystem does not yet support assay.
     Unsupported,
-    /// Encolado o ejecutándose.
+    /// Queued or running.
     Running,
 }
 
@@ -526,20 +523,20 @@ impl From<ferrobox_domain::assay::AssayStatus> for AssayStatusDto {
     }
 }
 
-/// Severidad de un hallazgo del ensaye.
+/// Severity of an assay finding.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AssaySeverityDto {
-    /// Crítica.
+    /// Critical.
     Critical,
-    /// Alta.
+    /// High.
     High,
-    /// Media.
+    /// Medium.
     Medium,
-    /// Baja.
+    /// Low.
     Low,
-    /// Sin puntuación.
+    /// No score.
     Unknown,
 }
 
@@ -555,7 +552,7 @@ impl From<ferrobox_domain::assay::AssaySeverity> for AssaySeverityDto {
     }
 }
 
-/// Recuento de hallazgos por severidad.
+/// Finding counts by severity.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayCountsDto {
@@ -583,21 +580,21 @@ impl From<ferrobox_domain::assay::AssayCounts> for AssayCountsDto {
     }
 }
 
-/// Componente del inventario de un ensaye.
+/// Component of an assay inventory.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayComponentResponse {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) purl: Option<String>,
-    /// `root` es el paquete ensayado; `direct` una dependencia declarada;
-    /// `transitive` una resuelta desde lockfile.
+    /// `root` is the assayed package; `direct` a declared dependency;
+    /// `transitive` one resolved from a lockfile.
     pub(crate) kind: String,
-    /// Licencias declaradas en el manifiesto o en metadatos de distro.
+    /// Licenses declared in the manifest or in distro metadata.
     pub(crate) licenses: Vec<String>,
 }
 
-/// Hallazgo (impureza) de un ensaye.
+/// Finding (impurity) of an assay.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayFindingResponse {
@@ -611,7 +608,7 @@ pub(crate) struct AssayFindingResponse {
     pub(crate) details_url: Option<String>,
 }
 
-/// Ensaye completo de una versión de paquete.
+/// Full assay of a package version.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayResponse {
@@ -669,7 +666,7 @@ impl From<&ferrobox_domain::assay::Assay> for AssayResponse {
     }
 }
 
-/// Coordenada a ensayar, en el cuerpo o en la query.
+/// Coordinate to assay, in the body or in the query.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayLookupRequest {
@@ -678,35 +675,35 @@ pub(crate) struct AssayLookupRequest {
     pub(crate) version: String,
 }
 
-/// Resultado de lanzar un reensaye en lote.
+/// Result of launching a batch re-assay.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AssayRerunResponse {
-    /// Número de coordenadas distintas encoladas para reensayar.
+    /// Number of distinct coordinates queued to re-assay.
     pub(crate) scheduled: u32,
 }
 
-/// Política de retención enviada al guardar.
+/// Retention policy sent when saving.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct RetentionPolicyRequest {
-    /// Conservar las N versiones más recientes de cada paquete.
+    /// Keep the N most recent versions of each package.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) keep_last: Option<u32>,
-    /// Conservar versiones indexadas en los últimos N días.
+    /// Keep versions indexed in the last N days.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) keep_days: Option<u32>,
 }
 
-/// Política de retención de un repositorio.
+/// Retention policy of a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct RetentionPolicyResponse {
-    /// Conservar las N versiones más recientes de cada paquete.
+    /// Keep the N most recent versions of each package.
     pub(crate) keep_last: Option<u32>,
-    /// Conservar versiones indexadas en los últimos N días.
+    /// Keep versions indexed in the last N days.
     pub(crate) keep_days: Option<u32>,
 }
 
@@ -719,24 +716,24 @@ impl From<ferrobox_domain::retention::RetentionPolicy> for RetentionPolicyRespon
     }
 }
 
-/// Tope de almacenamiento enviado al guardar.
+/// Storage cap sent when saving.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct QuotaRequest {
-    /// Tope en bytes. Ausente o `null` = ilimitado.
+    /// Cap in bytes. Absent or `null` = unlimited.
     #[serde(default)]
     #[ts(optional, type = "number")]
     pub(crate) limit_bytes: Option<u64>,
 }
 
-/// Uso y tope de almacenamiento de un repositorio.
+/// Storage use and cap of a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct QuotaResponse {
-    /// Tope en bytes, o `null` si no hay límite.
+    /// Cap in bytes, or `null` if there is no limit.
     #[ts(type = "number | null")]
     pub(crate) limit_bytes: Option<u64>,
-    /// Bytes ocupados por todos los binarios del repositorio.
+    /// Bytes occupied by every binary in the repository.
     #[ts(type = "number")]
     pub(crate) used_bytes: u64,
 }
@@ -783,17 +780,17 @@ impl From<ferrobox_domain::worm::WormPolicy> for WormResponse {
     }
 }
 
-/// Resultado de aplicar retención o recolectar basura.
+/// Result of applying retention or collecting garbage.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CleanupReportResponse {
-    /// Versiones o etiquetas eliminadas del índice.
+    /// Versions or tags removed from the index.
     #[ts(type = "number")]
     pub(crate) dropped_versions: u64,
-    /// Binarios borrados.
+    /// Binaries deleted.
     #[ts(type = "number")]
     pub(crate) deleted_artifacts: u64,
-    /// Bytes liberados en almacenamiento.
+    /// Bytes freed in storage.
     #[ts(type = "number")]
     pub(crate) freed_bytes: u64,
 }
@@ -808,39 +805,39 @@ impl From<ferrobox_application::retention::CleanupReport> for CleanupReportRespo
     }
 }
 
-/// Una fila del dry-run o del resultado real.
+/// A row from the dry-run or from the real result.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CleanupItemResponse {
-    /// Repositorio al que pertenece la fila.
+    /// Repository the row belongs to.
     pub(crate) repository: String,
-    /// Nombre del paquete, o vacío si es un binario huérfano.
+    /// Package name, or empty if this is an orphan binary.
     pub(crate) name: String,
-    /// Versión, etiqueta, digest o identificador del binario.
+    /// Version, tag, digest, or binary identifier.
     pub(crate) version: String,
-    /// Tamaño del binario, si se conoce.
+    /// Binary size, if known.
     #[ts(type = "number")]
     pub(crate) size_bytes: u64,
-    /// Por qué se incluye en la limpieza.
+    /// Why it is included in the cleanup.
     pub(crate) reason: String,
 }
 
-/// Simulación o aplicación de retención/GC.
+/// Simulation or application of retention/GC.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CleanupPreviewResponse {
-    /// `true` si no se ha borrado nada.
+    /// `true` if nothing has been deleted.
     pub(crate) dry_run: bool,
-    /// Versiones o etiquetas eliminadas (o que se eliminarían) del índice.
+    /// Versions or tags removed (or that would be removed) from the index.
     #[ts(type = "number")]
     pub(crate) dropped_versions: u64,
-    /// Binarios borrados (o que se borrarían).
+    /// Binaries deleted (or that would be deleted).
     #[ts(type = "number")]
     pub(crate) deleted_artifacts: u64,
-    /// Bytes liberados (o que se liberarían).
+    /// Bytes freed (or that would be freed).
     #[ts(type = "number")]
     pub(crate) freed_bytes: u64,
-    /// Detalle para revisar antes de aplicar.
+    /// Detail to review before applying.
     pub(crate) items: Vec<CleanupItemResponse>,
 }
 
@@ -866,23 +863,23 @@ impl From<ferrobox_application::retention::CleanupPreview> for CleanupPreviewRes
     }
 }
 
-/// Una coincidencia de la búsqueda global de paquetes.
+/// A match from the global package search.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PackageSearchHitResponse {
-    /// Repositorio donde está indexado el paquete.
+    /// Repository where the package is indexed.
     pub(crate) repository_id: String,
-    /// Nombre del repositorio.
+    /// Repository name.
     pub(crate) repository_name: String,
-    /// Forge o Mirror.
+    /// Forge or Mirror.
     pub(crate) kind: RepositoryKindDto,
-    /// Ecosistema del paquete.
+    /// Package ecosystem.
     pub(crate) ecosystem: PackageEcosystemDto,
-    /// Nombre del paquete.
+    /// Package name.
     pub(crate) name: String,
-    /// Versión mostrada.
+    /// Displayed version.
     pub(crate) version: String,
-    /// `true` si esa versión está yankada.
+    /// `true` if that version is yanked.
     pub(crate) yanked: bool,
 }
 
@@ -900,15 +897,15 @@ impl From<ferrobox_application::search_packages::PackageSearchHit> for PackageSe
     }
 }
 
-/// Resultado de buscar paquetes en toda la instancia.
+/// Result of searching packages across the instance.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SearchResponse {
-    /// Coincidencias, ya recortadas al límite pedido.
+    /// Matches, already trimmed to the requested limit.
     pub(crate) hits: Vec<PackageSearchHitResponse>,
 }
 
-/// Resumen de un grupo en listados.
+/// Group summary in listings.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct GroupSummaryResponse {
@@ -918,16 +915,16 @@ pub(crate) struct GroupSummaryResponse {
     pub(crate) member_count: usize,
     #[ts(type = "number")]
     pub(crate) repository_count: usize,
-    /// Nombres de usuario de los miembros, ordenados.
+    /// Member usernames, sorted.
     pub(crate) member_names: Vec<String>,
-    /// Nombres de los repositorios asignados, ordenados.
+    /// Assigned repository names, sorted.
     pub(crate) repository_names: Vec<String>,
 }
 
-/// Grupo al que pertenece el usuario autenticado.
+/// Group the authenticated user belongs to.
 ///
-/// No incluye el resto de miembros: eso solo lo ve un administrador
-/// en la ficha del grupo.
+/// Does not include the other members: only an administrator sees
+/// those on the group detail page.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct MyGroupMembershipResponse {
@@ -936,7 +933,7 @@ pub(crate) struct MyGroupMembershipResponse {
     pub(crate) repositories: Vec<GroupRepositoryGrantResponse>,
 }
 
-/// Repositorio asignado a un grupo, con el rol en ese repositorio.
+/// Repository assigned to a group, with the role on that repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct GroupRepositoryGrantResponse {
@@ -945,7 +942,7 @@ pub(crate) struct GroupRepositoryGrantResponse {
     pub(crate) role: RoleDto,
 }
 
-/// Detalle de un grupo: miembros y repositorios.
+/// Group detail: members and repositories.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct GroupDetailResponse {
@@ -955,21 +952,21 @@ pub(crate) struct GroupDetailResponse {
     pub(crate) repositories: Vec<GroupRepositoryGrantResponse>,
 }
 
-/// Cuerpo de la petición para crear un grupo.
+/// Request body to create a group.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateGroupRequest {
     pub(crate) name: String,
 }
 
-/// Cuerpo de la petición para sustituir los miembros de un grupo.
+/// Request body to replace the members of a group.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SetGroupMembersRequest {
     pub(crate) user_ids: Vec<String>,
 }
 
-/// Asignación de un repositorio a un grupo.
+/// Assignment of a repository to a group.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct GroupRepositoryGrantRequest {
@@ -977,14 +974,14 @@ pub(crate) struct GroupRepositoryGrantRequest {
     pub(crate) role: RoleDto,
 }
 
-/// Cuerpo de la petición para sustituir los repositorios de un grupo.
+/// Request body to replace the repositories of a group.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SetGroupRepositoriesRequest {
     pub(crate) grants: Vec<GroupRepositoryGrantRequest>,
 }
 
-/// Grupo con acceso a un repositorio.
+/// Group with access to a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct RepositoryAccessGrantResponse {
@@ -993,7 +990,7 @@ pub(crate) struct RepositoryAccessGrantResponse {
     pub(crate) role: RoleDto,
 }
 
-/// Asignación de un grupo a un repositorio.
+/// Assignment of a group to a repository.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct RepositoryAccessGrantRequest {
@@ -1001,65 +998,65 @@ pub(crate) struct RepositoryAccessGrantRequest {
     pub(crate) role: RoleDto,
 }
 
-/// Cuerpo de la petición para sustituir los grupos de un repositorio.
+/// Request body to replace the groups of a repository.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct SetRepositoryAccessRequest {
     pub(crate) grants: Vec<RepositoryAccessGrantRequest>,
 }
 
-/// Cuerpo de la petición para copiar una versión de un Forge a otro.
+/// Request body to copy a version from one Forge to another.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PromotePackageRequest {
-    /// Identificador del Forge destino, del mismo ecosistema.
+    /// Identifier of the destination Forge, of the same ecosystem.
     pub(crate) target_repository_id: String,
-    /// Nombre del paquete. Obligatorio salvo en repositorios genéricos.
+    /// Package name. Required except in generic repositories.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) name: Option<String>,
-    /// Versión, etiqueta OCI o referencia Conan (`0.1@_/_`).
+    /// Version, OCI tag, or Conan reference (`0.1@_/_`).
     #[serde(default)]
     #[ts(optional)]
     pub(crate) version: Option<String>,
-    /// Identificador del binario, para repositorios genéricos.
+    /// Binary identifier, for generic repositories.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) artifact_id: Option<String>,
-    /// Si es `true`, la copia conserva el yank del origen.
+    /// If `true`, the copy keeps the yank of the source.
     #[serde(default)]
     pub(crate) preserve_yanked: bool,
 }
 
-/// Cuerpo para calentar la caché de un `Mirror`.
+/// Body to warm the cache of a `Mirror`.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PrefetchPackageRequest {
-    /// Nombre del paquete, módulo o imagen.
+    /// Package, module, or image name.
     pub(crate) name: String,
-    /// Versión, etiqueta OCI o digest. Vacío = solo índice.
+    /// Version, OCI tag, or digest. Empty = index only.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) version: Option<String>,
 }
 
-/// Destino de réplica enviado al guardar.
+/// Replica destination sent when saving.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ReplicaPolicyRequest {
-    /// URL de la instancia remota (`http://host:3000`). Vacío = borrar.
+    /// URL of the remote instance (`http://host:3000`). Empty = delete.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) remote_url: Option<String>,
-    /// UUID del Forge destino en esa instancia.
+    /// UUID of the destination Forge on that instance.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) destination_id: Option<String>,
-    /// Token de API con escritura en el destino. Ausente: conserva el anterior.
+    /// API token with write access on the destination. Absent: keeps the previous one.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) token: Option<String>,
-    /// `push` (defecto) o `pull`.
+    /// `push` (default) or `pull`.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) direction: Option<String>,
@@ -1069,7 +1066,7 @@ pub(crate) struct ReplicaPolicyRequest {
     pub(crate) interval_minutes: Option<u32>,
 }
 
-/// Última ejecución de réplica.
+/// Last replica run.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ReplicaRunResponse {
@@ -1083,7 +1080,7 @@ pub(crate) struct ReplicaRunResponse {
     pub(crate) error: Option<String>,
 }
 
-/// Política de réplica de un repositorio.
+/// Replica policy of a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ReplicaPolicyResponse {
@@ -1129,7 +1126,7 @@ impl From<ferrobox_domain::replica::ReplicaPolicy> for ReplicaPolicyResponse {
     }
 }
 
-/// Resultado de un push de réplica.
+/// Result of a replica push.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ReplicaPushResponse {
@@ -1141,7 +1138,7 @@ pub(crate) struct ReplicaPushResponse {
     pub(crate) skipped: u32,
 }
 
-/// Resultado de importar un archivo portable.
+/// Result of importing a portable archive.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct ImportRepositoryResponse {
@@ -1155,7 +1152,7 @@ pub(crate) struct ImportRepositoryResponse {
     pub(crate) bytes_copied: u64,
 }
 
-/// Resultado del prefetch.
+/// Result of the prefetch.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PrefetchPackageResponse {
@@ -1165,30 +1162,30 @@ pub(crate) struct PrefetchPackageResponse {
     pub(crate) downloaded: bool,
 }
 
-/// Resultado de copiar una versión a otro Forge.
+/// Result of copying a version to another Forge.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct PromotePackageResponse {
-    /// Nombre copiado, si el ecosistema indexa por coordenada.
+    /// Copied name, if the ecosystem indexes by coordinate.
     pub(crate) name: Option<String>,
-    /// Versión copiada.
+    /// Copied version.
     pub(crate) version: Option<String>,
-    /// Binarios nuevos creados en el destino.
+    /// New binaries created on the destination.
     #[ts(type = "number")]
     pub(crate) artifacts_copied: u32,
-    /// Bytes escritos en el destino.
+    /// Bytes written on the destination.
     #[ts(type = "number")]
     pub(crate) bytes_copied: u64,
 }
 
-/// Evento de un aviso HTTP.
+/// Event of an HTTP notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) enum WebhookEventDto {
-    /// Ensaye terminado.
+    /// Assay finished.
     #[serde(rename = "assay.completed")]
     AssayCompleted,
-    /// Versión publicada o cacheada.
+    /// Version published or cached.
     #[serde(rename = "package.published")]
     PackagePublished,
 }
@@ -1211,15 +1208,15 @@ impl From<WebhookEventDto> for ferrobox_domain::webhook::WebhookEvent {
     }
 }
 
-/// Aviso HTTP de un repositorio.
+/// HTTP notification of a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct WebhookResponse {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) url: String,
-    /// `true` si hay un secreto HMAC configurado. El valor nunca se
-    /// devuelve.
+    /// `true` if an HMAC secret is configured. The value is never
+    /// returned.
     pub(crate) has_secret: bool,
     pub(crate) events: Vec<WebhookEventDto>,
     pub(crate) enabled: bool,
@@ -1243,7 +1240,7 @@ impl From<&ferrobox_domain::webhook::Webhook> for WebhookResponse {
     }
 }
 
-/// Envío de un aviso HTTP.
+/// Delivery of an HTTP notification.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct WebhookDeliveryResponse {
@@ -1269,7 +1266,7 @@ impl From<&ferrobox_domain::webhook::WebhookDelivery> for WebhookDeliveryRespons
     }
 }
 
-/// Cuerpo para crear un aviso HTTP.
+/// Body to create an HTTP notification.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct CreateWebhookRequest {
@@ -1287,12 +1284,12 @@ fn default_enabled() -> bool {
     true
 }
 
-/// Momento de evaluación de una política de admisión.
+/// Evaluation moment of an admission policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AdmissionWhenDto {
-    /// Al resolver un manifiesto o un paquete para instalarlo.
+    /// When resolving a manifest or a package to install it.
     Pull,
 }
 
@@ -1312,14 +1309,14 @@ impl From<ferrobox_domain::admission::AdmissionWhen> for AdmissionWhenDto {
     }
 }
 
-/// Condición que dispara el efecto de una política de admisión.
+/// Condition that triggers the effect of an admission policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AdmissionPredicateDto {
-    /// El artefacto no tiene una firma Cosign / Notation enlazada.
+    /// The artifact has no linked Cosign / Notation signature.
     NotSigned,
-    /// El artefacto no tiene una firma Cosign válida contra las claves.
+    /// The artifact has no Cosign signature valid against the keys.
     NotVerified,
 }
 
@@ -1342,14 +1339,14 @@ impl From<ferrobox_domain::admission::AdmissionPredicate> for AdmissionPredicate
     }
 }
 
-/// Qué hacer si la condición de admisión se cumple.
+/// What to do if the admission condition is met.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AdmissionEffectDto {
-    /// Bloquea la operación.
+    /// Blocks the operation.
     Deny,
-    /// Deja pasar y solo deja constancia.
+    /// Lets it through and only records it.
     Warn,
 }
 
@@ -1371,61 +1368,61 @@ impl From<ferrobox_domain::admission::AdmissionEffect> for AdmissionEffectDto {
     }
 }
 
-/// Política de admisión enviada al guardar o simular.
+/// Admission policy sent when saving or simulating.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AdmissionPolicyRequest {
-    /// `true` si la regla se aplica en el pull.
+    /// `true` if the rule applies on pull.
     pub(crate) enabled: bool,
-    /// Momento de evaluación.
+    /// Evaluation moment.
     pub(crate) when: AdmissionWhenDto,
-    /// Condición de firma (compatibilidad).
+    /// Signature condition (compatibility).
     pub(crate) predicate: AdmissionPredicateDto,
-    /// Efecto si la condición se cumple.
+    /// Effect if the condition is met.
     pub(crate) effect: AdmissionEffectDto,
-    /// PEM de claves públicas Cosign (`cosign generate-key-pair`).
+    /// PEM of Cosign public keys (`cosign generate-key-pair`).
     #[serde(default)]
     pub(crate) public_keys_pem: String,
-    /// Exigir firma Cosign / Notation.
+    /// Require a Cosign / Notation signature.
     #[serde(default)]
     pub(crate) require_signed: Option<bool>,
-    /// Exigir verificación contra las claves PEM.
+    /// Require verification against the PEM keys.
     #[serde(default)]
     pub(crate) require_verified: Option<bool>,
-    /// Umbral de hallazgo (`medium`, `high`, `critical`). Vacío = apagado.
+    /// Finding threshold (`medium`, `high`, `critical`). Empty = off.
     #[serde(default)]
     pub(crate) min_finding: Option<String>,
-    /// Licencias SPDX denegadas.
+    /// Denied SPDX licenses.
     #[serde(default)]
     pub(crate) forbidden_licenses: Vec<String>,
-    /// Perfil que rellenó la regla, si se eligió uno.
+    /// Profile that filled the rule, if one was chosen.
     #[serde(default)]
     pub(crate) profile: Option<String>,
 }
 
-/// Política de admisión de un repositorio.
+/// Admission policy of a repository.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AdmissionPolicyResponse {
-    /// `true` si la regla se aplica en el pull.
+    /// `true` if the rule applies on pull.
     pub(crate) enabled: bool,
-    /// Momento de evaluación.
+    /// Evaluation moment.
     pub(crate) when: AdmissionWhenDto,
-    /// Condición de firma (compatibilidad).
+    /// Signature condition (compatibility).
     pub(crate) predicate: AdmissionPredicateDto,
-    /// Efecto si la condición se cumple.
+    /// Effect if the condition is met.
     pub(crate) effect: AdmissionEffectDto,
-    /// PEM de claves públicas Cosign del repositorio.
+    /// PEM of the repository Cosign public keys.
     pub(crate) public_keys_pem: String,
-    /// Exigir firma Cosign / Notation.
+    /// Require a Cosign / Notation signature.
     pub(crate) require_signed: bool,
-    /// Exigir verificación contra las claves PEM.
+    /// Require verification against the PEM keys.
     pub(crate) require_verified: bool,
-    /// Umbral de hallazgo, si la cláusula está armada.
+    /// Finding threshold, if the clause is armed.
     pub(crate) min_finding: Option<String>,
-    /// Licencias SPDX denegadas.
+    /// Denied SPDX licenses.
     pub(crate) forbidden_licenses: Vec<String>,
-    /// Perfil que rellenó la regla, si se eligió uno.
+    /// Profile that filled the rule, if one was chosen.
     pub(crate) profile: Option<String>,
 }
 
@@ -1504,27 +1501,27 @@ impl From<ferrobox_ports::admission_store::AdmissionRecord> for AdmissionPolicyR
     }
 }
 
-/// Un artefacto que la política tocaría en un pull.
+/// An artifact the policy would touch on a pull.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AdmissionPreviewItemResponse {
-    /// Nombre del paquete o de la imagen.
+    /// Package or image name.
     pub(crate) name: String,
-    /// Versión o etiqueta.
+    /// Version or tag.
     pub(crate) version: String,
-    /// `deny` o `warn`.
+    /// `deny` or `warn`.
     pub(crate) effect: AdmissionEffectDto,
-    /// Motivo legible.
+    /// Readable reason.
     pub(crate) reason: String,
 }
 
-/// Resultado de simular la política contra el inventario.
+/// Result of simulating the policy against the inventory.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AdmissionPreviewResponse {
-    /// Artefactos que disparan la condición.
+    /// Artifacts that trigger the condition.
     pub(crate) matches: Vec<AdmissionPreviewItemResponse>,
-    /// Versiones listadas que no disparan la condición.
+    /// Listed versions that do not trigger the condition.
     #[ts(type = "number")]
     pub(crate) allowed: usize,
 }
@@ -1547,7 +1544,7 @@ impl From<ferrobox_application::admission::AdmissionPreview> for AdmissionPrevie
     }
 }
 
-/// Un aviso o una denegación registrados en un pull.
+/// A warning or a denial recorded on a pull.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AdmissionEventResponse {
@@ -1572,7 +1569,7 @@ impl From<ferrobox_domain::admission::AdmissionEvent> for AdmissionEventResponse
     }
 }
 
-/// Una fila del registro de auditoría.
+/// A row of the audit log.
 #[derive(Serialize, TS)]
 #[ts(export)]
 pub(crate) struct AuditEventResponse {
@@ -1599,13 +1596,13 @@ impl From<ferrobox_domain::audit::AuditEvent> for AuditEventResponse {
     }
 }
 
-/// Cuerpo para actualizar un aviso HTTP.
+/// Body to update an HTTP notification.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]
 pub(crate) struct UpdateWebhookRequest {
     pub(crate) name: String,
     pub(crate) url: String,
-    /// Ausente: conserva el secreto. Cadena vacía: lo borra.
+    /// Absent: keeps the secret. Empty string: deletes it.
     #[serde(default)]
     #[ts(optional)]
     pub(crate) secret: Option<String>,

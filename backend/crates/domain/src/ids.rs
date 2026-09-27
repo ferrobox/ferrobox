@@ -2,20 +2,20 @@ use std::fmt;
 
 use uuid::Uuid;
 
-/// Identificador único de un artefacto.
+/// Unique identifier of an artifact.
 ///
-/// Es un *newtype* sobre [`Uuid`]: el propio sistema de tipos, no una
-/// convención documentada, impide confundir el identificador de un
-/// artefacto con el de cualquier otra entidad futura (por ejemplo, un
-/// repositorio), aunque ambos sean, en representación binaria, el mismo
-/// valor de 128 bits.
+/// It is a *newtype* over [`Uuid`]: the type system itself, not a
+/// documented convention, prevents confusing an artifact identifier
+/// with that of any other future entity (for example, a
+/// repository), even if both are, in binary representation, the same
+/// 128-bit value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArtifactId(Uuid);
 
 impl ArtifactId {
-    /// Genera un nuevo identificador, usando UUID versión 7 (RFC 9562),
-    /// que incorpora una marca de tiempo para conservar buena localidad
-    /// de escritura en el índice de la base de datos.
+    /// Generates a new identifier, using UUID version 7 (RFC 9562),
+    /// which embeds a timestamp to preserve good write
+    /// locality in the database index.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -46,12 +46,12 @@ impl From<ArtifactId> for Uuid {
     }
 }
 
-/// Identificador único de un repositorio.
+/// Unique identifier of a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RepositoryId(Uuid);
 
 impl RepositoryId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -82,12 +82,12 @@ impl From<RepositoryId> for Uuid {
     }
 }
 
-/// Identificador único de un usuario.
+/// Unique identifier of a user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UserId(Uuid);
 
 impl UserId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -118,12 +118,12 @@ impl From<UserId> for Uuid {
     }
 }
 
-/// Identificador único de un token de API.
+/// Unique identifier of an API token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ApiTokenId(Uuid);
 
 impl ApiTokenId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -154,12 +154,12 @@ impl From<ApiTokenId> for Uuid {
     }
 }
 
-/// Identificador único de un ensaye (`Assay`).
+/// Unique identifier of an assay (`Assay`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssayId(Uuid);
 
 impl AssayId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -190,12 +190,12 @@ impl From<AssayId> for Uuid {
     }
 }
 
-/// Identificador único de un grupo de usuarios.
+/// Unique identifier of a user group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GroupId(Uuid);
 
 impl GroupId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -226,12 +226,12 @@ impl From<GroupId> for Uuid {
     }
 }
 
-/// Identificador único de un aviso HTTP (`webhook`).
+/// Unique identifier of an HTTP webhook.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WebhookId(Uuid);
 
 impl WebhookId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -262,12 +262,12 @@ impl From<WebhookId> for Uuid {
     }
 }
 
-/// Identificador único de un envío de aviso HTTP.
+/// Unique identifier of an HTTP webhook delivery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WebhookDeliveryId(Uuid);
 
 impl WebhookDeliveryId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -298,12 +298,12 @@ impl From<WebhookDeliveryId> for Uuid {
     }
 }
 
-/// Identificador único de un evento de admisión (aviso o denegación).
+/// Unique identifier of an admission event (warning or denial).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AdmissionEventId(Uuid);
 
 impl AdmissionEventId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())
@@ -334,12 +334,12 @@ impl From<AdmissionEventId> for Uuid {
     }
 }
 
-/// Identificador único de un evento de auditoría.
+/// Unique identifier of an audit event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AuditEventId(Uuid);
 
 impl AuditEventId {
-    /// Genera un nuevo identificador, usando UUID versión 7.
+    /// Generates a new identifier, using UUID version 7.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::now_v7())

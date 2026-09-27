@@ -1,5 +1,5 @@
-//! Aviso HTTP (`webhook`): un POST a una URL cuando ocurre un evento
-//! en un repositorio. El install y el publish no esperan la respuesta.
+//! HTTP webhook: a POST to a URL when an event occurs
+//! in a repository. Install and publish do not wait for the response.
 
 use std::fmt;
 
@@ -12,18 +12,18 @@ const MAX_NAME_LENGTH: usize = 100;
 const MAX_SECRET_LENGTH: usize = 256;
 const MAX_URL_LENGTH: usize = 2048;
 
-/// Evento que puede disparar un aviso HTTP.
+/// Event that can trigger an HTTP webhook.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WebhookEvent {
-    /// Un ensaye ha terminado (listo, fallido o no soportado).
+    /// An assay has finished (ready, failed, or unsupported).
     AssayCompleted,
-    /// Una versión ha quedado disponible en el repositorio (publish o
-    /// cacheo de un Mirror).
+    /// A version has become available in the repository (publish or
+    /// caching of a Mirror).
     PackagePublished,
 }
 
 impl WebhookEvent {
-    /// Etiqueta estable usada en persistencia, API y cabecera HTTP.
+    /// Stable label used in persistence, API, and HTTP header.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -32,8 +32,8 @@ impl WebhookEvent {
         }
     }
 
-    /// Parsea la etiqueta estable. `ping` no es un evento persistido:
-    /// solo se usa al probar el aviso.
+    /// Parses the stable label. `ping` is not a persisted event:
+    /// it is only used when testing the webhook.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -50,17 +50,17 @@ impl fmt::Display for WebhookEvent {
     }
 }
 
-/// Resultado de un envío.
+/// Result of a delivery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebhookDeliveryStatus {
-    /// El destino respondió 2xx.
+    /// The destination responded 2xx.
     Success,
-    /// Red, TLS o respuesta fuera de 2xx.
+    /// Network, TLS, or a response outside 2xx.
     Failed,
 }
 
 impl WebhookDeliveryStatus {
-    /// Etiqueta estable.
+    /// Stable label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -69,7 +69,7 @@ impl WebhookDeliveryStatus {
         }
     }
 
-    /// Parsea la etiqueta estable.
+    /// Parses the stable label.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -80,46 +80,46 @@ impl WebhookDeliveryStatus {
     }
 }
 
-/// Motivos por los que un aviso no es válido.
+/// Reasons why a webhook is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum WebhookError {
-    /// El nombre no puede estar vacío.
+    /// The name cannot be empty.
     #[error("webhook name cannot be empty")]
     EmptyName,
 
-    /// El nombre supera la longitud máxima.
+    /// The name exceeds the maximum length.
     #[error("webhook name cannot exceed {max} characters, got {actual}")]
     NameTooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real.
+        /// Actual length.
         actual: usize,
     },
 
-    /// La URL no es `http` ni `https`, o no tiene host.
+    /// The URL is neither `http` nor `https`, or it has no host.
     #[error("webhook URL must be an absolute http or https URL")]
     InvalidUrl,
 
-    /// La URL supera la longitud máxima.
+    /// The URL exceeds the maximum length.
     #[error("webhook URL cannot exceed {max} characters")]
     UrlTooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
     },
 
-    /// El secreto supera la longitud máxima.
+    /// The secret exceeds the maximum length.
     #[error("webhook secret cannot exceed {max} characters")]
     SecretTooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
     },
 
-    /// Hay que elegir al menos un evento.
+    /// At least one event must be chosen.
     #[error("select at least one webhook event")]
     NoEvents,
 }
 
-/// Un aviso HTTP asociado a un repositorio.
+/// An HTTP webhook associated with a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Webhook {
     id: WebhookId,
@@ -132,12 +132,12 @@ pub struct Webhook {
 }
 
 impl Webhook {
-    /// Crea un aviso nuevo.
+    /// Creates a new webhook.
     ///
     /// # Errors
     ///
-    /// [`WebhookError`] si el nombre, la URL, el secreto o los eventos
-    /// no son válidos.
+    /// [`WebhookError`] if the name, URL, secret, or events
+    /// are not valid.
     pub fn new(
         repository_id: RepositoryId,
         name: impl Into<String>,
@@ -157,11 +157,11 @@ impl Webhook {
         )
     }
 
-    /// Reconstituye un aviso ya persistido.
+    /// Reconstitutes an already persisted webhook.
     ///
     /// # Errors
     ///
-    /// [`WebhookError`] si algún campo no cumple las invariantes.
+    /// [`WebhookError`] if any field does not meet the invariants.
     pub fn from_parts(
         id: WebhookId,
         repository_id: RepositoryId,
@@ -191,56 +191,56 @@ impl Webhook {
         })
     }
 
-    /// Identificador.
+    /// Identifier.
     #[must_use]
     pub fn id(&self) -> WebhookId {
         self.id
     }
 
-    /// Repositorio al que pertenece.
+    /// Repository it belongs to.
     #[must_use]
     pub fn repository_id(&self) -> RepositoryId {
         self.repository_id
     }
 
-    /// Nombre descriptivo.
+    /// Descriptive name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// URL de destino.
+    /// Destination URL.
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    /// Secreto HMAC, si hay.
+    /// HMAC secret, if any.
     #[must_use]
     pub fn secret(&self) -> Option<&str> {
         self.secret.as_deref()
     }
 
-    /// Eventos suscritos.
+    /// Subscribed events.
     #[must_use]
     pub fn events(&self) -> &[WebhookEvent] {
         &self.events
     }
 
-    /// `true` si está activo.
+    /// `true` if it is active.
     #[must_use]
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    /// `true` si este aviso debe dispararse para `event`.
+    /// `true` if this webhook should fire for `event`.
     #[must_use]
     pub fn listens_to(&self, event: WebhookEvent) -> bool {
         self.enabled && self.events.contains(&event)
     }
 }
 
-/// Un intento de envío a un aviso.
+/// An attempt to deliver to a webhook.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookDelivery {
     id: WebhookDeliveryId,
@@ -253,7 +253,7 @@ pub struct WebhookDelivery {
 }
 
 impl WebhookDelivery {
-    /// Construye un envío ya persistido o recién realizado.
+    /// Builds a delivery that is already persisted or just performed.
     #[must_use]
     pub fn from_parts(
         id: WebhookDeliveryId,
@@ -275,43 +275,43 @@ impl WebhookDelivery {
         }
     }
 
-    /// Identificador del envío.
+    /// Delivery identifier.
     #[must_use]
     pub fn id(&self) -> WebhookDeliveryId {
         self.id
     }
 
-    /// Aviso al que pertenece.
+    /// Webhook it belongs to.
     #[must_use]
     pub fn webhook_id(&self) -> WebhookId {
         self.webhook_id
     }
 
-    /// Nombre del evento (`assay.completed`, `package.published`, `ping`).
+    /// Event name (`assay.completed`, `package.published`, `ping`).
     #[must_use]
     pub fn event(&self) -> &str {
         &self.event
     }
 
-    /// Resultado.
+    /// Result.
     #[must_use]
     pub fn status(&self) -> WebhookDeliveryStatus {
         self.status
     }
 
-    /// Código HTTP del destino, si llegó a responder.
+    /// HTTP status of the destination, if it responded.
     #[must_use]
     pub fn http_status(&self) -> Option<u16> {
         self.http_status
     }
 
-    /// Detalle del fallo, si lo hubo.
+    /// Failure detail, if any.
     #[must_use]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
-    /// Instante RFC 3339.
+    /// RFC 3339 timestamp.
     #[must_use]
     pub fn created_at(&self) -> &str {
         &self.created_at

@@ -2,26 +2,26 @@
 import type { CleanupItemResponse } from "./CleanupItemResponse";
 
 /**
- * Simulación o aplicación de retención/GC.
+ * Simulation or application of retention/GC.
  */
 export type CleanupPreviewResponse = { 
 /**
- * `true` si no se ha borrado nada.
+ * `true` if nothing has been deleted.
  */
 dry_run: boolean, 
 /**
- * Versiones o etiquetas eliminadas (o que se eliminarían) del índice.
+ * Versions or tags removed (or that would be removed) from the index.
  */
 dropped_versions: number, 
 /**
- * Binarios borrados (o que se borrarían).
+ * Binaries deleted (or that would be deleted).
  */
 deleted_artifacts: number, 
 /**
- * Bytes liberados (o que se liberarían).
+ * Bytes freed (or that would be freed).
  */
 freed_bytes: number, 
 /**
- * Detalle para revisar antes de aplicar.
+ * Detail to review before applying.
  */
 items: Array<CleanupItemResponse>, };

@@ -1,5 +1,5 @@
-//! Intervalo de refresco de un `Mirror` y el barrido de los que ya toca
-//! reindexar.
+//! Refresh interval of a `Mirror` and the sweep of those due to be
+//! reindexed.
 
 use std::collections::HashSet;
 
@@ -15,48 +15,48 @@ use crate::get_repository::{GetRepositoryError, GetRepositoryUseCase};
 use crate::packaging::PackagingRegistry;
 use crate::prefetch_package::{PrefetchError, PrefetchPackageUseCase};
 
-/// Horas mínimas entre refrescos programados.
+/// Minimum hours between scheduled refreshes.
 pub const MIN_PREFETCH_INTERVAL_HOURS: u32 = 1;
-/// Horas máximas (una semana).
+/// Maximum hours (one week).
 pub const MAX_PREFETCH_INTERVAL_HOURS: u32 = 168;
 
-/// Motivos por los que no se puede guardar el intervalo.
+/// Reasons the interval cannot be saved.
 #[derive(Debug, Error)]
 pub enum SetMirrorScheduleError {
-    /// Solo un `Mirror` tiene cron de prefetch.
+    /// Only a `Mirror` has a prefetch cron.
     #[error("cannot schedule prefetch on a {0} repository")]
     NotAMirror(&'static str),
 
-    /// El intervalo está fuera de 1..=168 (salvo 0 / ausente = apagar).
+    /// The interval is outside 1..=168 (except 0 / absent = turn off).
     #[error(
         "prefetch interval must be between {MIN_PREFETCH_INTERVAL_HOURS} and {MAX_PREFETCH_INTERVAL_HOURS} hours, or 0 to disable"
     )]
     InvalidInterval,
 
-    /// El repositorio no existe o falló la persistencia.
+    /// The repository does not exist or persistence failed.
     #[error(transparent)]
     Repository(#[from] GetRepositoryError),
 }
 
-/// Motivos por los que el barrido programado puede fallar.
+/// Reasons the scheduled sweep can fail.
 #[derive(Debug, Error)]
 pub enum MirrorScheduleRunError {
-    /// Fallo al listar o guardar repositorios.
+    /// Failed to list or save repositories.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 
-    /// Fallo al leer el índice de un `Mirror` vencido.
+    /// Failed to read the index of a due `Mirror`.
     #[error(transparent)]
     Index(#[from] PackageIndexStoreError),
 }
 
-/// Normaliza el intervalo: `None` o `0` apaga el cron; 1..=168 lo deja
-/// activo.
+/// Normalizes the interval: `None` or `0` turns the cron off; 1..=168
+/// leaves it on.
 ///
 /// # Errors
 ///
-/// [`SetMirrorScheduleError::InvalidInterval`] si el valor es positivo
-/// y queda fuera del rango.
+/// [`SetMirrorScheduleError::InvalidInterval`] if the value is positive
+/// and falls outside the range.
 pub fn normalize_prefetch_interval(
     hours: Option<u32>,
 ) -> Result<Option<u32>, SetMirrorScheduleError> {
@@ -71,16 +71,16 @@ pub fn normalize_prefetch_interval(
     }
 }
 
-/// Caso de uso: guardar el intervalo de refresco de un `Mirror`.
+/// Use case: save the refresh interval of a `Mirror`.
 pub struct SetMirrorScheduleUseCase;
 
 impl SetMirrorScheduleUseCase {
-    /// Actualiza `prefetch_interval_hours` y conserva `last_prefetch_at`.
+    /// Updates `prefetch_interval_hours` and keeps `last_prefetch_at`.
     ///
     /// # Errors
     ///
-    /// [`SetMirrorScheduleError`] si no es un `Mirror`, el intervalo no
-    /// es válido, o falla la persistencia.
+    /// [`SetMirrorScheduleError`] if it is not a `Mirror`, the interval
+    /// is not valid, or persistence fails.
     pub async fn execute(
         repositories: &GetRepositoryUseCase,
         id: RepositoryId,
@@ -100,18 +100,18 @@ impl SetMirrorScheduleUseCase {
     }
 }
 
-/// Recorre los `Mirror` con intervalo vencido, reindexa lo ya conocido
-/// y marca `last_prefetch_at`.
+/// Walks `Mirror`s whose interval is due, reindexes what is already
+/// known, and stamps `last_prefetch_at`.
 ///
-/// Cargo, npm y el resto de índices se refrescan por nombre (sin
-/// descargar el binario). OCI y Helm piden cada par nombre+versión.
-/// Un fallo de un paquete no aborta el resto ni impide marcar la
-/// corrida: el siguiente tick espera al intervalo.
+/// Cargo, npm, and the other indexes refresh by name (without
+/// downloading the binary). OCI and Helm request each name+version
+/// pair. A failure of one package does not abort the rest or prevent
+/// stamping the run: the next tick waits for the interval.
 ///
 /// # Errors
 ///
-/// [`MirrorScheduleRunError`] si falla listar repositorios, leer el
-/// índice o persistir la marca de última corrida.
+/// [`MirrorScheduleRunError`] if listing repositories, reading the
+/// index, or persisting the last-run stamp fails.
 pub async fn run_due(
     repositories: &dyn ferrobox_ports::repository_store::RepositoryStore,
     package_index: &dyn PackageIndexStore,

@@ -6,53 +6,53 @@ use thiserror::Error;
 
 use crate::auth_crypto::{PasswordHashError, hash_password, verify_password};
 
-/// Motivos por los que cambiar la contraseña puede fallar.
+/// Reasons changing the password can fail.
 #[derive(Debug, Error)]
 pub enum ChangePasswordError {
-    /// La nueva contraseña no cumple la política de la instancia.
+    /// The new password does not meet the instance policy.
     #[error(transparent)]
     InvalidPassword(#[from] ferrobox_domain::user::PasswordPolicyError),
 
-    /// La contraseña actual no coincide.
+    /// The current password does not match.
     #[error("current password is incorrect")]
     InvalidCurrentPassword,
 
-    /// Las cuentas robot no tienen contraseña.
+    /// Robot accounts have no password.
     #[error("a robot account has no password")]
     RobotAccount,
 
-    /// El usuario autenticado ya no existe.
+    /// The authenticated user no longer exists.
     #[error("user not found")]
     NotFound,
 
-    /// Fallo al hashear la nueva contraseña.
+    /// Failed to hash the new password.
     #[error(transparent)]
     PasswordHashing(#[from] PasswordHashError),
 
-    /// Fallo al consultar o persistir el almacén de usuarios.
+    /// Failed to query or persist the user store.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Caso de uso: el usuario autenticado cambia su propia contraseña.
+/// Use case: the authenticated user changes their own password.
 pub struct ChangePasswordUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl ChangePasswordUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Verifica la contraseña actual y sustituye el hash almacenado.
+    /// Verifies the current password and replaces the stored hash.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ChangePasswordError`] si la nueva contraseña no
-    /// cumple la política, la actual no coincide, el usuario no
-    /// existe, o fallan el hashing o la persistencia.
+    /// Returns [`ChangePasswordError`] if the new password does not
+    /// meet the policy, the current one does not match, the user does
+    /// not exist, or hashing or persistence fails.
     pub async fn execute(
         &self,
         username: &Username,

@@ -2,6 +2,6 @@
 import type { GroupRepositoryGrantRequest } from "./GroupRepositoryGrantRequest";
 
 /**
- * Cuerpo de la petición para sustituir los repositorios de un grupo.
+ * Request body to replace the repositories of a group.
  */
 export type SetGroupRepositoriesRequest = { grants: Array<GroupRepositoryGrantRequest>, };

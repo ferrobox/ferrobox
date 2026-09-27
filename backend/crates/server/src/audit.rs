@@ -1,4 +1,4 @@
-//! Rutas HTTP del registro de auditoría (solo rol `Admin`).
+//! HTTP routes for the audit log (`Admin` role only).
 
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use crate::authz::require_manage_users;
 use crate::dto::AuditEventResponse;
 use crate::error::ApiError;
 
-/// Deja constancia de una escritura. No falla la petición.
+/// Records a write. Does not fail the request.
 pub(crate) async fn record(
     state: &AppState,
     actor: &User,

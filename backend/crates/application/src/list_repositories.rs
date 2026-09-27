@@ -3,24 +3,24 @@ use std::sync::Arc;
 use ferrobox_domain::repository::Repository;
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 
-/// Caso de uso: listar todos los repositorios existentes.
+/// Use case: list every existing repository.
 pub struct ListRepositoriesUseCase {
     repository_store: Arc<dyn RepositoryStore>,
 }
 
 impl ListRepositoriesUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(repository_store: Arc<dyn RepositoryStore>) -> Self {
         Self { repository_store }
     }
 
-    /// Lista todos los repositorios existentes.
+    /// Lists every existing repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`RepositoryStoreError::Backend`] if the underlying
+    /// backend fails.
     pub async fn execute(&self) -> Result<Vec<Repository>, RepositoryStoreError> {
         self.repository_store.find_all().await
     }

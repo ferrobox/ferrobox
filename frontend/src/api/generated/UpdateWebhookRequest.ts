@@ -2,10 +2,10 @@
 import type { WebhookEventDto } from "./WebhookEventDto";
 
 /**
- * Cuerpo para actualizar un aviso HTTP.
+ * Body to update an HTTP notification.
  */
 export type UpdateWebhookRequest = { name: string, url: string, 
 /**
- * Ausente: conserva el secreto. Cadena vacía: lo borra.
+ * Absent: keeps the secret. Empty string: deletes it.
  */
 secret?: string, events: Array<WebhookEventDto>, enabled: boolean, };

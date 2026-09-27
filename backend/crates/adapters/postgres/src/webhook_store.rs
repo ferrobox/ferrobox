@@ -10,13 +10,13 @@ use sqlx::{PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`WebhookStore`] contra `PostgreSQL`.
+/// [`WebhookStore`] adapter against `PostgreSQL`.
 pub struct PostgresWebhookStore {
     pool: PgPool,
 }
 
 impl PostgresWebhookStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

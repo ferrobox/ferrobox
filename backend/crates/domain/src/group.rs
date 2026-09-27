@@ -7,18 +7,18 @@ use crate::user::Role;
 
 const MAX_GROUP_NAME_LENGTH: usize = 64;
 
-/// Acceso efectivo de un usuario a un repositorio.
+/// Effective access of a user to a repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RepositoryAccess {
-    /// Puede listar y descargar.
+    /// Can list and download.
     Read,
-    /// Puede publicar, borrar y configurar el repositorio.
+    /// Can publish, delete, and configure the repository.
     Write,
 }
 
 impl RepositoryAccess {
-    /// Convierte el rol asignado a un grupo en acceso al repositorio.
-    /// `Admin` no se usa a nivel de grupo: es un rol de instancia.
+    /// Converts the role assigned to a group into repository access.
+    /// `Admin` is not used at group level: it is an instance role.
     #[must_use]
     pub fn from_group_role(role: Role) -> Option<Self> {
         match role {
@@ -28,7 +28,7 @@ impl RepositoryAccess {
         }
     }
 
-    /// Etiqueta estable usada en la API HTTP.
+    /// Stable label used in the HTTP API.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -37,35 +37,35 @@ impl RepositoryAccess {
         }
     }
 
-    /// `true` si incluye escritura.
+    /// `true` if it includes write access.
     #[must_use]
     pub fn can_write(self) -> bool {
         matches!(self, Self::Write)
     }
 }
 
-/// Nombre validado de un grupo: no vacío, con longitud acotada, y
-/// restringido a caracteres seguros para identificadores.
+/// Validated group name: non-empty, with a bounded length, and
+/// restricted to characters safe for identifiers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupName(String);
 
-/// Motivos por los que una cadena no es un [`GroupName`] válido.
+/// Reasons why a string is not a valid [`GroupName`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum GroupNameError {
-    /// El nombre no puede estar vacío.
+    /// The name cannot be empty.
     #[error("group name cannot be empty")]
     Empty,
 
-    /// El nombre supera la longitud máxima permitida.
+    /// The name exceeds the maximum allowed length.
     #[error("group name cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 
-    /// El nombre contiene un carácter fuera del alfabeto permitido.
+    /// The name contains a character outside the allowed alphabet.
     #[error(
         "group name contains an invalid character: '{0}' \
          (only ASCII letters, digits, '-' and '_' are allowed)"
@@ -74,12 +74,12 @@ pub enum GroupNameError {
 }
 
 impl GroupName {
-    /// Valida y construye un nombre de grupo.
+    /// Validates and builds a group name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`GroupNameError`] si `name` está vacío, supera `64`
-    /// caracteres, o contiene un carácter fuera del alfabeto permitido.
+    /// Returns [`GroupNameError`] if `name` is empty, exceeds `64`
+    /// characters, or contains a character outside the allowed alphabet.
     pub fn parse(name: impl Into<String>) -> Result<Self, GroupNameError> {
         let name = name.into();
 
@@ -104,7 +104,7 @@ impl GroupName {
         Ok(Self(name))
     }
 
-    /// Devuelve el nombre como cadena de texto.
+    /// Returns the name as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -117,10 +117,10 @@ impl fmt::Display for GroupName {
     }
 }
 
-/// Un grupo de usuarios al que un Admin asigna repositorios.
+/// A group of users to which an Admin assigns repositories.
 ///
-/// Los miembros y el acceso a repositorios no viven en esta entidad:
-/// son asociaciones que persiste el almacén de grupos.
+/// Members and repository access do not live on this entity:
+/// they are associations persisted by the group store.
 #[derive(Debug, Clone)]
 pub struct Group {
     id: GroupId,
@@ -128,7 +128,7 @@ pub struct Group {
 }
 
 impl Group {
-    /// Crea un grupo nuevo.
+    /// Creates a new group.
     #[must_use]
     pub fn new(name: GroupName) -> Self {
         Self {
@@ -137,19 +137,19 @@ impl Group {
         }
     }
 
-    /// Reconstituye un grupo ya persistido.
+    /// Reconstitutes an already persisted group.
     #[must_use]
     pub fn from_parts(id: GroupId, name: GroupName) -> Self {
         Self { id, name }
     }
 
-    /// Identificador único.
+    /// Unique identifier.
     #[must_use]
     pub fn id(&self) -> GroupId {
         self.id
     }
 
-    /// Nombre del grupo.
+    /// Group name.
     #[must_use]
     pub fn name(&self) -> &GroupName {
         &self.name

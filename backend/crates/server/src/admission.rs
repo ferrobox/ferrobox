@@ -1,4 +1,4 @@
-//! Rutas HTTP de la política de admisión.
+//! HTTP routes for the admission policy.
 
 use std::sync::Arc;
 
@@ -72,7 +72,7 @@ pub(crate) async fn dry_run(
     Ok(Json(AdmissionPreviewResponse::from(preview)))
 }
 
-/// Evalúa la política en un pull HTTP si hay nombre y versión de paquete.
+/// Evaluates the policy on an HTTP pull when a package name and version are present.
 pub(crate) async fn enforce_download(
     state: &AppState,
     repository_id: RepositoryId,

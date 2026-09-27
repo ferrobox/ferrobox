@@ -1,4 +1,4 @@
-//! Avisos HTTP de un repositorio: CRUD y envío en segundo plano.
+//! HTTP webhooks of a repository: CRUD and background delivery.
 
 use std::sync::Arc;
 
@@ -21,39 +21,39 @@ use thiserror::Error;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Motivos por los que gestionar o enviar un aviso puede fallar.
+/// Reasons managing or sending a webhook can fail.
 #[derive(Debug, Error)]
 pub enum ManageWebhookError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// El aviso no existe.
+    /// The webhook does not exist.
     #[error("webhook {0} was not found")]
     WebhookNotFound(WebhookId),
 
-    /// El aviso no pertenece a ese repositorio.
+    /// The webhook does not belong to that repository.
     #[error("webhook does not belong to this repository")]
     WebhookMismatch,
 
-    /// Un `Alloy` no dispara avisos propios: configúralos en un Forge o Mirror miembro.
+    /// An `Alloy` does not fire its own webhooks: configure them on a member Forge or Mirror.
     #[error("webhooks do not apply to Alloy repositories")]
     AlloyRepository,
 
-    /// Los campos del aviso no son válidos.
+    /// The webhook fields are not valid.
     #[error(transparent)]
     Invalid(#[from] WebhookError),
 
-    /// Fallo al persistir avisos.
+    /// Failed to persist webhooks.
     #[error(transparent)]
     Store(#[from] WebhookStoreError),
 
-    /// Fallo al consultar repositorios.
+    /// Failed to query repositories.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 }
 
-/// Caso de uso: avisos HTTP por repositorio.
+/// Use case: HTTP webhooks per repository.
 #[derive(Clone)]
 pub struct WebhookService {
     store: Arc<dyn WebhookStore>,
@@ -62,7 +62,7 @@ pub struct WebhookService {
 }
 
 impl WebhookService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         store: Arc<dyn WebhookStore>,
@@ -76,21 +76,21 @@ impl WebhookService {
         }
     }
 
-    /// Lista los avisos de un repositorio.
+    /// Lists the webhooks of a repository.
     ///
     /// # Errors
     ///
-    /// [`ManageWebhookError::RepositoryNotFound`] o fallo de persistencia.
+    /// [`ManageWebhookError::RepositoryNotFound`] or a persistence failure.
     pub async fn list(&self, repository_id: RepositoryId) -> Result<Vec<Webhook>, ManageWebhookError> {
         self.require_writable_repository(repository_id).await?;
         Ok(self.store.find_by_repository(repository_id).await?)
     }
 
-    /// Crea un aviso.
+    /// Creates a webhook.
     ///
     /// # Errors
     ///
-    /// [`ManageWebhookError::Invalid`] o el repositorio no existe.
+    /// [`ManageWebhookError::Invalid`] or the repository does not exist.
     pub async fn create(
         &self,
         repository_id: RepositoryId,
@@ -106,11 +106,11 @@ impl WebhookService {
         Ok(webhook)
     }
 
-    /// Actualiza un aviso. Si `secret` es `None`, conserva el anterior.
+    /// Updates a webhook. If `secret` is `None`, keeps the previous one.
     ///
     /// # Errors
     ///
-    /// [`ManageWebhookError::WebhookNotFound`] o validación.
+    /// [`ManageWebhookError::WebhookNotFound`] or validation.
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
@@ -138,7 +138,7 @@ impl WebhookService {
         Ok(webhook)
     }
 
-    /// Elimina un aviso.
+    /// Deletes a webhook.
     ///
     /// # Errors
     ///
@@ -154,7 +154,7 @@ impl WebhookService {
         Ok(())
     }
 
-    /// Últimos envíos de un aviso.
+    /// Latest deliveries of a webhook.
     ///
     /// # Errors
     ///
@@ -169,7 +169,7 @@ impl WebhookService {
         Ok(self.store.deliveries(webhook_id, 20).await?)
     }
 
-    /// Envía un `ping` síncrono para comprobar el destino.
+    /// Sends a synchronous `ping` to check the destination.
     ///
     /// # Errors
     ///
@@ -195,8 +195,8 @@ impl WebhookService {
         Ok(self.deliver(&webhook, "ping", payload).await)
     }
 
-    /// Dispara `package.published` en segundo plano. Nunca bloquea al
-    /// llamador: un fallo queda en el historial de envíos.
+    /// Fires `package.published` in the background. Never blocks the
+    /// caller: a failure is recorded in the delivery history.
     pub fn notify_package_published(
         &self,
         repository_id: RepositoryId,
@@ -210,7 +210,7 @@ impl WebhookService {
         });
     }
 
-    /// Dispara `assay.completed` en segundo plano.
+    /// Fires `assay.completed` in the background.
     pub fn notify_assay_completed(&self, assay: Assay) {
         let service = self.clone();
         tokio::spawn(async move {

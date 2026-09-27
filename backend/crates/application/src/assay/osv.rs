@@ -1,4 +1,4 @@
-//! Consulta OSV (*Open Source Vulnerabilities*) por lote.
+//! Batch OSV (*Open Source Vulnerabilities*) query.
 
 use std::collections::HashMap;
 
@@ -15,16 +15,16 @@ const OSV_QUERYBATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
 const OSV_VULN_URL: &str = "https://api.osv.dev/v1/vulns";
 const OSV_BATCH_SIZE: usize = 1000;
 
-/// Consulta OSV para los componentes con versión concreta.
+/// Queries OSV for components with a concrete version.
 ///
 /// # Errors
 ///
-/// Devuelve [`HttpClientError`] si el remoto falla.
+/// Returns [`HttpClientError`] if the remote fails.
 ///
 /// # Panics
 ///
-/// No entra en pánico en la práctica: el lote de consultas se construye
-/// con tipos que siempre serializan.
+/// In practice this never panics: the query batch is built with types
+/// that always serialize.
 pub async fn query_findings(
     http: &dyn HttpClient,
     ecosystem: PackageEcosystem,
@@ -248,7 +248,7 @@ fn severity_of(vuln: &OsvVuln) -> AssaySeverity {
 }
 
 fn cvss_numeric_from_vector(vector: &str) -> Option<f64> {
-    // Algunos avisos mandan "7.5" y otros el vector. Si hay un número suelto, úsalo.
+    // Some advisories send "7.5" and others the vector. If there is a loose number, use it.
     vector.parse().ok()
 }
 

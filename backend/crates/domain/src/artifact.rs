@@ -1,13 +1,13 @@
 use crate::checksum::Sha256Checksum;
 use crate::ids::{ArtifactId, RepositoryId};
 
-/// Un artefacto binario almacenado en un repositorio.
+/// A binary artifact stored in a repository.
 ///
-/// A diferencia de los objetos de valor (`ArtifactId`, `Sha256Checksum`),
-/// `Artifact` es una **Entidad**: dos instancias con el mismo
-/// identificador son la misma entidad, incluso si el resto de sus campos
-/// difiere. Por eso `PartialEq` y `Hash` se implementan a mano,
-/// comparando y derivando únicamente a partir del identificador.
+/// Unlike value objects (`ArtifactId`, `Sha256Checksum`),
+/// `Artifact` is an **Entity**: two instances with the same
+/// identifier are the same entity, even if the rest of their fields
+/// differ. That is why `PartialEq` and `Hash` are implemented by hand,
+/// comparing and hashing solely from the identifier.
 #[derive(Debug, Clone)]
 pub struct Artifact {
     id: ArtifactId,
@@ -18,7 +18,7 @@ pub struct Artifact {
 }
 
 impl Artifact {
-    /// Registra un artefacto nuevo, asignándole un identificador nuevo.
+    /// Registers a new artifact, assigning it a new identifier.
     #[must_use]
     pub fn new(repository_id: RepositoryId, checksum: Sha256Checksum, size_bytes: u64) -> Self {
         Self {
@@ -30,9 +30,9 @@ impl Artifact {
         }
     }
 
-    /// Reconstituye un artefacto ya existente a partir de un
-    /// identificador conocido (por ejemplo, al cargarlo desde
-    /// persistencia).
+    /// Reconstitutes an already existing artifact from a
+    /// known identifier (for example, when loading it from
+    /// persistence).
     #[must_use]
     pub fn from_parts(
         id: ArtifactId,
@@ -62,25 +62,25 @@ impl Artifact {
         self.filename.as_deref()
     }
 
-    /// Identificador único de este artefacto.
+    /// Unique identifier of this artifact.
     #[must_use]
     pub fn id(&self) -> ArtifactId {
         self.id
     }
 
-    /// Identificador del repositorio al que pertenece este artefacto.
+    /// Identifier of the repository this artifact belongs to.
     #[must_use]
     pub fn repository_id(&self) -> RepositoryId {
         self.repository_id
     }
 
-    /// Checksum SHA-256 validado del contenido binario.
+    /// Validated SHA-256 checksum of the binary content.
     #[must_use]
     pub fn checksum(&self) -> &Sha256Checksum {
         &self.checksum
     }
 
-    /// Tamaño en bytes del contenido binario.
+    /// Size in bytes of the binary content.
     #[must_use]
     pub fn size_bytes(&self) -> u64 {
         self.size_bytes

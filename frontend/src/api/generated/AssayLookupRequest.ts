@@ -2,6 +2,6 @@
 import type { PackageEcosystemDto } from "./PackageEcosystemDto";
 
 /**
- * Coordenada a ensayar, en el cuerpo o en la query.
+ * Coordinate to assay, in the body or in the query.
  */
 export type AssayLookupRequest = { ecosystem: PackageEcosystemDto, name: string, version: string, };

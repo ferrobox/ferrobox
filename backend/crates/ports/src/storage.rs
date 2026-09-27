@@ -4,20 +4,19 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
 
-/// Identifica de forma única un objeto binario dentro del almacenamiento
-/// subyacente -- por ejemplo, una ruta o "key" dentro de un bucket S3.
+/// Uniquely identifies a binary object inside the underlying storage
+/// -- for example, a path or "key" inside an S3 bucket.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StorageKey(String);
 
 impl StorageKey {
-    /// Construye una clave de almacenamiento a partir de cualquier
-    /// cadena de texto.
+    /// Builds a storage key from any text string.
     #[must_use]
     pub fn new(key: impl Into<String>) -> Self {
         Self(key.into())
     }
 
-    /// Devuelve la clave como cadena de texto.
+    /// Returns the key as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -30,60 +29,60 @@ impl fmt::Display for StorageKey {
     }
 }
 
-/// Motivos por los que una operación de almacenamiento puede fallar.
+/// Reasons a storage operation can fail.
 #[derive(Debug, Error)]
 pub enum StorageError {
-    /// No existe ningún objeto bajo la clave indicada.
+    /// No object exists under the given key.
     #[error("object not found: {0}")]
     NotFound(StorageKey),
 
-    /// El backend de almacenamiento concreto (Garage, S3, sistema de
-    /// archivos local, etc.) devolvió un error propio. Se envuelve como
-    /// un error opaco porque este crate de puertos no depende de ningún
-    /// backend concreto -- cada adaptador traduce su propio tipo de
-    /// error a esta variante en el límite de la capa.
+    /// The concrete storage backend (Garage, S3, local filesystem,
+    /// etc.) returned its own error. It is wrapped as an opaque error
+    /// because this ports crate does not depend on any concrete
+    /// backend -- each adapter translates its own error type to this
+    /// variant at the layer boundary.
     #[error("storage backend failure: {0}")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de almacenamiento de contenido binario.
+/// Binary content storage port.
 ///
-/// Cualquier backend (Garage, AWS S3, Azure Blob Storage, sistema de
-/// archivos local...) que implemente este *trait* puede sustituir a
-/// cualquier otro sin que el dominio ni la capa de aplicación necesiten
-/// cambiar una sola línea -- es la materialización directa del primer
-/// requisito arquitectónico de `FerroBox`: almacenamiento agnóstico.
+/// Any backend (Garage, AWS S3, Azure Blob Storage, local
+/// filesystem...) that implements this *trait* can replace any other
+/// without the domain or the application layer needing to change a
+/// single line -- it is the direct materialization of the first
+/// architectural requirement of `FerroBox`: storage-agnostic design.
 #[async_trait]
 pub trait StoragePort: Send + Sync {
-    /// Sube el contenido binario bajo la clave indicada, sobrescribiendo
-    /// cualquier objeto previo con la misma clave.
+    /// Uploads the binary content under the given key, overwriting any
+    /// previous object with the same key.
     ///
     /// # Errors
     ///
-    /// Devuelve [`StorageError::Backend`] si el backend subyacente falla.
+    /// Returns [`StorageError::Backend`] if the underlying backend fails.
     async fn put(&self, key: &StorageKey, content: Bytes) -> Result<(), StorageError>;
 
-    /// Descarga el contenido binario almacenado bajo la clave indicada.
+    /// Downloads the binary content stored under the given key.
     ///
     /// # Errors
     ///
-    /// Devuelve [`StorageError::NotFound`] si la clave no existe, o
-    /// [`StorageError::Backend`] si el backend subyacente falla.
+    /// Returns [`StorageError::NotFound`] if the key does not exist, or
+    /// [`StorageError::Backend`] if the underlying backend fails.
     async fn get(&self, key: &StorageKey) -> Result<Bytes, StorageError>;
 
-    /// Elimina el objeto almacenado bajo la clave indicada. No es un
-    /// error eliminar una clave que no existe.
+    /// Deletes the object stored under the given key. Deleting a
+    /// missing key is not an error.
     ///
     /// # Errors
     ///
-    /// Devuelve [`StorageError::Backend`] si el backend subyacente falla.
+    /// Returns [`StorageError::Backend`] if the underlying backend fails.
     async fn delete(&self, key: &StorageKey) -> Result<(), StorageError>;
 
-    /// Comprueba si existe un objeto bajo la clave indicada.
+    /// Checks whether an object exists under the given key.
     ///
     /// # Errors
     ///
-    /// Devuelve [`StorageError::Backend`] si el backend subyacente falla.
+    /// Returns [`StorageError::Backend`] if the underlying backend fails.
     async fn exists(&self, key: &StorageKey) -> Result<bool, StorageError>;
 }
 
@@ -94,10 +93,9 @@ mod tests {
 
     use super::*;
 
-    /// Adaptador falso, solo para pruebas: guarda los objetos en memoria
-    /// en lugar de en un backend real. Nos permite comprobar que el
-    /// diseño del puerto funciona de extremo a extremo antes de escribir
-    /// el primer adaptador real (Garage) en el siguiente paso.
+    /// Fake adapter, tests only: stores objects in memory instead of a
+    /// real backend. Lets us verify the port design end to end before
+    /// writing the first real adapter (Garage) in the next step.
     #[derive(Default)]
     struct InMemoryStorage {
         objects: Mutex<HashMap<StorageKey, Bytes>>,

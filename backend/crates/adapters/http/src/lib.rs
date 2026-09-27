@@ -1,25 +1,24 @@
-//! Adaptador de [`HttpClient`](ferrobox_ports::http_client::HttpClient)
-//! basado en `reqwest`.
+//! [`HttpClient`](ferrobox_ports::http_client::HttpClient) adapter
+//! backed by `reqwest`.
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
 use reqwest::Client;
 
-/// Cliente HTTP saliente respaldado por `reqwest`.
+/// Outgoing HTTP client backed by `reqwest`.
 pub struct ReqwestHttpClient {
     client: Client,
 }
 
 impl ReqwestHttpClient {
-    /// Construye un cliente con la configuración por defecto de
-    /// `reqwest` (TLS rustls, redirecciones seguidas).
+    /// Builds a client with `reqwest`'s default configuration
+    /// (rustls TLS, redirects followed).
     ///
     /// # Panics
     ///
-    /// En la práctica no debería entrar en pánico: fallar al construir
-    /// el cliente de `reqwest` solo ocurre si faltan conectores TLS en
-    /// el entorno.
+    /// In practice this should not panic: building the `reqwest` client
+    /// only fails if TLS connectors are missing from the environment.
     #[must_use]
     pub fn new() -> Self {
         Self {

@@ -15,13 +15,13 @@ use uuid::Uuid;
 
 use crate::ecosystem_column;
 
-/// Adaptador de [`AssayStore`] contra `PostgreSQL`.
+/// [`AssayStore`] adapter against `PostgreSQL`.
 pub struct PostgresAssayStore {
     pool: PgPool,
 }
 
 impl PostgresAssayStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

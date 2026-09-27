@@ -1,4 +1,4 @@
-//! Rutas públicas de inicio de sesión federado (`OIDC`).
+//! Public routes for federated sign-in (`OIDC`).
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub(crate) struct OidcCallbackQuery {
     error_description: Option<String>,
 }
 
-/// Construye el servicio si `OIDC_ISSUER` y `OIDC_CLIENT_ID` están.
+/// Builds the service when `OIDC_ISSUER` and `OIDC_CLIENT_ID` are set.
 pub(crate) fn service_from_config(
     config: &Config,
     http_client: Arc<dyn ferrobox_ports::http_client::HttpClient>,

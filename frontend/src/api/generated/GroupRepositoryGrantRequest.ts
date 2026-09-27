@@ -2,6 +2,6 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Asignación de un repositorio a un grupo.
+ * Assignment of a repository to a group.
  */
 export type GroupRepositoryGrantRequest = { repository_id: string, role: RoleDto, };

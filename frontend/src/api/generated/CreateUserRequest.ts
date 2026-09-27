@@ -2,6 +2,6 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Cuerpo de la petición para crear un usuario.
+ * Request body to create a user.
  */
 export type CreateUserRequest = { username: string, email: string, password: string, role: RoleDto, };

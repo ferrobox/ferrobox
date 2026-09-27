@@ -2,14 +2,14 @@
 import type { AdmissionPreviewItemResponse } from "./AdmissionPreviewItemResponse";
 
 /**
- * Resultado de simular la política contra el inventario.
+ * Result of simulating the policy against the inventory.
  */
 export type AdmissionPreviewResponse = { 
 /**
- * Artefactos que disparan la condición.
+ * Artifacts that trigger the condition.
  */
 matches: Array<AdmissionPreviewItemResponse>, 
 /**
- * Versiones listadas que no disparan la condición.
+ * Listed versions that do not trigger the condition.
  */
 allowed: number, };

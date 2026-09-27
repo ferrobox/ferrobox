@@ -1,62 +1,61 @@
-//! Capa de dominio de `FerroBox`.
+//! Domain layer of `FerroBox`.
 //!
-//! Contiene entidades, objetos de valor e invariantes de negocio. Este
-//! crate no tiene ninguna dependencia hacia otro crate de `FerroBox` y nunca
-//! debe depender de detalles de infraestructura (bases de datos, HTTP,
-//! almacenamiento de objetos). Es el anillo más interno de la Arquitectura
-//! Limpia (Robert C. Martin, *Clean Architecture*, 2017): el resto de
-//! crates pueden depender de este, pero este crate nunca puede depender
-//! de ellos.
+//! Contains entities, value objects, and business invariants. This
+//! crate has no dependency on any other `FerroBox` crate and must never
+//! depend on infrastructure details (databases, HTTP, object storage).
+//! It is the innermost ring of Clean Architecture (Robert C. Martin,
+//! *Clean Architecture*, 2017): the rest of the crates may depend on
+//! this one, but this crate must never depend on them.
 
-/// `RepositoryKind`, `PackageEcosystem` y la entidad Repository.
+/// `RepositoryKind`, `PackageEcosystem`, and the Repository entity.
 pub mod repository;
 
-/// La entidad Artifact y su ciclo de vida.
+/// The Artifact entity and its lifecycle.
 pub mod artifact;
 
-/// Checksums validados de artefactos.
+/// Validated artifact checksums.
 pub mod checksum;
 
-/// Identificadores de dominio (objetos de valor).
+/// Domain identifiers (value objects).
 pub mod ids;
 
-/// Coordenadas de paquete (`PackageEcosystem`, `PackageName`,
-/// `PackageVersion`): identifican unívocamente una versión concreta de
-/// un paquete dentro de un ecosistema, independientemente de en qué
-/// repositorio esté publicada.
+/// Package coordinates (`PackageEcosystem`, `PackageName`,
+/// `PackageVersion`): uniquely identify a concrete version of a
+/// package within an ecosystem, regardless of which repository it is
+/// published in.
 pub mod package_coordinate;
 
-/// La entidad `User` y los objetos de valor `Username` y `Email`.
+/// The `User` entity and the `Username` and `Email` value objects.
 pub mod user;
 
-/// Identidad federada (`OIDC`) y mapeo de roles y grupos del `IdP`.
+/// Federated identity (`OIDC`) and IdP role and group mapping.
 pub mod oidc;
 
-/// La entidad `Group` y el acceso de un grupo a un repositorio.
+/// The `Group` entity and a group's access to a repository.
 pub mod group;
 
-/// Aviso HTTP (`webhook`) de un repositorio.
+/// HTTP webhook for a repository.
 pub mod webhook;
 
-/// La entidad `ApiToken` y el objeto de valor `ApiTokenName`.
+/// The `ApiToken` entity and the `ApiTokenName` value object.
 pub mod api_token;
 
-/// La entidad `Assay`: ensaye de un artefacto (composición e impurezas).
+/// The `Assay` entity: assay of an artifact (composition and impurities).
 pub mod assay;
 
-/// Política de retención de versiones de un repositorio.
+/// Version retention policy for a repository.
 pub mod retention;
 
-/// Política de admisión (firma, y más adelante otras condiciones).
+/// Admission policy (signature, and later other conditions).
 pub mod admission;
 
-/// Réplica push hacia otra instancia FerroBox.
+/// Push replica toward another FerroBox instance.
 pub mod replica;
 
-/// Registro de auditoría de escrituras de negocio.
+/// Audit log of business writes.
 pub mod audit;
 
-/// Cuota de almacenamiento de un repositorio.
+/// Storage quota for a repository.
 pub mod quota;
 
 /// Write-once / read-many lock for a repository.

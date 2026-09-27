@@ -1,4 +1,4 @@
-//! Rutas HTTP de cuota de almacenamiento.
+//! HTTP routes for storage quota.
 
 use std::sync::Arc;
 

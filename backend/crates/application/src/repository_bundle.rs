@@ -1,9 +1,9 @@
-//! Exporta e importa el contenido de un repositorio como un `.tar.gz`
-//! portable (`ferrobox.repository.v1`).
+//! Exports and imports the content of a repository as a portable
+//! `.tar.gz` (`ferrobox.repository.v1`).
 //!
-//! El archivo lleva `manifest.json` (ecosistema, paquetes e índice) y
-//! los binarios en `blobs/<sha256>`. Sirve para copiar un `Forge` o la
-//! caché de un `Mirror` a otro `Forge` de la misma instancia o de otra.
+//! The archive holds `manifest.json` (ecosystem, packages, and index)
+//! and the binaries in `blobs/<sha256>`. Used to copy a `Forge` or a
+//! `Mirror` cache to another `Forge` of the same instance or another.
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -38,79 +38,79 @@ use crate::storage_key::storage_key_for;
 
 const BUNDLE_FORMAT: &str = "ferrobox.repository.v1";
 
-/// Recuento de un export.
+/// Count of an export.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportBundle {
-    /// Bytes del `.tar.gz`.
+    /// Bytes of the `.tar.gz`.
     pub bytes: Bytes,
-    /// Nombre sugerido del archivo.
+    /// Suggested filename.
     pub filename: String,
-    /// Paquetes indexados incluidos.
+    /// Indexed packages included.
     pub packages: u32,
-    /// Binarios incluidos.
+    /// Binaries included.
     pub artifacts: u32,
-    /// Entradas de índice sin binario (omitidas).
+    /// Index entries without a binary (omitted).
     pub skipped_index_only: u32,
 }
 
-/// Recuento de un import.
+/// Count of an import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportOutcome {
-    /// Coordenadas nuevas escritas.
+    /// New coordinates written.
     pub packages_imported: u32,
-    /// Binarios nuevos escritos.
+    /// New binaries written.
     pub artifacts_imported: u32,
-    /// Paquetes o binarios que ya estaban.
+    /// Packages or binaries that were already there.
     pub skipped: u32,
-    /// Bytes escritos en el destino.
+    /// Bytes written to the destination.
     pub bytes_copied: u64,
 }
 
-/// Motivos por los que exportar o importar puede fallar.
+/// Reasons exporting or importing can fail.
 #[derive(Debug, Error)]
 pub enum BundleError {
-    /// Un `Alloy` no se exporta ni recibe un import.
+    /// An `Alloy` is not exported and does not receive an import.
     #[error("cannot {0} an Alloy repository")]
     Alloy(&'static str),
 
-    /// El destino de un import tiene que ser un `Forge`.
+    /// The destination of an import must be a `Forge`.
     #[error("cannot import into a {0} repository")]
     TargetNotForge(&'static str),
 
-    /// El archivo no es un bundle válido.
+    /// The archive is not a valid bundle.
     #[error("invalid repository bundle: {0}")]
     InvalidBundle(String),
 
-    /// El ecosistema del archivo no coincide con el destino.
+    /// The archive ecosystem does not match the destination.
     #[error("bundle ecosystem '{bundle}' does not match repository '{repository}'")]
     EcosystemMismatch {
-        /// Ecosistema del archivo.
+        /// Archive ecosystem.
         bundle: &'static str,
-        /// Ecosistema del repositorio destino.
+        /// Destination repository ecosystem.
         repository: &'static str,
     },
 
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error(transparent)]
     Repository(#[from] GetRepositoryError),
 
-    /// Fallo al listar repositorios.
+    /// Failed to list repositories.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 
-    /// Fallo al listar o guardar artefactos.
+    /// Failed to list or save artifacts.
     #[error(transparent)]
     Artifact(#[from] ArtifactStoreError),
 
-    /// Fallo al leer o escribir el índice.
+    /// Failed to read or write the index.
     #[error(transparent)]
     Index(#[from] PackageIndexStoreError),
 
-    /// Fallo al leer o escribir objetos.
+    /// Failed to read or write objects.
     #[error(transparent)]
     Storage(#[from] StorageError),
 
-    /// El destino no admite más binarios.
+    /// The destination cannot accept more binaries.
     #[error(transparent)]
     Quota(#[from] QuotaError),
 }
@@ -140,7 +140,7 @@ struct BundleBlob {
     size_bytes: u64,
 }
 
-/// Exporta e importa archivos portables de un repositorio.
+/// Exports and imports portable archives of a repository.
 #[derive(Clone)]
 #[allow(clippy::struct_field_names)]
 pub struct RepositoryBundleService {
@@ -152,7 +152,7 @@ pub struct RepositoryBundleService {
 }
 
 impl RepositoryBundleService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -170,11 +170,11 @@ impl RepositoryBundleService {
         }
     }
 
-    /// Empaqueta el contenido cacheado de un `Forge` o un `Mirror`.
+    /// Packs the cached content of a `Forge` or a `Mirror`.
     ///
     /// # Errors
     ///
-    /// [`BundleError`] si el repositorio es un `Alloy` o falla un puerto.
+    /// [`BundleError`] if the repository is an `Alloy` or a port fails.
     pub async fn export(&self, repository_id: RepositoryId) -> Result<ExportBundle, BundleError> {
         let repository = self.repositories.execute(repository_id).await?;
         if matches!(repository.kind(), RepositoryKind::Alloy { .. }) {
@@ -266,14 +266,14 @@ impl RepositoryBundleService {
         })
     }
 
-    /// Restaura un bundle en un `Forge` del mismo ecosistema.
+    /// Restores a bundle into a `Forge` of the same ecosystem.
     ///
-    /// Las coordenadas o checksums que ya existen se omiten.
+    /// Coordinates or checksums that already exist are omitted.
     ///
     /// # Errors
     ///
-    /// [`BundleError`] si el destino no es un `Forge`, el archivo no es
-    /// válido, el ecosistema no coincide, o falla un puerto.
+    /// [`BundleError`] if the destination is not a `Forge`, the archive
+    /// is not valid, the ecosystem does not match, or a port fails.
     pub async fn import(
         &self,
         repository_id: RepositoryId,
@@ -512,9 +512,9 @@ fn read_bundle(archive: &[u8]) -> Result<(BundleManifest, HashMap<String, Bytes>
     Ok((manifest, blobs))
 }
 
-/// El índice del origen guarda UUID locales en `files[].artifact_id`.
-/// Tras copiar el blob, esas claves tienen que apuntar al artefacto
-/// nuevo o el destino lista vacío y NuGet no puede bajar el `.nupkg`.
+/// The source index stores local UUIDs in `files[].artifact_id`.
+/// After copying the blob, those keys must point to the new artifact
+/// or the destination lists empty and NuGet cannot download the `.nupkg`.
 fn remap_index_entry(entry: Bytes, dest_id: Option<ferrobox_domain::ids::ArtifactId>) -> Bytes {
     let Some(dest_id) = dest_id else {
         return entry;

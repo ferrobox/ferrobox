@@ -1,4 +1,4 @@
-//! Cuota de almacenamiento por repositorio.
+//! Per-repository storage quota.
 
 use std::sync::Arc;
 
@@ -10,65 +10,65 @@ use ferrobox_ports::quota_store::{QuotaStore, QuotaStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
-/// Uso actual y tope configurado.
+/// Current usage and configured cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuotaSnapshot {
-    /// Tope en bytes, o `None` si no hay límite.
+    /// Cap in bytes, or `None` if there is no limit.
     pub limit_bytes: Option<u64>,
-    /// Suma de los binarios del repositorio (también los desindexados).
+    /// Sum of the repository binaries (including unindexed ones).
     pub used_bytes: u64,
 }
 
-/// Motivos por los que consultar o aplicar una cuota puede fallar.
+/// Reasons querying or applying a quota can fail.
 #[derive(Debug, Error)]
 pub enum QuotaError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// Un `Alloy` no almacena binarios propios.
+    /// An `Alloy` does not store its own binaries.
     #[error("quota does not apply to Alloy repositories")]
     AlloyRepository,
 
-    /// Falta la migración SQL (`sqlx migrate run` en el directorio backend).
+    /// Missing SQL migration (`sqlx migrate run` from the backend directory).
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_quota is missing)"
     )]
     MissingSchema,
 
-    /// El tope pedido no es válido.
+    /// The requested cap is not valid.
     #[error(transparent)]
     InvalidQuota(#[from] StorageQuotaError),
 
-    /// Guardar este binario superaría el tope.
+    /// Storing this binary would exceed the cap.
     #[error(
         "repository quota exceeded: using {used_bytes} of {limit_bytes} bytes, \
          need {additional_bytes} more"
     )]
     Exceeded {
-        /// Bytes ya ocupados.
+        /// Bytes already occupied.
         used_bytes: u64,
-        /// Tope configurado.
+        /// Configured cap.
         limit_bytes: u64,
-        /// Tamaño del binario que se quiere añadir.
+        /// Size of the binary to add.
         additional_bytes: u64,
     },
 
-    /// Fallo al consultar el almacén de repositorios.
+    /// Failed to query the repository store.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar artefactos.
+    /// Failed to query artifacts.
     #[error(transparent)]
     Artifacts(#[from] ArtifactStoreError),
 
-    /// Fallo al consultar o persistir la cuota.
+    /// Failed to query or persist the quota.
     #[error(transparent)]
     Policy(#[from] QuotaStoreError),
 }
 
-/// Caso de uso: cuota de almacenamiento.
+/// Use case: storage quota.
 #[derive(Clone)]
 #[allow(clippy::struct_field_names)]
 pub struct QuotaService {
@@ -78,7 +78,7 @@ pub struct QuotaService {
 }
 
 impl QuotaService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -92,11 +92,11 @@ impl QuotaService {
         }
     }
 
-    /// Devuelve tope y uso actual.
+    /// Returns the cap and current usage.
     ///
     /// # Errors
     ///
-    /// [`QuotaError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`QuotaError::RepositoryNotFound`] or a port failure.
     pub async fn get_snapshot(
         &self,
         repository_id: RepositoryId,
@@ -113,12 +113,12 @@ impl QuotaService {
         })
     }
 
-    /// Guarda el tope. No borra nada.
+    /// Saves the cap. Does not delete anything.
     ///
     /// # Errors
     ///
     /// [`QuotaError::RepositoryNotFound`], [`QuotaError::AlloyRepository`]
-    /// o [`QuotaError::MissingSchema`].
+    /// or [`QuotaError::MissingSchema`].
     pub async fn save(
         &self,
         repository_id: RepositoryId,
@@ -142,11 +142,11 @@ impl QuotaService {
         Ok(self.artifact_store.total_size_bytes().await?)
     }
 
-    /// Rechaza un `publish` o un cacheo que no quepa en el tope.
+    /// Rejects a `publish` or a cache that would not fit in the cap.
     ///
     /// # Errors
     ///
-    /// [`QuotaError::Exceeded`] si `used + additional` supera el tope.
+    /// [`QuotaError::Exceeded`] if `used + additional` exceeds the cap.
     pub async fn ensure_can_store(
         &self,
         repository_id: RepositoryId,

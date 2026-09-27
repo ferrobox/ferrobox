@@ -1,17 +1,17 @@
-//! El patrón Strategy que permite a `FerroBox` soportar varios
-//! ecosistemas de paquetes (Cargo, npm, `PyPI`...) sin que el resto de la
-//! capa de aplicación necesite conocer los detalles de ninguno de ellos.
+//! The Strategy pattern that lets `FerroBox` support several
+//! package ecosystems (Cargo, npm, `PyPI`...) without the rest of the
+//! application layer needing to know the details of any of them.
 //!
-//! Cada ecosistema tiene reglas propias e incompatibles entre sí para
-//! tres operaciones: cómo se interpreta la petición de publicación
-//! (`cargo publish` no envía el mismo formato que `npm publish`), cómo
-//! se construye la respuesta del protocolo de índice que el
-//! gestor de paquetes nativo consulta para resolver dependencias, y cómo
-//! se localiza el artefacto binario correspondiente para su descarga.
-//! [`PackagingStrategy`] captura esas tres operaciones como un contrato
-//! único; [`PackagingRegistry`] selecciona, en tiempo de ejecución, qué
-//! implementación concreta usar según el [`PackageEcosystem`] del
-//! repositorio sobre el que se está operando.
+//! Each ecosystem has its own incompatible rules for
+//! three operations: how the publish request is interpreted
+//! (`cargo publish` does not send the same format as `npm publish`), how
+//! the index-protocol response is built that the
+//! native package manager queries to resolve dependencies, and how
+//! the matching binary artifact is located for download.
+//! [`PackagingStrategy`] captures those three operations as a single
+//! contract; [`PackagingRegistry`] selects, at runtime, which
+//! concrete implementation to use based on the [`PackageEcosystem`] of
+//! the repository being operated on.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,232 +31,232 @@ use thiserror::Error;
 
 use crate::assay::AssayService;
 
-/// La implementación de Cargo (protocolo de índice disperso) del
-/// patrón Strategy.
+/// The Cargo implementation (sparse index protocol) of the
+/// Strategy pattern.
 pub mod cargo;
 
-/// La implementación de npm (registro compatible con `npm publish` /
-/// `npm install`) del patrón Strategy.
+/// The npm implementation (registry compatible with `npm publish` /
+/// `npm install`) of the Strategy pattern.
 pub mod npm;
 
-/// La implementación de `PyPI` (`twine upload` / `pip install`, índice
-/// simple PEP 503) del patrón Strategy.
+/// The `PyPI` implementation (`twine upload` / `pip install`, PEP 503
+/// simple index) of the Strategy pattern.
 pub mod pypi;
 
-/// Detección de firmas Cosign / Sigstore y otros accesorios OCI.
+/// Detection of Cosign / Sigstore signatures and other OCI accessories.
 pub mod cosign;
 
-/// La implementación de OCI (Distribution Spec v2: `docker push` /
-/// `docker pull`) del patrón Strategy.
+/// The OCI implementation (Distribution Spec v2: `docker push` /
+/// `docker pull`) of the Strategy pattern.
 pub mod oci;
 
-/// La implementación de Conan (API v2 con revisiones: `conan upload` /
-/// `conan install`) del patrón Strategy.
+/// The Conan implementation (v2 API with revisions: `conan upload` /
+/// `conan install`) of the Strategy pattern.
 pub mod conan;
 
-/// La implementación de Maven (layout HTTP clásico: `mvn deploy` /
-/// `mvn dependency:get`) del patrón Strategy.
+/// The Maven implementation (classic HTTP layout: `mvn deploy` /
+/// `mvn dependency:get`) of the Strategy pattern.
 pub mod maven;
 
-/// La implementación de `NuGet` (API V3: `dotnet nuget push` /
-/// `dotnet restore`) del patrón Strategy.
+/// The `NuGet` implementation (V3 API: `dotnet nuget push` /
+/// `dotnet restore`) of the Strategy pattern.
 pub mod nuget;
 
-/// La implementación de Go (protocolo `GOPROXY`: `go get` /
-/// `go mod download`) del patrón Strategy.
+/// The Go implementation (`GOPROXY` protocol: `go get` /
+/// `go mod download`) of the Strategy pattern.
 pub mod golang;
 
-/// Motivos por los que una operación de empaquetado puede fallar.
+/// Reasons a packaging operation can fail.
 #[derive(Debug, Error)]
 pub enum PackagingError {
-    /// Se invocó una estrategia con un repositorio de un ecosistema
-    /// distinto al que la estrategia implementa.
+    /// A strategy was invoked with a repository from an ecosystem
+    /// other than the one the strategy implements.
     #[error(
         "repository is configured for ecosystem '{actual}', but this strategy handles '{expected}'"
     )]
     EcosystemMismatch {
-        /// Ecosistema que la estrategia sabe manejar.
+        /// Ecosystem this strategy knows how to handle.
         expected: &'static str,
-        /// Ecosistema real del repositorio recibido.
+        /// Actual ecosystem of the repository that was received.
         actual: &'static str,
     },
 
-    /// La petición de publicación no tiene un formato válido para este
-    /// ecosistema.
+    /// The publish request does not have a valid format for this
+    /// ecosystem.
     #[error("invalid publish payload: {0}")]
     InvalidPayload(String),
 
-    /// Ya existe una versión publicada con esa misma coordenada -- los
-    /// registros de paquetes son inmutables una vez publicados (yank
-    /// aparte, que no sobrescribe el contenido, solo lo marca).
+    /// A published version already exists at that same coordinate --
+    /// package registries are immutable once published (yank
+    /// aside, which does not overwrite the content, only marks it).
     #[error("{0} was already published and cannot be overwritten")]
     AlreadyPublished(PackageCoordinate),
 
-    /// No existe ninguna versión publicada de este paquete en el
-    /// repositorio.
+    /// No published version of this package exists in the
+    /// repository.
     #[error("no published versions of package '{0}' were found in this repository")]
     PackageNotFound(String),
 
-    /// La coordenada solicitada no corresponde a ninguna versión
-    /// publicada.
+    /// The requested coordinate does not correspond to any published
+    /// version.
     #[error("{0} was not found")]
     VersionNotFound(PackageCoordinate),
 
-    /// No existe un fichero con ese nombre en el índice del repositorio
-    /// (p. ej. un wheel o sdist concreto de `PyPI`).
+    /// No file with that name exists in the repository index
+    /// (e.g. a specific `PyPI` wheel or sdist).
     #[error("file '{0}' was not found in this repository")]
     FileNotFound(String),
 
-    /// Fallo al subir o descargar el contenido binario del paquete.
+    /// Failure uploading or downloading the package binary content.
     #[error(transparent)]
     Storage(#[from] StorageError),
 
-    /// Fallo al persistir los metadatos del artefacto binario.
+    /// Failure persisting the binary artifact metadata.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
 
-    /// Fallo al leer o escribir el índice de paquetes.
+    /// Failure reading or writing the package index.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
 
-    /// El contenido binario almacenado no coincide con el checksum SHA-256
-    /// persistido al publicar.
+    /// The stored binary content does not match the SHA-256 checksum
+    /// persisted at publish time.
     #[error("stored artifact checksum mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch {
-        /// Checksum persistido al publicar.
+        /// Checksum persisted at publish time.
         expected: String,
-        /// Checksum recalculado sobre el objeto almacenado.
+        /// Checksum recomputed over the stored object.
         actual: String,
     },
 
-    /// El repositorio es de solo lectura (un `Mirror` o un `Alloy`) y
-    /// no acepta publicaciones.
+    /// The repository is read-only (a `Mirror` or an `Alloy`) and
+    /// does not accept publishes.
     #[error("repository is read-only and does not accept publishes")]
     ReadOnlyRepository,
 
-    /// Fallo al consultar el almacén de repositorios (p. ej. al
-    /// resolver los miembros de un `Alloy`).
+    /// Failure querying the repository store (e.g. when
+    /// resolving the members of an `Alloy`).
     #[error(transparent)]
     RepositoryPersistence(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar el *upstream* de un repositorio `Mirror`.
+    /// Failure querying the *upstream* of a `Mirror` repository.
     #[error(transparent)]
     Upstream(#[from] HttpClientError),
 
-    /// La respuesta del *upstream* no tiene el formato esperado.
+    /// The *upstream* response does not have the expected format.
     #[error("invalid upstream response: {0}")]
     InvalidUpstream(String),
 
-    /// El binario no cabe en la cuota de almacenamiento del repositorio.
+    /// The binary does not fit in the repository storage quota.
     #[error(transparent)]
     Quota(#[from] crate::quota::QuotaError),
 
-    /// Una política de admisión bloquea esta operación.
+    /// An admission policy blocks this operation.
     #[error("{0}")]
     PolicyDenied(String),
 }
 
-/// El resultado de publicar un paquete: su coordenada recién asignada.
+/// The result of publishing a package: its newly assigned coordinate.
 pub type PublishOutcome = PackageCoordinate;
 
-/// Recuento de una promoción Forge→Forge: la coordenada copiada y el
-/// volumen de binarios nuevos en el destino.
+/// Tally of a Forge→Forge promotion: the copied coordinate and the
+/// volume of new binaries at the destination.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromoteOutcome {
-    /// Coordenada publicada en el repositorio destino.
+    /// Coordinate published in the destination repository.
     pub coordinate: PackageCoordinate,
-    /// Binarios nuevos creados en el destino (sin contar blobs OCI ya presentes).
+    /// New binaries created at the destination (not counting OCI blobs already present).
     pub artifacts_copied: u32,
-    /// Bytes escritos en el almacenamiento del destino.
+    /// Bytes written to the destination storage.
     pub bytes_copied: u64,
 }
 
-/// Una coincidencia de `cargo search` contra el índice de un repositorio.
+/// A `cargo search` match against a repository index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageSearchHit {
-    /// Nombre del paquete.
+    /// Package name.
     pub name: String,
-    /// Última versión no yankada (o la última publicada, si todas lo están).
+    /// Latest non-yanked version (or the latest published one, if all are yanked).
     pub max_version: String,
 }
 
-/// Un manifiesto OCI leído del índice: media type, digest y cuerpo.
+/// An OCI manifest read from the index: media type, digest, and body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OciManifestDocument {
-    /// Media type OCI o Docker del manifiesto.
+    /// OCI or Docker media type of the manifest.
     pub media_type: String,
-    /// Digest `sha256:…` del cuerpo.
+    /// `sha256:…` digest of the body.
     pub digest: String,
-    /// Cuerpo crudo del manifiesto.
+    /// Raw manifest body.
     pub body: Bytes,
 }
 
-/// Estrategia de empaquetado para un ecosistema concreto.
+/// Packaging strategy for a specific ecosystem.
 ///
-/// Cada implementación encapsula las tres operaciones que el gestor de
-/// paquetes nativo de su ecosistema espera de un registro: publicar un
-/// paquete nuevo, responder al protocolo de índice con el que se
-/// resuelven las dependencias, y servir el contenido binario de una
-/// versión ya publicada.
+/// Each implementation encapsulates the three operations that its
+/// ecosystem's native package manager expects from a registry: publish a
+/// new package, respond to the index protocol used to
+/// resolve dependencies, and serve the binary content of an
+/// already published version.
 #[async_trait]
 pub trait PackagingStrategy: Send + Sync {
-    /// El ecosistema que esta estrategia sabe manejar.
+    /// The ecosystem this strategy knows how to handle.
     fn ecosystem(&self) -> PackageEcosystem;
 
-    /// Publica un paquete nuevo en `repository` a partir de la petición
-    /// cruda enviada por el cliente nativo del ecosistema (por ejemplo,
-    /// el cuerpo de una petición `cargo publish`).
+    /// Publishes a new package in `repository` from the raw
+    /// request sent by the ecosystem's native client (for example,
+    /// the body of a `cargo publish` request).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
-    /// pertenece a este ecosistema, [`PackagingError::InvalidPayload`]
-    /// si `payload` no tiene el formato esperado,
-    /// [`PackagingError::AlreadyPublished`] si la coordenada resultante
-    /// ya existía, o cualquier otro error si falla el puerto
-    /// correspondiente.
+    /// Returns [`PackagingError::EcosystemMismatch`] if `repository` does not
+    /// belong to this ecosystem, [`PackagingError::InvalidPayload`]
+    /// if `payload` does not have the expected format,
+    /// [`PackagingError::AlreadyPublished`] if the resulting coordinate
+    /// already existed, or any other error if the corresponding
+    /// port fails.
     async fn publish(
         &self,
         repository: &Repository,
         payload: Bytes,
     ) -> Result<PublishOutcome, PackagingError>;
 
-    /// Construye la respuesta del protocolo de índice de este ecosistema
-    /// para el paquete `name` dentro de `repository`.
+    /// Builds this ecosystem's index-protocol response
+    /// for package `name` inside `repository`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
-    /// pertenece a este ecosistema, o cualquier otro error si falla el
-    /// puerto correspondiente.
+    /// Returns [`PackagingError::EcosystemMismatch`] if `repository` does not
+    /// belong to this ecosystem, or any other error if the corresponding
+    /// port fails.
     async fn index(
         &self,
         repository: &Repository,
         name: &PackageName,
     ) -> Result<Bytes, PackagingError>;
 
-    /// Descarga el contenido binario de una versión ya publicada.
+    /// Downloads the binary content of an already published version.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
-    /// pertenece a este ecosistema, [`PackagingError::PackageNotFound`]
-    /// si `coordinate` no corresponde a ninguna versión publicada, o
-    /// cualquier otro error si falla el puerto correspondiente.
+    /// Returns [`PackagingError::EcosystemMismatch`] if `repository` does not
+    /// belong to this ecosystem, [`PackagingError::PackageNotFound`]
+    /// if `coordinate` does not correspond to any published version, or
+    /// any other error if the corresponding port fails.
     async fn download(
         &self,
         repository: &Repository,
         coordinate: &PackageCoordinate,
     ) -> Result<Bytes, PackagingError>;
 
-    /// Descarga un fichero del repositorio por su nombre de archivo
-    /// (p. ej. un wheel o sdist de `PyPI`). La implementación por defecto
-    /// indica que el ecosistema no resuelve artefactos por nombre.
+    /// Downloads a file from the repository by filename
+    /// (e.g. a `PyPI` wheel or sdist). The default implementation
+    /// indicates that the ecosystem does not resolve artifacts by name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::FileNotFound`] si el ecosistema no
-    /// soporta esta operación o el fichero no existe.
+    /// Returns [`PackagingError::FileNotFound`] if the ecosystem does not
+    /// support this operation or the file does not exist.
     async fn download_file(
         &self,
         _repository: &Repository,
@@ -265,13 +265,13 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::FileNotFound(filename.to_string()))
     }
 
-    /// Sube un fichero identificado por la ruta relativa del protocolo
-    /// nativo (p. ej. receta o paquete Conan).
+    /// Uploads a file identified by the native protocol's relative
+    /// path (e.g. a Conan recipe or package).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
-    /// acepta este tipo de subida.
+    /// Returns [`PackagingError::InvalidPayload`] if the ecosystem does not
+    /// accept this kind of upload.
     async fn put_protocol_file(
         &self,
         _repository: &Repository,
@@ -283,12 +283,12 @@ pub trait PackagingStrategy: Send + Sync {
         ))
     }
 
-    /// Descarga un fichero identificado por la ruta relativa del
-    /// protocolo nativo.
+    /// Downloads a file identified by the native protocol's relative
+    /// path.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::FileNotFound`] si no existe.
+    /// Returns [`PackagingError::FileNotFound`] if it does not exist.
     async fn get_protocol_file(
         &self,
         _repository: &Repository,
@@ -297,12 +297,12 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::FileNotFound(path.to_string()))
     }
 
-    /// Metadatos JSON del protocolo nativo para `path` (latest,
-    /// revisiones, listado de ficheros, búsqueda de binarios).
+    /// Native-protocol JSON metadata for `path` (latest,
+    /// revisions, file listing, binary search).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::PackageNotFound`] si no hay datos.
+    /// Returns [`PackagingError::PackageNotFound`] if there is no data.
     async fn protocol_metadata(
         &self,
         _repository: &Repository,
@@ -311,13 +311,13 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(path.to_string()))
     }
 
-    /// Almacena un blob OCI identificado por su digest `sha256:…`.
-    /// La implementación por defecto indica que el ecosistema no usa blobs.
+    /// Stores an OCI blob identified by its `sha256:…` digest.
+    /// The default implementation indicates that the ecosystem does not use blobs.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
-    /// soporta blobs, u otro error si falla el puerto correspondiente.
+    /// Returns [`PackagingError::InvalidPayload`] if the ecosystem does not
+    /// support blobs, or another error if the corresponding port fails.
     async fn put_blob(
         &self,
         _repository: &Repository,
@@ -329,12 +329,12 @@ pub trait PackagingStrategy: Send + Sync {
         ))
     }
 
-    /// Publica un manifiesto OCI (por etiqueta o por digest).
+    /// Publishes an OCI manifest (by tag or by digest).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
-    /// soporta manifiestos, u otro error si falla el puerto correspondiente.
+    /// Returns [`PackagingError::InvalidPayload`] if the ecosystem does not
+    /// support manifests, or another error if the corresponding port fails.
     async fn put_manifest(
         &self,
         _repository: &Repository,
@@ -348,12 +348,12 @@ pub trait PackagingStrategy: Send + Sync {
         ))
     }
 
-    /// Lee un manifiesto OCI por etiqueta o digest.
+    /// Reads an OCI manifest by tag or digest.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::PackageNotFound`] o
-    /// [`PackagingError::VersionNotFound`] si no existe.
+    /// Returns [`PackagingError::PackageNotFound`] or
+    /// [`PackagingError::VersionNotFound`] if it does not exist.
     async fn get_manifest(
         &self,
         _repository: &Repository,
@@ -363,12 +363,12 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
-    /// Descarga un blob OCI por digest. `name` es el nombre de imagen
-    /// (un `Mirror` lo necesita para construir la URL *upstream*).
+    /// Downloads an OCI blob by digest. `name` is the image name
+    /// (a `Mirror` needs it to build the *upstream* URL).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::FileNotFound`] si el blob no existe.
+    /// Returns [`PackagingError::FileNotFound`] if the blob does not exist.
     async fn get_blob(
         &self,
         repository: &Repository,
@@ -378,11 +378,11 @@ pub trait PackagingStrategy: Send + Sync {
         self.download_file(repository, digest).await
     }
 
-    /// Lista las etiquetas de una imagen OCI.
+    /// Lists the tags of an OCI image.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::PackageNotFound`] si la imagen no existe.
+    /// Returns [`PackagingError::PackageNotFound`] if the image does not exist.
     async fn list_tags(
         &self,
         _repository: &Repository,
@@ -391,13 +391,13 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
-    /// Lista los manifiestos que apuntan a `digest` como `subject`
-    /// (Referrers API del Distribution Spec).
+    /// Lists the manifests that point to `digest` as `subject`
+    /// (Distribution Spec Referrers API).
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::PackageNotFound`] si el ecosistema no
-    /// implementa referrers o la imagen no existe.
+    /// Returns [`PackagingError::PackageNotFound`] if the ecosystem does not
+    /// implement referrers or the image does not exist.
     async fn list_referrers(
         &self,
         _repository: &Repository,
@@ -408,18 +408,18 @@ pub trait PackagingStrategy: Send + Sync {
         Err(PackagingError::PackageNotFound(_name.to_string()))
     }
 
-    /// Marca (o desmarca) una versión ya publicada como *yanked*. No
-    /// borra el binario: `cargo` sigue pudiendo descargarlo si está
-    /// fijado en un `Cargo.lock`, pero deja de considerarlo para
-    /// resoluciones nuevas.
+    /// Marks (or unmarks) an already published version as *yanked*. Does not
+    /// delete the binary: `cargo` can still download it if it is
+    /// pinned in a `Cargo.lock`, but stops considering it for
+    /// new resolutions.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
-    /// pertenece a este ecosistema, [`PackagingError::ReadOnlyRepository`]
-    /// si es un `Mirror` o un `Alloy`, [`PackagingError::VersionNotFound`]
-    /// si esa coordenada no existe, o cualquier otro error si falla el
-    /// puerto correspondiente.
+    /// Returns [`PackagingError::EcosystemMismatch`] if `repository` does not
+    /// belong to this ecosystem, [`PackagingError::ReadOnlyRepository`]
+    /// if it is a `Mirror` or an `Alloy`, [`PackagingError::VersionNotFound`]
+    /// if that coordinate does not exist, or any other error if the
+    /// corresponding port fails.
     async fn set_yanked(
         &self,
         repository: &Repository,
@@ -427,17 +427,17 @@ pub trait PackagingStrategy: Send + Sync {
         yanked: bool,
     ) -> Result<(), PackagingError>;
 
-    /// Copia una versión ya publicada de `source` a `target` (ambos
-    /// `Forge` del mismo ecosistema). Los binarios se reescriben con
-    /// identificadores nuevos; por defecto la copia no hereda el yank.
+    /// Copies an already published version from `source` to `target` (both
+    /// `Forge` of the same ecosystem). Binaries are rewritten with
+    /// new identifiers; by default the copy does not inherit yank.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::InvalidPayload`] si el ecosistema no
-    /// soporta esta operación, [`PackagingError::VersionNotFound`] si
-    /// la coordenada no existe en el origen,
-    /// [`PackagingError::AlreadyPublished`] si ya está en el destino, u
-    /// otro error si falla un puerto.
+    /// Returns [`PackagingError::InvalidPayload`] if the ecosystem does not
+    /// support this operation, [`PackagingError::VersionNotFound`] if
+    /// the coordinate does not exist at the source,
+    /// [`PackagingError::AlreadyPublished`] if it is already at the destination, or
+    /// another error if a port fails.
     async fn promote_version(
         &self,
         _source: &Repository,
@@ -450,14 +450,14 @@ pub trait PackagingStrategy: Send + Sync {
         ))
     }
 
-    /// Busca paquetes cuyo nombre contiene `query` (sin distinguir
-    /// mayúsculas), hasta `limit` coincidencias.
+    /// Searches for packages whose name contains `query` (case
+    /// insensitive), up to `limit` matches.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackagingError::EcosystemMismatch`] si `repository` no
-    /// pertenece a este ecosistema, o cualquier otro error si falla el
-    /// puerto correspondiente.
+    /// Returns [`PackagingError::EcosystemMismatch`] if `repository` does not
+    /// belong to this ecosystem, or any other error if the corresponding
+    /// port fails.
     async fn search(
         &self,
         repository: &Repository,
@@ -466,8 +466,8 @@ pub trait PackagingStrategy: Send + Sync {
     ) -> Result<Vec<PackageSearchHit>, PackagingError>;
 }
 
-/// Dispara un ensaye en segundo plano si la estrategia tiene
-/// [`AssayService`]. No bloquea publish ni install.
+/// Fires a background assay if the strategy has
+/// [`AssayService`]. Does not block publish or install.
 pub(crate) fn notify_assay(
     assays: Option<&AssayService>,
     repository_id: RepositoryId,
@@ -491,8 +491,8 @@ pub(crate) async fn ensure_quota(
     Ok(())
 }
 
-/// Copia el objeto almacenado de `source_artifact_id` a un artefacto
-/// nuevo en `target_repository_id`. Aplica la cuota del destino.
+/// Copies the stored object from `source_artifact_id` to a new
+/// artifact in `target_repository_id`. Applies the destination quota.
 pub(crate) async fn copy_stored_artifact(
     artifact_store: &dyn ArtifactStore,
     storage: &dyn StoragePort,
@@ -525,40 +525,40 @@ pub(crate) async fn copy_stored_artifact(
     Ok((copied.id(), size_bytes))
 }
 
-/// Selecciona, en tiempo de ejecución, la [`PackagingStrategy`] adecuada
-/// para el [`PackageEcosystem`] de un repositorio.
+/// Selects, at runtime, the appropriate [`PackagingStrategy`]
+/// for a repository's [`PackageEcosystem`].
 ///
-/// Es el "contexto" del patrón Strategy: el resto de la aplicación
-/// (rutas HTTP, casos de uso futuros) depende únicamente de este
-/// registro, no de ninguna estrategia concreta -- añadir un ecosistema
-/// nuevo consiste en implementar `PackagingStrategy` e invocar
-/// [`PackagingRegistry::register`], sin tocar ningún otro punto del
-/// sistema.
+/// This is the "context" of the Strategy pattern: the rest of the application
+/// (HTTP routes, future use cases) depends only on this
+/// registry, not on any concrete strategy -- adding a new
+/// ecosystem means implementing `PackagingStrategy` and calling
+/// [`PackagingRegistry::register`], without touching any other point in the
+/// system.
 #[derive(Clone, Default)]
 pub struct PackagingRegistry {
     strategies: HashMap<PackageEcosystem, Arc<dyn PackagingStrategy>>,
 }
 
 impl PackagingRegistry {
-    /// Crea un registro vacío.
+    /// Creates an empty registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Registra una estrategia para el ecosistema que ella misma declara
-    /// manejar, sustituyendo cualquier estrategia registrada
-    /// previamente para ese mismo ecosistema.
+    /// Registers a strategy for the ecosystem it declares it
+    /// handles, replacing any strategy previously
+    /// registered for that same ecosystem.
     #[must_use]
     pub fn register(mut self, strategy: Arc<dyn PackagingStrategy>) -> Self {
         self.strategies.insert(strategy.ecosystem(), strategy);
         self
     }
 
-    /// Busca la estrategia registrada para el ecosistema indicado.
-    /// Devuelve `None` si ningún ecosistema fue registrado para ese
-    /// ecosistema -- por ejemplo, porque su implementación todavía no
-    /// existe.
+    /// Looks up the strategy registered for the given ecosystem.
+    /// Returns `None` if no strategy was registered for that
+    /// ecosystem -- for example, because its implementation does not
+    /// exist yet.
     #[must_use]
     pub fn strategy_for(&self, ecosystem: PackageEcosystem) -> Option<Arc<dyn PackagingStrategy>> {
         self.strategies.get(&ecosystem).cloned()

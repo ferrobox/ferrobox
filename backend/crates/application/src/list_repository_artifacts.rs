@@ -17,9 +17,9 @@ use uuid::Uuid;
 use crate::packaging::cosign;
 use crate::storage_key::storage_key_for;
 
-/// Artefacto listado junto con el nombre y la versión de paquete, si el
-/// índice de su ecosistema los conoce (por ejemplo, un crate publicado
-/// con `cargo publish`).
+/// Listed artifact together with the package name and version, if the
+/// ecosystem index knows them (for example, a crate published with
+/// `cargo publish`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedArtifact {
     artifact: Artifact,
@@ -32,69 +32,68 @@ pub struct ListedArtifact {
 }
 
 impl ListedArtifact {
-    /// Metadatos binarios del artefacto.
+    /// Binary metadata of the artifact.
     #[must_use]
     pub fn artifact(&self) -> &Artifact {
         &self.artifact
     }
 
-    /// Nombre del paquete indexado, si existe.
+    /// Indexed package name, if any.
     #[must_use]
     pub fn package_name(&self) -> Option<&str> {
         self.package_name.as_deref()
     }
 
-    /// Versión del paquete indexado, si existe.
+    /// Indexed package version, if any.
     #[must_use]
     pub fn package_version(&self) -> Option<&str> {
         self.package_version.as_deref()
     }
 
-    /// `true` si el índice marca esta versión como *yanked*.
+    /// `true` if the index marks this version as *yanked*.
     #[must_use]
     pub fn yanked(&self) -> bool {
         self.yanked
     }
 
-    /// Nombre de fichero en el índice (receta `Conan`, sdist de `PyPI`, etc.).
+    /// Filename in the index (`Conan` recipe, `PyPI` sdist, etc.).
     #[must_use]
     pub fn filename(&self) -> Option<&str> {
         self.filename.as_deref()
     }
 
-    /// `true` si hay una firma Cosign / Notation enlazada a este artefacto.
+    /// `true` if a Cosign / Notation signature is linked to this artifact.
     #[must_use]
     pub fn signed(&self) -> bool {
         self.signed
     }
 
-    /// `true` si alguna firma Cosign simple verifica contra las claves
-    /// del repositorio.
+    /// `true` if a simple Cosign signature verifies against the
+    /// repository keys.
     #[must_use]
     pub fn verified(&self) -> bool {
         self.verified
     }
 }
 
-/// Motivos por los que listar los artefactos de un repositorio puede
-/// fallar.
+/// Reasons listing the artifacts of a repository can fail.
 #[derive(Debug, Error)]
 pub enum ListRepositoryArtifactsError {
-    /// Fallo al consultar el almacén de artefactos.
+    /// Failed to query the artifact store.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
 
-    /// Fallo al consultar el índice de paquetes.
+    /// Failed to query the package index.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
 
-    /// Fallo al consultar el almacén de repositorios (p. ej. al
-    /// resolver los miembros de un `Alloy`).
+    /// Failed to query the repository store (e.g. when resolving the
+    /// members of an `Alloy`).
     #[error(transparent)]
     RepositoryPersistence(#[from] RepositoryStoreError),
 }
 
-/// Caso de uso: listar los artefactos de un repositorio.
+/// Use case: list the artifacts of a repository.
 #[derive(Clone)]
 #[allow(clippy::struct_field_names)]
 pub struct ListRepositoryArtifactsUseCase {
@@ -111,7 +110,7 @@ struct CosignVerifyPorts {
 }
 
 impl ListRepositoryArtifactsUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -126,8 +125,8 @@ impl ListRepositoryArtifactsUseCase {
         }
     }
 
-    /// Carga manifiestos Cosign y verifica contra las claves del
-    /// repositorio para el badge «Verificada» y el dry-run.
+    /// Loads Cosign manifests and verifies them against the repository
+    /// keys for the "Verified" badge and the dry-run.
     #[must_use]
     pub fn with_cosign_verify(
         mut self,
@@ -138,13 +137,13 @@ impl ListRepositoryArtifactsUseCase {
         self
     }
 
-    /// Lista los artefactos del repositorio indicado, enriquecidos con
-    /// nombre y versión cuando el índice de paquetes los conoce. Si el
-    /// repositorio es un `Alloy`, une los artefactos de sus miembros.
+    /// Lists the artifacts of the given repository, enriched with name
+    /// and version when the package index knows them. If the repository
+    /// is an `Alloy`, unions the artifacts of its members.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ListRepositoryArtifactsError`] si falla un puerto.
+    /// Returns [`ListRepositoryArtifactsError`] if a port fails.
     pub async fn execute(
         &self,
         repository_id: RepositoryId,
@@ -152,12 +151,12 @@ impl ListRepositoryArtifactsUseCase {
         self.list_all(repository_id, None).await
     }
 
-    /// Como [`Self::execute`], pero usa `public_keys_pem` para verificar
-    /// (dry-run de «no está verificada» sin guardar todavía).
+    /// Like [`Self::execute`], but uses `public_keys_pem` to verify
+    /// (dry-run of "not verified" without saving yet).
     ///
     /// # Errors
     ///
-    /// Devuelve [`ListRepositoryArtifactsError`] si falla un puerto.
+    /// Returns [`ListRepositoryArtifactsError`] if a port fails.
     pub async fn execute_with_keys(
         &self,
         repository_id: RepositoryId,
@@ -425,8 +424,8 @@ fn apply_index_item(
         }
     }
 
-    // Tras un import, `files[].artifact_id` puede ser el UUID del origen.
-    // La columna del índice es el artefacto del destino.
+    // After an import, `files[].artifact_id` may be the source UUID.
+    // The index column is the destination artifact.
     if mapped_file {
         names_by_artifact
             .entry(item.artifact_id)

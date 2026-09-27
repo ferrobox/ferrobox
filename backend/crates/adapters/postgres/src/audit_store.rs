@@ -8,13 +8,13 @@ use sqlx::{PgPool, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`AuditStore`] contra `PostgreSQL`.
+/// [`AuditStore`] adapter against `PostgreSQL`.
 pub struct PostgresAuditStore {
     pool: PgPool,
 }
 
 impl PostgresAuditStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

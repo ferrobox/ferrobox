@@ -8,35 +8,34 @@ use thiserror::Error;
 
 use crate::auth_crypto::{generate_api_token_secret, hash_api_token_secret};
 
-/// Motivos por los que crear un token de API puede fallar.
+/// Reasons creating an API token can fail.
 #[derive(Debug, Error)]
 pub enum CreateApiTokenError {
-    /// La caducidad está en el pasado.
+    /// The expiry is in the past.
     #[error("token expiry must be in the future")]
     ExpiryInThePast,
 
-    /// Fallo al persistir el token.
+    /// Failed to persist the token.
     #[error(transparent)]
     Persistence(#[from] ApiTokenStoreError),
 }
 
-/// Resultado de crear un token: metadatos + secreto en claro (una sola
-/// vez).
+/// Result of creating a token: metadata + plaintext secret (once only).
 #[derive(Debug, Clone)]
 pub struct CreateApiTokenResult {
-    /// Token recién creado.
+    /// Newly created token.
     pub token: ApiToken,
-    /// Secreto en claro. Solo se expone aquí.
+    /// Plaintext secret. Exposed only here.
     pub plaintext_secret: String,
 }
 
-/// Caso de uso: emitir un nuevo token de API para un usuario.
+/// Use case: issue a new API token for a user.
 pub struct CreateApiTokenUseCase {
     api_token_store: Arc<dyn ApiTokenStore>,
 }
 
 impl CreateApiTokenUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(api_token_store: Arc<dyn ApiTokenStore>) -> Self {
         Self { api_token_store }
@@ -87,32 +86,32 @@ impl CreateApiTokenUseCase {
     }
 }
 
-/// Motivos por los que listar tokens puede fallar.
+/// Reasons listing tokens can fail.
 #[derive(Debug, Error)]
 pub enum ListApiTokensError {
-    /// Fallo al consultar el almacén.
+    /// Failed to query the store.
     #[error(transparent)]
     Persistence(#[from] ApiTokenStoreError),
 }
 
-/// Caso de uso: listar los tokens de API de un usuario.
+/// Use case: list a user's API tokens.
 pub struct ListApiTokensUseCase {
     api_token_store: Arc<dyn ApiTokenStore>,
 }
 
 impl ListApiTokensUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(api_token_store: Arc<dyn ApiTokenStore>) -> Self {
         Self { api_token_store }
     }
 
-    /// Lista los tokens del usuario, sin secretos.
+    /// Lists the user's tokens, without secrets.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ListApiTokensError::Persistence`] si el backend
-    /// falla.
+    /// Returns [`ListApiTokensError::Persistence`] if the backend
+    /// fails.
     pub async fn execute(
         &self,
         user_id: UserId,
@@ -121,37 +120,37 @@ impl ListApiTokensUseCase {
     }
 }
 
-/// Motivos por los que revocar un token puede fallar.
+/// Reasons revoking a token can fail.
 #[derive(Debug, Error)]
 pub enum RevokeApiTokenError {
-    /// El token no existe o no pertenece al usuario.
+    /// The token does not exist or does not belong to the user.
     #[error("API token not found")]
     NotFound,
 
-    /// Fallo al consultar / actualizar el almacén.
+    /// Failed to query / update the store.
     #[error(transparent)]
     Persistence(#[from] ApiTokenStoreError),
 }
 
-/// Caso de uso: revocar (borrar) un token de API propio.
+/// Use case: revoke (delete) one of the caller's own API tokens.
 pub struct RevokeApiTokenUseCase {
     api_token_store: Arc<dyn ApiTokenStore>,
 }
 
 impl RevokeApiTokenUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(api_token_store: Arc<dyn ApiTokenStore>) -> Self {
         Self { api_token_store }
     }
 
-    /// Revoca el token indicado si pertenece al usuario.
+    /// Revokes the given token if it belongs to the user.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RevokeApiTokenError::NotFound`] si el token no
-    /// existe o no es del usuario, o un error de persistencia si el
-    /// backend falla.
+    /// Returns [`RevokeApiTokenError::NotFound`] if the token does not
+    /// exist or is not the user's, or a persistence error if the
+    /// backend fails.
     pub async fn execute(
         &self,
         user_id: UserId,

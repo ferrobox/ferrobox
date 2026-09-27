@@ -1,7 +1,7 @@
-//! Rutas HTTP del protocolo `GOPROXY` (`go get` / `go mod download`).
+//! HTTP routes for the `GOPROXY` protocol (`go get` / `go mod download`).
 //!
-//! El origen se monta en `/go/<UUID>/`. Las lecturas son públicas; la
-//! subida del zip del módulo exige token de API y rol de escritura.
+//! The origin is mounted at `/go/<UUID>/`. Reads are public; uploading
+//! the module zip requires an API token and a write role.
 
 use std::sync::Arc;
 
@@ -26,12 +26,12 @@ use crate::error::ApiError;
 
 const GO_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 
-/// Rutas de solo lectura (listado, `.info`, `.mod`, `.zip`, `@latest`).
+/// Read-only routes (listing, `.info`, `.mod`, `.zip`, `@latest`).
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new().route("/go/{repository_id}/{*path}", get(go_get).head(go_head))
 }
 
-/// Rutas de escritura (subida del zip y yank).
+/// Write routes (zip upload and yank).
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/go/{repository_id}/{*path}", put(go_put))

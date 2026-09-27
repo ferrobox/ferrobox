@@ -1,4 +1,4 @@
-//! Documento [`CycloneDX`](https://cyclonedx.org/) 1.5 generado a partir de un ensaye.
+//! [`CycloneDX`](https://cyclonedx.org/) 1.5 document generated from an assay.
 
 use bytes::Bytes;
 use ferrobox_domain::assay::{Assay, AssayComponent};
@@ -25,12 +25,12 @@ fn looks_like_spdx_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '+'))
 }
 
-/// Serializa el ensaye como JSON `CycloneDX` 1.5.
+/// Serializes the assay as `CycloneDX` 1.5 JSON.
 ///
 /// # Panics
 ///
-/// No entra en pánico en la práctica: el documento se construye con
-/// tipos que siempre serializan.
+/// In practice this never panics: the document is built with types
+/// that always serialize.
 #[must_use]
 pub fn to_cyclonedx(assay: &Assay) -> Bytes {
     let coordinate = assay.coordinate();

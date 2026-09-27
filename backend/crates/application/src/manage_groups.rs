@@ -10,43 +10,43 @@ use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::user_store::{UserStore, UserStoreError};
 use thiserror::Error;
 
-/// Resumen de un grupo para listados.
+/// Summary of a group for listings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSummary {
-    /// El grupo.
+    /// The group.
     pub group: Group,
-    /// Número de miembros.
+    /// Number of members.
     pub member_count: usize,
-    /// Número de repositorios asignados.
+    /// Number of assigned repositories.
     pub repository_count: usize,
-    /// Nombres de usuario de los miembros, ordenados.
+    /// Usernames of the members, sorted.
     pub member_names: Vec<String>,
-    /// Nombres de los repositorios asignados, ordenados.
+    /// Names of the assigned repositories, sorted.
     pub repository_names: Vec<String>,
 }
 
-/// Detalle de un grupo: miembros y repositorios.
+/// Detail of a group: members and repositories.
 #[derive(Debug, Clone)]
 pub struct GroupDetail {
-    /// El grupo.
+    /// The group.
     pub group: Group,
-    /// Usuarios miembros.
+    /// Member users.
     pub members: Vec<User>,
-    /// Repositorios asignados, con el rol del grupo en cada uno.
+    /// Assigned repositories, with the group's role on each.
     pub repositories: Vec<(Repository, Role)>,
 }
 
-/// Grupo al que pertenece un usuario, con los repositorios que le
-/// concede. No incluye el resto de miembros.
+/// Group a user belongs to, with the repositories it grants them.
+/// Does not include the other members.
 #[derive(Debug, Clone)]
 pub struct GroupMembership {
-    /// El grupo.
+    /// The group.
     pub group: Group,
-    /// Repositorios asignados a este grupo, con el rol concedido.
+    /// Repositories assigned to this group, with the granted role.
     pub repositories: Vec<(Repository, Role)>,
 }
 
-/// Visibilidad de repositorios para un usuario.
+/// Repository visibility for a user.
 #[derive(Debug, Clone)]
 pub struct RepositoryVisibility {
     all: bool,
@@ -54,8 +54,8 @@ pub struct RepositoryVisibility {
 }
 
 impl RepositoryVisibility {
-    /// El usuario ve todos los repositorios (Admin, o un usuario sin
-    /// grupos cuando todavía no hay restricciones).
+    /// The user sees every repository (Admin, or a user with no
+    /// groups when there are still no restrictions).
     #[must_use]
     pub fn all() -> Self {
         Self {
@@ -64,52 +64,52 @@ impl RepositoryVisibility {
         }
     }
 
-    /// El usuario solo ve este conjunto.
+    /// The user sees only this set.
     #[must_use]
     pub fn only(ids: HashSet<RepositoryId>) -> Self {
         Self { all: false, ids }
     }
 
-    /// `true` si el repositorio es visible.
+    /// `true` if the repository is visible.
     #[must_use]
     pub fn contains(&self, id: RepositoryId) -> bool {
         self.all || self.ids.contains(&id)
     }
 }
 
-/// Motivos por los que una operación de grupos puede fallar.
+/// Reasons a group operation can fail.
 #[derive(Debug, Error)]
 pub enum GroupError {
-    /// El grupo no existe.
+    /// The group does not exist.
     #[error("group not found")]
     GroupNotFound,
 
-    /// Un usuario indicado no existe.
+    /// A given user does not exist.
     #[error("user not found")]
     UserNotFound,
 
-    /// Un repositorio indicado no existe.
+    /// A given repository does not exist.
     #[error("repository not found")]
     RepositoryNotFound,
 
-    /// Un grupo no puede tener rol `admin` en un repositorio.
+    /// A group cannot have the `admin` role on a repository.
     #[error("group repository role must be reader or developer")]
     InvalidGroupRole,
 
-    /// Fallo al persistir grupos.
+    /// Failed to persist groups.
     #[error(transparent)]
     Groups(#[from] GroupStoreError),
 
-    /// Fallo al consultar usuarios.
+    /// Failed to query users.
     #[error(transparent)]
     Users(#[from] UserStoreError),
 
-    /// Fallo al consultar repositorios.
+    /// Failed to query repositories.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 }
 
-/// Servicio de grupos y de acceso a repositorios.
+/// Service for groups and repository access.
 #[allow(clippy::struct_field_names)]
 #[derive(Clone)]
 pub struct GroupService {
@@ -119,7 +119,7 @@ pub struct GroupService {
 }
 
 impl GroupService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         group_store: Arc<dyn GroupStore>,
@@ -133,22 +133,22 @@ impl GroupService {
         }
     }
 
-    /// Crea un grupo vacío.
+    /// Creates an empty group.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si el nombre está duplicado o falla la persistencia.
+    /// [`GroupError`] if the name is duplicated or persistence fails.
     pub async fn create(&self, name: GroupName) -> Result<Group, GroupError> {
         let group = Group::new(name);
         self.group_store.save(&group).await?;
         Ok(group)
     }
 
-    /// Lista grupos con recuentos y nombres de miembros y repositorios.
+    /// Lists groups with counts and names of members and repositories.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn list(&self) -> Result<Vec<GroupSummary>, GroupError> {
         let groups = self.group_store.find_all().await?;
         let mut summaries = Vec::with_capacity(groups.len());
@@ -166,12 +166,12 @@ impl GroupService {
         Ok(summaries)
     }
 
-    /// Grupos a los que pertenece `user_id`, con los repositorios que
-    /// esos grupos conceden. No incluye el resto de miembros.
+    /// Groups `user_id` belongs to, with the repositories those
+    /// groups grant. Does not include the other members.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn memberships_for(
         &self,
         user_id: UserId,
@@ -194,11 +194,11 @@ impl GroupService {
         Ok(memberships)
     }
 
-    /// Detalle de un grupo.
+    /// Detail of a group.
     ///
     /// # Errors
     ///
-    /// [`GroupError::GroupNotFound`] o fallo de persistencia.
+    /// [`GroupError::GroupNotFound`] or a persistence failure.
     pub async fn get(&self, id: GroupId) -> Result<GroupDetail, GroupError> {
         let group = self
             .group_store
@@ -223,11 +223,11 @@ impl GroupService {
         })
     }
 
-    /// Elimina un grupo.
+    /// Deletes a group.
     ///
     /// # Errors
     ///
-    /// [`GroupError::GroupNotFound`] o fallo de persistencia.
+    /// [`GroupError::GroupNotFound`] or a persistence failure.
     pub async fn delete(&self, id: GroupId) -> Result<(), GroupError> {
         if self.group_store.delete(id).await? {
             Ok(())
@@ -236,11 +236,11 @@ impl GroupService {
         }
     }
 
-    /// Sustituye los miembros del grupo.
+    /// Replaces the group members.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si el grupo o algún usuario no existen.
+    /// [`GroupError`] if the group or a user does not exist.
     pub async fn set_members(&self, id: GroupId, user_ids: Vec<UserId>) -> Result<(), GroupError> {
         self.ensure_group(id).await?;
         for user_id in &user_ids {
@@ -252,12 +252,12 @@ impl GroupService {
         Ok(())
     }
 
-    /// Sustituye los repositorios asignados a un grupo.
+    /// Replaces the repositories assigned to a group.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si el grupo o un repositorio no existen, o el rol
-    /// no es `reader`/`developer`.
+    /// [`GroupError`] if the group or a repository does not exist, or
+    /// the role is not `reader`/`developer`.
     pub async fn set_group_repositories(
         &self,
         id: GroupId,
@@ -269,11 +269,11 @@ impl GroupService {
         Ok(())
     }
 
-    /// Grupos asignados a un repositorio.
+    /// Groups assigned to a repository.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn repository_grants(
         &self,
         repository_id: RepositoryId,
@@ -289,11 +289,11 @@ impl GroupService {
         Ok(result)
     }
 
-    /// Sustituye los grupos de un repositorio.
+    /// Replaces the groups of a repository.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si el repositorio o un grupo no existen.
+    /// [`GroupError`] if the repository or a group does not exist.
     pub async fn set_repository_groups(
         &self,
         repository_id: RepositoryId,
@@ -314,17 +314,17 @@ impl GroupService {
         Ok(())
     }
 
-    /// Acceso efectivo de `user` al repositorio.
+    /// Effective access of `user` to the repository.
     ///
-    /// Un Admin de instancia siempre escribe. Si el repositorio tiene
-    /// grupos, solo cuentan esos grupos (y el Admin). Si no tiene
-    /// grupos, vale el rol de instancia **salvo** que el usuario ya
-    /// pertenezca a algún grupo: entonces solo ve los repositorios
-    /// asignados a sus grupos.
+    /// An instance Admin always writes. If the repository has groups,
+    /// only those groups (and the Admin) count. If it has no groups,
+    /// the instance role applies **except** when the user already
+    /// belongs to some group: then they only see the repositories
+    /// assigned to their groups.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn access_on(
         &self,
         user: &User,
@@ -360,11 +360,11 @@ impl GroupService {
         Ok(best)
     }
 
-    /// `true` si el repositorio tiene al menos un grupo asignado.
+    /// `true` if the repository has at least one assigned group.
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn is_restricted(&self, repository_id: RepositoryId) -> Result<bool, GroupError> {
         Ok(!self
             .group_store
@@ -373,15 +373,15 @@ impl GroupService {
             .is_empty())
     }
 
-    /// Repositorios que `user` puede ver.
+    /// Repositories that `user` can see.
     ///
-    /// Un Admin ve todos. Un usuario que pertenece a algún grupo solo
-    /// ve los repositorios asignados a esos grupos. Quien no está en
-    /// ningún grupo ve los repositorios sin restringir (sin grupos).
+    /// An Admin sees all. A user who belongs to some group only sees
+    /// the repositories assigned to those groups. Someone in no group
+    /// sees unrestricted repositories (no groups).
     ///
     /// # Errors
     ///
-    /// [`GroupError`] si falla un puerto.
+    /// [`GroupError`] if a port fails.
     pub async fn visibility(&self, user: &User) -> Result<RepositoryVisibility, GroupError> {
         if user.role() == Role::Admin {
             return Ok(RepositoryVisibility::all());
