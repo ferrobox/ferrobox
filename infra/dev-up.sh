@@ -26,7 +26,7 @@ wait_for_healthy() {
 
 wait_for_healthy postgres
 wait_for_healthy garage
-docker compose up --no-deps garage-init
+docker compose up --no-deps --exit-code-from garage-init garage-init
 
 echo ""
 echo "Infraestructura lista:"
