@@ -98,7 +98,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags and OCI labels
+      - name: Derive tags, labels, and OCI annotations
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -107,7 +107,18 @@ jobs:
           tags: |
             type=raw,value=${{ needs.prepare.outputs.version }}
             type=raw,value=latest,enable=${{ needs.prepare.outputs.is_release }}
+          # Labels land on the image config; annotations land on the OCI
+          # manifest/index. They're separate metadata slots, so both need
+          # to be set explicitly and kept identical -- otherwise
+          # metadata-action falls back to the GitHub repo's "About"
+          # description and detected license for annotations only, which
+          # is stale (pre-rename copy) and can never detect a non-SPDX
+          # license like FSL-1.1-Apache-2.0 (always reports NOASSERTION).
           labels: |
+            org.opencontainers.image.title=FerroBox
+            org.opencontainers.image.description=Self-hosted artifact registry for Cargo, npm, PyPI, OCI images, Helm charts, Conan, Maven, NuGet, Go modules, and generic files.
+            org.opencontainers.image.licenses=FSL-1.1-Apache-2.0
+          annotations: |
             org.opencontainers.image.title=FerroBox
             org.opencontainers.image.description=Self-hosted artifact registry for Cargo, npm, PyPI, OCI images, Helm charts, Conan, Maven, NuGet, Go modules, and generic files.
             org.opencontainers.image.licenses=FSL-1.1-Apache-2.0
@@ -128,6 +139,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
