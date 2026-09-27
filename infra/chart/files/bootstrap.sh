@@ -1,14 +1,14 @@
 #!/bin/sh
-# Crea el layout de un nodo, importa la clave S3 y el bucket.
-# Es idempotente: un compose up o un helm upgrade no falla.
-# La imagen oficial de Garage es FROM scratch (sin shell ni CLI usable
-# desde otro contenedor), así que esto habla con la admin API v2.
-# Compose monta infra/garage/bootstrap.sh, que apunta aquí.
+# Creates a one-node layout, imports the S3 key, and the bucket.
+# Idempotent: compose up or helm upgrade does not fail.
+# The official Garage image is FROM scratch (no usable shell or CLI
+# from another container), so this talks to the admin API v2.
+# Compose mounts infra/garage/bootstrap.sh, which points here.
 set -eu
 
 ADMIN="${GARAGE_ADMIN_URL:-http://garage:3903}"
 BUCKET="${S3_BUCKET:-ferrobox}"
-# 1 GB SI, como `garage layout assign -c 1G`.
+# 1 GB SI, same as `garage layout assign -c 1G`.
 CAPACITY="${GARAGE_CAPACITY_BYTES:-1000000000}"
 
 if [ -z "${GARAGE_ADMIN_TOKEN:-}" ]; then

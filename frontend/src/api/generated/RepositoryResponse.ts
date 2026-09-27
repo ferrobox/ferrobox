@@ -4,23 +4,23 @@ import type { RepositoryAccessDto } from "./RepositoryAccessDto";
 import type { RepositoryKindDto } from "./RepositoryKindDto";
 
 /**
- * Representación de un repositorio en las respuestas de la API.
+ * Representation of a repository in API responses.
  */
 export type RepositoryResponse = { id: string, name: string, kind: RepositoryKindDto, ecosystem: PackageEcosystemDto, 
 /**
- * Acceso del usuario autenticado a este repositorio.
+ * Access of the authenticated user to this repository.
  */
 access: RepositoryAccessDto, 
 /**
- * `true` si hay grupos asignados; entonces solo esos grupos (y
- * los administradores) pueden verlo.
+ * `true` if groups are assigned; then only those groups (and
+ * administrators) can see it.
  */
 restricted: boolean, 
 /**
- * Horas entre refrescos programados del *upstream*. `null` = apagado.
+ * Hours between scheduled *upstream* refreshes. `null` = off.
  */
 prefetch_interval_hours: number | null, 
 /**
- * Último refresco programado, RFC 3339, o `null`.
+ * Last scheduled refresh, RFC 3339, or `null`.
  */
 last_prefetch_at: string | null, };

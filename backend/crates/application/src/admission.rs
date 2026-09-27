@@ -23,62 +23,61 @@ use crate::list_repository_artifacts::{
 };
 use crate::packaging::PackagingError;
 
-/// Motivos por los que consultar o guardar la política de admisión
-/// puede fallar.
+/// Reasons querying or saving the admission policy can fail.
 #[derive(Debug, Error)]
 pub enum AdmissionError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// Un `Alloy` no tiene política propia: rigen las de sus miembros.
+    /// An `Alloy` has no policy of its own: its members' policies apply.
     #[error("alloy repositories do not have their own admission policy")]
     AlloyRepository,
 
-    /// El repositorio no admite política de admisión.
+    /// The repository does not support an admission policy.
     #[error("admission policies apply to Forge and Mirror repositories")]
     UnsupportedRepository,
 
-    /// La política enviada no es válida.
+    /// The submitted policy is not valid.
     #[error(transparent)]
     InvalidPolicy(#[from] AdmissionPolicyError),
 
-    /// Fallo al leer o escribir la política.
+    /// Failed to read or write the policy.
     #[error(transparent)]
     Store(#[from] AdmissionStoreError),
 
-    /// Fallo al listar artefactos para el dry-run.
+    /// Failed to list artifacts for the dry-run.
     #[error(transparent)]
     Artifacts(#[from] ListRepositoryArtifactsError),
 
-    /// Fallo al consultar repositorios.
+    /// Failed to query repositories.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 }
 
-/// Un artefacto que la política tocaría en un pull.
+/// An artifact the policy would touch on a pull.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionPreviewItem {
-    /// Nombre del paquete o de la imagen.
+    /// Package or image name.
     pub name: String,
-    /// Versión o etiqueta.
+    /// Version or tag.
     pub version: String,
-    /// `deny` o `warn`.
+    /// `deny` or `warn`.
     pub effect: AdmissionEffect,
-    /// Motivo legible.
+    /// Human-readable reason.
     pub reason: String,
 }
 
-/// Resultado de simular la política contra el inventario.
+/// Result of simulating the policy against the inventory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionPreview {
-    /// Artefactos que disparan la condición.
+    /// Artifacts that trigger the condition.
     pub matches: Vec<AdmissionPreviewItem>,
-    /// Versiones listadas que no disparan la condición.
+    /// Listed versions that do not trigger the condition.
     pub allowed: usize,
 }
 
-/// Caso de uso: política de admisión de un repositorio.
+/// Use case: admission policy of a repository.
 #[derive(Clone)]
 pub struct AdmissionService {
     store: Arc<dyn AdmissionStore>,
@@ -88,7 +87,7 @@ pub struct AdmissionService {
 }
 
 impl AdmissionService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     pub fn new(
         store: Arc<dyn AdmissionStore>,
@@ -103,19 +102,19 @@ impl AdmissionService {
         }
     }
 
-    /// Ensayes para evaluar CVE y licencia. Sin ellos, esas cláusulas
-    /// no disparan (fail-open).
+    /// Assays for evaluating CVE and license. Without them, those
+    /// clauses do not fire (fail-open).
     #[must_use]
     pub fn with_assays(mut self, assays: Arc<dyn AssayStore>) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Devuelve la política guardada, o la inactiva por defecto.
+    /// Returns the saved policy, or the inactive default.
     ///
     /// # Errors
     ///
-    /// [`AdmissionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`AdmissionError::RepositoryNotFound`] or a port failure.
     pub async fn get_policy(
         &self,
         repository_id: RepositoryId,
@@ -131,7 +130,7 @@ impl AdmissionService {
         }
     }
 
-    /// PEM de claves Cosign del repositorio. Vacío si no hay o falla.
+    /// PEM of the repository Cosign keys. Empty if none or on failure.
     pub async fn public_keys_pem(&self, repository_id: RepositoryId) -> String {
         self.store
             .find_by_repository(repository_id)
@@ -140,11 +139,11 @@ impl AdmissionService {
             .unwrap_or_default()
     }
 
-    /// Persiste la política y las claves Cosign.
+    /// Persists the policy and the Cosign keys.
     ///
     /// # Errors
     ///
-    /// [`AdmissionError::AlloyRepository`] o un fallo de puerto.
+    /// [`AdmissionError::AlloyRepository`] or a port failure.
     pub async fn save_policy(
         &self,
         repository_id: RepositoryId,
@@ -162,11 +161,11 @@ impl AdmissionService {
         })
     }
 
-    /// Simula la política contra el inventario (ignora `enabled`).
+    /// Simulates the policy against the inventory (ignores `enabled`).
     ///
     /// # Errors
     ///
-    /// [`AdmissionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`AdmissionError::RepositoryNotFound`] or a port failure.
     pub async fn dry_run(
         &self,
         repository_id: RepositoryId,
@@ -188,11 +187,11 @@ impl AdmissionService {
         ))
     }
 
-    /// Últimos avisos y denegaciones del repositorio.
+    /// Latest warnings and denials of the repository.
     ///
     /// # Errors
     ///
-    /// [`AdmissionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`AdmissionError::RepositoryNotFound`] or a port failure.
     pub async fn list_events(
         &self,
         repository_id: RepositoryId,
@@ -205,12 +204,12 @@ impl AdmissionService {
         }
     }
 
-    /// Deniega un pull si la política activa lo exige y deja constancia
-    /// de avisos o denegaciones.
+    /// Denies a pull if the active policy requires it and records
+    /// warnings or denials.
     ///
     /// # Errors
     ///
-    /// [`PackagingError::PolicyDenied`] si hay que bloquear.
+    /// [`PackagingError::PolicyDenied`] if it must be blocked.
     pub async fn enforce_pull(
         &self,
         repository_id: RepositoryId,
@@ -257,11 +256,11 @@ impl AdmissionService {
         Ok(())
     }
 
-    /// Como [`Self::enforce_pull`], para un paquete sin firma Cosign.
+    /// Like [`Self::enforce_pull`], for a package without a Cosign signature.
     ///
     /// # Errors
     ///
-    /// [`PackagingError::PolicyDenied`] si hay que bloquear.
+    /// [`PackagingError::PolicyDenied`] if it must be blocked.
     pub async fn enforce_package_pull(
         &self,
         repository_id: RepositoryId,
@@ -422,8 +421,8 @@ impl AdmissionService {
     }
 }
 
-/// Docker pide el manifiesto por etiqueta y otra vez por digest (y a
-/// menudo HEAD + GET). Sin esto, un pull deja dos filas idénticas.
+/// Docker requests the manifest by tag and again by digest (and often
+/// HEAD + GET). Without this, a pull leaves two identical rows.
 const PULL_EVENT_DEDUPE_SECS: i64 = 15;
 
 fn is_digest_reference(reference: &str) -> bool {

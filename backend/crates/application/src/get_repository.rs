@@ -5,38 +5,38 @@ use ferrobox_domain::repository::Repository;
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
-/// Motivos por los que consultar un repositorio puede fallar.
+/// Reasons looking up a repository can fail.
 #[derive(Debug, Error)]
 pub enum GetRepositoryError {
-    /// El repositorio indicado no existe.
+    /// The given repository does not exist.
     #[error("repository {0} does not exist")]
     NotFound(RepositoryId),
 
-    /// Fallo al consultar el repositorio.
+    /// Failed to query the repository.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 }
 
-/// Caso de uso: consultar el detalle de un repositorio existente.
+/// Use case: look up the details of an existing repository.
 #[derive(Clone)]
 pub struct GetRepositoryUseCase {
     repository_store: Arc<dyn RepositoryStore>,
 }
 
 impl GetRepositoryUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(repository_store: Arc<dyn RepositoryStore>) -> Self {
         Self { repository_store }
     }
 
-    /// Busca el repositorio indicado.
+    /// Looks up the given repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`GetRepositoryError::NotFound`] si `id` no corresponde a
-    /// ningún repositorio existente, o [`GetRepositoryError::Persistence`]
-    /// si el backend subyacente falla.
+    /// Returns [`GetRepositoryError::NotFound`] if `id` does not match
+    /// any existing repository, or [`GetRepositoryError::Persistence`]
+    /// if the underlying backend fails.
     pub async fn execute(&self, id: RepositoryId) -> Result<Repository, GetRepositoryError> {
         self.repository_store
             .find_by_id(id)
@@ -44,12 +44,12 @@ impl GetRepositoryUseCase {
             .ok_or(GetRepositoryError::NotFound(id))
     }
 
-    /// Persiste un repositorio ya cargado (por ejemplo, tras cambiar el
-    /// intervalo de prefetch).
+    /// Persists an already loaded repository (for example, after
+    /// changing the prefetch interval).
     ///
     /// # Errors
     ///
-    /// [`GetRepositoryError::Persistence`] si el backend subyacente falla.
+    /// [`GetRepositoryError::Persistence`] if the underlying backend fails.
     pub async fn save(&self, repository: &Repository) -> Result<(), GetRepositoryError> {
         self.repository_store.save(repository).await?;
         Ok(())

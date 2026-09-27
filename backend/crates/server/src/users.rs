@@ -1,4 +1,4 @@
-//! Rutas HTTP de administración de usuarios (solo rol `Admin`).
+//! HTTP routes for user administration (`Admin` role only).
 
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-//! Retención de versiones (índice) y recolección de basura (binarios) de un repositorio.
+//! Version retention (index) and garbage collection (binaries) of a repository.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -24,14 +24,14 @@ use crate::storage_key::storage_key_for;
 
 const BLOB_PACKAGE: &str = "_blob";
 
-/// Resultado de aplicar retención y/o recolección de basura.
+/// Result of applying retention and/or garbage collection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CleanupReport {
-    /// Coordenadas de paquete (versiones o etiquetas) eliminadas del índice.
+    /// Package coordinates (versions or tags) removed from the index.
     pub dropped_versions: u64,
-    /// Binarios borrados del almacén de artefactos.
+    /// Binaries deleted from the artifact store.
     pub deleted_artifacts: u64,
-    /// Bytes liberados en almacenamiento.
+    /// Bytes freed in storage.
     pub freed_bytes: u64,
 }
 
@@ -43,80 +43,80 @@ impl CleanupReport {
     }
 }
 
-/// Qué se borraría (o se ha borrado) al aplicar retención o GC.
+/// What would be (or has been) deleted when applying retention or GC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleanupItem {
-    /// Repositorio al que pertenece la fila.
+    /// Repository the row belongs to.
     pub repository: String,
-    /// Nombre del paquete, o `_blob` para una capa OCI.
+    /// Package name, or `_blob` for an OCI layer.
     pub name: String,
-    /// Versión, etiqueta o digest.
+    /// Version, tag, or digest.
     pub version: String,
-    /// Tamaño del binario, si se conoce.
+    /// Binary size, if known.
     pub size_bytes: u64,
-    /// Por qué entra en la limpieza.
+    /// Why it is included in the cleanup.
     pub reason: String,
 }
 
-/// Resultado de simular o aplicar una limpieza.
+/// Result of simulating or applying a cleanup.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CleanupPreview {
-    /// `true` si no se ha borrado nada.
+    /// `true` if nothing has been deleted.
     pub dry_run: bool,
-    /// Resumen numérico.
+    /// Numeric summary.
     pub report: CleanupReport,
-    /// Versiones y binarios afectados, para enseñarlos en la UI.
+    /// Affected versions and binaries, to show them in the UI.
     pub items: Vec<CleanupItem>,
 }
 
-/// Motivos por los que retención o GC pueden fallar.
+/// Reasons retention or GC can fail.
 #[derive(Debug, Error)]
 pub enum RetentionError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// Un `Alloy` no almacena binarios propios: no hay nada que retener.
+    /// An `Alloy` does not store its own binaries: there is nothing to retain.
     #[error("retention does not apply to Alloy repositories")]
     AlloyRepository,
 
-    /// Falta la migración SQL (`sqlx migrate run` en el directorio backend).
+    /// Missing SQL migration (`sqlx migrate run` from the backend directory).
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_retention is missing)"
     )]
     MissingSchema,
 
-    /// La política pedida no es válida.
+    /// The requested policy is not valid.
     #[error(transparent)]
     InvalidPolicy(#[from] RetentionPolicyError),
 
-    /// Fallo al consultar el almacén de repositorios.
+    /// Failed to query the repository store.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar o actualizar el almacén de artefactos.
+    /// Failed to query or update the artifact store.
     #[error(transparent)]
     Artifacts(#[from] ArtifactStoreError),
 
-    /// Fallo al consultar o actualizar el índice de paquetes.
+    /// Failed to query or update the package index.
     #[error(transparent)]
     Index(#[from] PackageIndexStoreError),
 
-    /// Fallo al consultar o actualizar ensayes.
+    /// Failed to query or update assays.
     #[error(transparent)]
     Assays(#[from] AssayStoreError),
 
-    /// Fallo al consultar o actualizar la política persistida.
+    /// Failed to query or update the persisted policy.
     #[error(transparent)]
     Policy(#[from] RetentionStoreError),
 
-    /// Fallo al eliminar un objeto binario.
+    /// Failed to delete a binary object.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-/// Caso de uso: política de retención y recolección de basura.
+/// Use case: retention policy and garbage collection.
 pub struct RetentionService {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -127,7 +127,7 @@ pub struct RetentionService {
 }
 
 impl RetentionService {
-    /// Construye el servicio a partir de sus puertos.
+    /// Builds the service from its ports.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -148,11 +148,11 @@ impl RetentionService {
         }
     }
 
-    /// Devuelve la política persistida, o «conservar todo» si no hay fila.
+    /// Returns the persisted policy, or "keep all" if there is no row.
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] si el repositorio no existe.
+    /// [`RetentionError::RepositoryNotFound`] if the repository does not exist.
     pub async fn get_policy(
         &self,
         repository_id: RepositoryId,
@@ -165,11 +165,11 @@ impl RetentionService {
         }
     }
 
-    /// Guarda la política. No desindexa nada hasta [`Self::apply`].
+    /// Saves the policy. Does not deindex anything until [`Self::apply`].
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] o [`RetentionError::AlloyRepository`].
+    /// [`RetentionError::RepositoryNotFound`] or [`RetentionError::AlloyRepository`].
     pub async fn save_policy(
         &self,
         repository_id: RepositoryId,
@@ -180,11 +180,11 @@ impl RetentionService {
         Ok(policy)
     }
 
-    /// Simula la política **sin borrar nada**.
+    /// Simulates the policy **without deleting anything**.
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`RetentionError::RepositoryNotFound`] or a port failure.
     pub async fn dry_run(
         &self,
         repository_id: RepositoryId,
@@ -196,12 +196,12 @@ impl RetentionService {
         Ok(preview)
     }
 
-    /// Guarda la política y la aplica: quita versiones del índice. El disco
-    /// se libera después, con la recolección de basura.
+    /// Saves the policy and applies it: removes versions from the index.
+    /// Disk is freed afterwards, with garbage collection.
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`RetentionError::RepositoryNotFound`] or a port failure.
     pub async fn apply_policy(
         &self,
         repository_id: RepositoryId,
@@ -215,24 +215,24 @@ impl RetentionService {
         Ok(preview)
     }
 
-    /// Aplica la política persistida (solo índice).
+    /// Applies the persisted policy (index only).
     ///
-    /// No bloquea `install` ni `publish`: hay que invocarlo a propósito.
+    /// Does not block `install` or `publish`: it must be invoked on purpose.
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`RetentionError::RepositoryNotFound`] or a port failure.
     pub async fn apply(&self, repository_id: RepositoryId) -> Result<CleanupReport, RetentionError> {
         self.require_cleanup_target(repository_id).await?;
         let policy = self.retention_store.find_by_repository(repository_id).await?;
         Ok(self.apply_policy(repository_id, policy).await?.report)
     }
 
-    /// Recolecta binarios huérfanos de un repositorio sin tocar versiones indexadas.
+    /// Collects orphan binaries of a repository without touching indexed versions.
     ///
     /// # Errors
     ///
-    /// [`RetentionError::RepositoryNotFound`] o un fallo de puerto.
+    /// [`RetentionError::RepositoryNotFound`] or a port failure.
     pub async fn collect_garbage_only(
         &self,
         repository_id: RepositoryId,
@@ -241,22 +241,22 @@ impl RetentionService {
         self.collect_garbage(repository_id).await
     }
 
-    /// Simula la recolección de basura de toda la instancia, sin borrar.
+    /// Simulates garbage collection of the whole instance, without deleting.
     ///
     /// # Errors
     ///
-    /// Un fallo de puerto.
+    /// A port failure.
     pub async fn dry_run_garbage_collection(&self) -> Result<CleanupPreview, RetentionError> {
         let mut preview = self.preview_all_garbage().await?;
         preview.dry_run = true;
         Ok(preview)
     }
 
-    /// Borra de disco los binarios que ya no están en el índice, en toda la instancia.
+    /// Deletes from disk the binaries that are no longer in the index, across the instance.
     ///
     /// # Errors
     ///
-    /// Un fallo de puerto.
+    /// A port failure.
     pub async fn collect_garbage_all(&self) -> Result<CleanupPreview, RetentionError> {
         let mut preview = self.preview_all_garbage().await?;
         for repository in self.repository_store.find_all().await? {

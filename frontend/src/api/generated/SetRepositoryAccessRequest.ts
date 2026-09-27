@@ -2,6 +2,6 @@
 import type { RepositoryAccessGrantRequest } from "./RepositoryAccessGrantRequest";
 
 /**
- * Cuerpo de la petición para sustituir los grupos de un repositorio.
+ * Request body to replace the groups of a repository.
  */
 export type SetRepositoryAccessRequest = { grants: Array<RepositoryAccessGrantRequest>, };

@@ -2,22 +2,22 @@
 import type { AdmissionEffectDto } from "./AdmissionEffectDto";
 
 /**
- * Un artefacto que la política tocaría en un pull.
+ * An artifact the policy would touch on a pull.
  */
 export type AdmissionPreviewItemResponse = { 
 /**
- * Nombre del paquete o de la imagen.
+ * Package or image name.
  */
 name: string, 
 /**
- * Versión o etiqueta.
+ * Version or tag.
  */
 version: string, 
 /**
- * `deny` o `warn`.
+ * `deny` or `warn`.
  */
 effect: AdmissionEffectDto, 
 /**
- * Motivo legible.
+ * Readable reason.
  */
 reason: string, };

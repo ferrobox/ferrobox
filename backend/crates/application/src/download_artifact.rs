@@ -9,30 +9,30 @@ use thiserror::Error;
 
 use crate::storage_key::storage_key_for;
 
-/// Motivos por los que descargar un artefacto puede fallar.
+/// Reasons downloading an artifact can fail.
 #[derive(Debug, Error)]
 pub enum DownloadArtifactError {
-    /// El artefacto indicado no existe.
+    /// The given artifact does not exist.
     #[error("artifact {0} does not exist")]
     NotFound(ArtifactId),
 
-    /// Fallo al consultar los metadatos del artefacto.
+    /// Failed to query the artifact metadata.
     #[error(transparent)]
     ArtifactLookup(#[from] ArtifactStoreError),
 
-    /// Fallo al descargar el contenido binario.
+    /// Failed to download the binary content.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-/// Caso de uso: descargar un artefacto ya publicado.
+/// Use case: download an already published artifact.
 pub struct DownloadArtifactUseCase {
     artifact_store: Arc<dyn ArtifactStore>,
     storage: Arc<dyn StoragePort>,
 }
 
 impl DownloadArtifactUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(artifact_store: Arc<dyn ArtifactStore>, storage: Arc<dyn StoragePort>) -> Self {
         Self {
@@ -41,14 +41,14 @@ impl DownloadArtifactUseCase {
         }
     }
 
-    /// Ejecuta la descarga: busca los metadatos del artefacto y luego su
-    /// contenido binario.
+    /// Runs the download: looks up the artifact metadata and then its
+    /// binary content.
     ///
     /// # Errors
     ///
-    /// Devuelve [`DownloadArtifactError::NotFound`] si `artifact_id` no
-    /// corresponde a ningún artefacto existente, o cualquiera de las
-    /// demás variantes si falla el puerto correspondiente.
+    /// Returns [`DownloadArtifactError::NotFound`] if `artifact_id` does
+    /// not match any existing artifact, or any of the other variants if
+    /// the corresponding port fails.
     pub async fn execute(
         &self,
         artifact_id: ArtifactId,

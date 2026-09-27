@@ -1,73 +1,73 @@
 //! Admission policy for a repository: structured rules that decide
 //! whether an artifact may be pulled or promoted into another Forge.
 //!
-//! Varias cláusulas pueden estar armadas a la vez (firma, hallazgo OSV,
-//! licencia denegada). La primera que se cumple dispara el efecto.
+//! Several clauses can be armed at once (signature, OSV finding,
+//! denied license). The first one that matches fires the effect.
 
 use thiserror::Error;
 
 use crate::assay::AssaySeverity;
 use crate::ids::{AdmissionEventId, RepositoryId};
 
-/// Momento en el que se evalúa la regla.
+/// Moment at which the rule is evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionWhen {
-    /// Al resolver un manifiesto o un paquete para instalarlo.
+    /// When resolving a manifest or a package to install it.
     Pull,
 }
 
-/// Condición de firma persistida por compatibilidad.
+/// Signature condition persisted for compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionPredicate {
-    /// El artefacto no tiene una firma Cosign / Notation enlazada.
+    /// The artifact has no linked Cosign / Notation signature.
     NotSigned,
-    /// El artefacto no tiene una firma Cosign válida contra las claves
-    /// públicas configuradas.
+    /// The artifact has no Cosign signature valid against the configured
+    /// public keys.
     NotVerified,
 }
 
-/// Qué hacer si la condición se cumple.
+/// What to do if the condition matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionEffect {
-    /// Bloquea la operación.
+    /// Blocks the operation.
     Deny,
-    /// Deja pasar y solo deja constancia (dry-run operativo).
+    /// Lets it through and only records it (operational dry-run).
     Warn,
 }
 
-/// Motivos por los que una política de admisión no es válida.
+/// Reasons why an admission policy is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AdmissionPolicyError {
-    /// El momento no es uno de los soportados.
+    /// The moment is not one of the supported ones.
     #[error("unsupported admission moment '{0}'")]
     UnknownWhen(String),
 
-    /// El predicado no es uno de los soportados.
+    /// The predicate is not one of the supported ones.
     #[error("unsupported admission predicate '{0}'")]
     UnknownPredicate(String),
 
-    /// El efecto no es uno de los soportados.
+    /// The effect is not one of the supported ones.
     #[error("unsupported admission effect '{0}'")]
     UnknownEffect(String),
 
-    /// El umbral de hallazgo no es válido.
+    /// The finding threshold is not valid.
     #[error("unsupported admission finding threshold '{0}'")]
     UnknownFinding(String),
 }
 
-/// Identificador de un perfil preconfigurado.
+/// Identifier of a preconfigured profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionProfile {
-    /// ISO/IEC 18974: detectar y actuar ante hallazgos ≥ Medium.
+    /// ISO/IEC 18974: detect and act on findings ≥ Medium.
     OpenChainSecurity,
-    /// Política inbound habitual: copyleft fuerte denegado.
+    /// Typical inbound policy: strong copyleft denied.
     CopyleftRestrict,
-    /// Solo hallazgos Critical, denegar.
+    /// Only Critical findings, deny.
     CriticalOnly,
 }
 
 impl AdmissionProfile {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -77,7 +77,7 @@ impl AdmissionProfile {
         }
     }
 
-    /// Parsea la etiqueta.
+    /// Parses the label.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -89,7 +89,7 @@ impl AdmissionProfile {
     }
 }
 
-/// Licencias SPDX del perfil de copyleft restrictivo.
+/// SPDX licenses of the restrictive copyleft profile.
 #[must_use]
 pub fn copyleft_restricted_licenses() -> &'static [&'static str] {
     &[
@@ -106,7 +106,7 @@ pub fn copyleft_restricted_licenses() -> &'static [&'static str] {
     ]
 }
 
-/// Cláusulas opcionales que, si se cumplen, disparan el efecto.
+/// Optional clauses that, if they match, fire the effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionClauses {
     require_signed: bool,
@@ -117,7 +117,7 @@ pub struct AdmissionClauses {
 }
 
 impl AdmissionClauses {
-    /// Ninguna cláusula extra: solo el predicado de firma legado.
+    /// No extra clauses: only the legacy signature predicate.
     #[must_use]
     pub fn from_predicate(predicate: AdmissionPredicate) -> Self {
         Self {
@@ -129,7 +129,7 @@ impl AdmissionClauses {
         }
     }
 
-    /// Construye las cláusulas a partir de campos sueltos.
+    /// Builds the clauses from loose fields.
     #[must_use]
     pub fn new(
         require_signed: bool,
@@ -147,37 +147,37 @@ impl AdmissionClauses {
         }
     }
 
-    /// `true` si hay que firmar (Cosign / Notation).
+    /// `true` if it must be signed (Cosign / Notation).
     #[must_use]
     pub fn require_signed(&self) -> bool {
         self.require_signed
     }
 
-    /// `true` si hay que verificar la firma contra las claves PEM.
+    /// `true` if the signature must be verified against the PEM keys.
     #[must_use]
     pub fn require_verified(&self) -> bool {
         self.require_verified
     }
 
-    /// Umbral de hallazgo OSV, si la cláusula está armada.
+    /// OSV finding threshold, if the clause is armed.
     #[must_use]
     pub fn min_finding(&self) -> Option<AssaySeverity> {
         self.min_finding
     }
 
-    /// Licencias denegadas (ids SPDX).
+    /// Denied licenses (SPDX ids).
     #[must_use]
     pub fn forbidden_licenses(&self) -> &[String] {
         &self.forbidden_licenses
     }
 
-    /// Perfil que rellenó estas cláusulas, si se eligió uno.
+    /// Profile that filled these clauses, if one was chosen.
     #[must_use]
     pub fn profile(&self) -> Option<AdmissionProfile> {
         self.profile
     }
 
-    /// Predicado legado para la columna `predicate`.
+    /// Legacy predicate for the `predicate` column.
     #[must_use]
     pub fn legacy_predicate(&self) -> AdmissionPredicate {
         if self.require_verified && !self.require_signed {
@@ -187,7 +187,7 @@ impl AdmissionClauses {
         }
     }
 
-    /// Codifica las cláusulas para persistirlas.
+    /// Encodes the clauses so they can be persisted.
     #[must_use]
     pub fn encode(&self) -> String {
         let mut parts = vec![
@@ -206,7 +206,7 @@ impl AdmissionClauses {
         parts.join("|")
     }
 
-    /// Restaura las cláusulas persistidas. Vacío = `None` (usar el predicado).
+    /// Restores persisted clauses. Empty = `None` (use the predicate).
     #[must_use]
     pub fn decode(value: &str) -> Option<Self> {
         let trimmed = value.trim();
@@ -256,38 +256,38 @@ impl AdmissionClauses {
     }
 }
 
-/// Hechos de un pull para evaluar la política.
+/// Facts of a pull for evaluating the policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionFacts {
-    /// Hay firma enlazada.
+    /// There is a linked signature.
     pub signed: bool,
-    /// La firma verifica contra las claves del repositorio.
+    /// The signature verifies against the repository keys.
     pub verified: bool,
-    /// `false` en ecosistemas sin Cosign (Cargo, npm…): se ignoran las
-    /// cláusulas de firma.
+    /// `false` in ecosystems without Cosign (Cargo, npm…): signature
+    /// clauses are ignored.
     pub consider_signature: bool,
-    /// Hallazgo más grave del ensaye listo. `None` = no hay ensaye o
-    /// no aplica: las cláusulas de CVE y licencia no disparan.
+    /// Most severe finding of the ready assay. `None` = there is no assay or
+    /// it does not apply: CVE and license clauses do not fire.
     pub max_finding: Option<AssaySeverity>,
-    /// Licencias declaradas en el inventario del ensaye listo.
+    /// Licenses declared in the inventory of the ready assay.
     pub licenses: Vec<String>,
 }
 
-/// Motivo por el que una política dispararía.
+/// Reason why a policy would fire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmissionHit {
-    /// Falta la firma.
+    /// The signature is missing.
     Unsigned,
-    /// La firma no verifica.
+    /// The signature does not verify.
     Unverified,
-    /// Un hallazgo alcanza el umbral.
+    /// A finding meets the threshold.
     Finding(AssaySeverity),
-    /// Una licencia está en la lista denegada.
+    /// A license is on the denied list.
     ForbiddenLicense(String),
 }
 
 impl AdmissionHit {
-    /// Etiqueta corta para el registro de eventos.
+    /// Short label for the event log.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -299,10 +299,10 @@ impl AdmissionHit {
     }
 }
 
-/// Una regla de admisión de un repositorio.
+/// An admission rule of a repository.
 ///
-/// Sin activar, no se aplica en el pull: sirve para guardarla y
-/// previsualizar el impacto.
+/// While disabled, it is not applied on pull: it is used to save it and
+/// preview the impact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionPolicy {
     enabled: bool,
@@ -312,7 +312,7 @@ pub struct AdmissionPolicy {
 }
 
 impl AdmissionPolicy {
-    /// Regla inactiva: pull + no firmada + denegar, desconectada.
+    /// Inactive rule: pull + unsigned + deny, disconnected.
     #[must_use]
     pub fn inactive() -> Self {
         Self {
@@ -323,9 +323,9 @@ impl AdmissionPolicy {
         }
     }
 
-    /// Perfil `OpenChain` seguridad (ISO/IEC 18974): hallazgo ≥ Medium, avisar.
+    /// `OpenChain` security profile (ISO/IEC 18974): finding ≥ Medium, warn.
     ///
-    /// Queda desactivada: hay que simular y activar a propósito.
+    /// It is left disabled: it must be simulated and enabled on purpose.
     #[must_use]
     pub fn profile_openchain_security() -> Self {
         Self {
@@ -342,7 +342,7 @@ impl AdmissionPolicy {
         }
     }
 
-    /// Perfil de copyleft restrictivo: deniega GPL/AGPL/SSPL.
+    /// Restrictive copyleft profile: denies GPL/AGPL/SSPL.
     #[must_use]
     pub fn profile_copyleft_restrict() -> Self {
         Self {
@@ -362,7 +362,7 @@ impl AdmissionPolicy {
         }
     }
 
-    /// Perfil conservador: solo Critical, denegar.
+    /// Conservative profile: only Critical, deny.
     #[must_use]
     pub fn profile_critical_only() -> Self {
         Self {
@@ -379,11 +379,11 @@ impl AdmissionPolicy {
         }
     }
 
-    /// Construye una política a partir de etiquetas persistidas.
+    /// Builds a policy from persisted labels.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionPolicyError`] si alguna etiqueta no es válida.
+    /// Returns [`AdmissionPolicyError`] if any label is not valid.
     pub fn parse(
         enabled: bool,
         when: &str,
@@ -399,11 +399,11 @@ impl AdmissionPolicy {
         })
     }
 
-    /// Construye una política con cláusulas explícitas.
+    /// Builds a policy with explicit clauses.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionPolicyError`] si `when` o `effect` no son válidos.
+    /// Returns [`AdmissionPolicyError`] if `when` or `effect` are not valid.
     pub fn compose(
         enabled: bool,
         when: &str,
@@ -418,11 +418,11 @@ impl AdmissionPolicy {
         })
     }
 
-    /// Restaura una fila persistida, usando `clauses` si no está vacío.
+    /// Restores a persisted row, using `clauses` if it is not empty.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionPolicyError`] si alguna etiqueta no es válida.
+    /// Returns [`AdmissionPolicyError`] if any label is not valid.
     pub fn parse_stored(
         enabled: bool,
         when: &str,
@@ -437,41 +437,41 @@ impl AdmissionPolicy {
         Ok(policy)
     }
 
-    /// `true` si la regla está armada.
+    /// `true` if the rule is armed.
     #[must_use]
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Momento de evaluación.
+    /// Evaluation moment.
     #[must_use]
     pub fn when(&self) -> AdmissionWhen {
         self.when
     }
 
-    /// Predicado legado (firma).
+    /// Legacy predicate (signature).
     #[must_use]
     pub fn predicate(&self) -> AdmissionPredicate {
         self.clauses.legacy_predicate()
     }
 
-    /// Efecto si la condición se cumple.
+    /// Effect if the condition matches.
     #[must_use]
     pub fn effect(&self) -> AdmissionEffect {
         self.effect
     }
 
-    /// Cláusulas armadas.
+    /// Armed clauses.
     #[must_use]
     pub fn clauses(&self) -> &AdmissionClauses {
         &self.clauses
     }
 
-    /// Efecto que se aplicaría en un pull de un artefacto con `signed`
-    /// y `verified`.
+    /// Effect that would be applied on a pull of an artifact with `signed`
+    /// and `verified`.
     ///
-    /// Ignora `enabled`: sirve para el dry-run («si activo esto…»).
-    /// Solo mira la firma; usa [`Self::preview_facts`] para CVE/licencia.
+    /// Ignores `enabled`: used for the dry-run ("if I turn this on…").
+    /// Only looks at the signature; use [`Self::preview_facts`] for CVE/license.
     #[must_use]
     pub fn preview_pull(&self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
         self.preview_facts(&AdmissionFacts {
@@ -484,7 +484,7 @@ impl AdmissionPolicy {
         .map(|_| self.effect)
     }
 
-    /// Primera cláusula que dispara, ignorando `enabled`.
+    /// First clause that fires, ignoring `enabled`.
     #[must_use]
     pub fn preview_facts(&self, facts: &AdmissionFacts) -> Option<AdmissionHit> {
         if !matches!(self.when, AdmissionWhen::Pull) {
@@ -516,7 +516,7 @@ impl AdmissionPolicy {
         None
     }
 
-    /// Efecto que **bloquea** un pull ahora mismo (regla activa + deny).
+    /// Effect that **blocks** a pull right now (active rule + deny).
     #[must_use]
     pub fn deny_pull(&self, signed: bool, verified: bool) -> bool {
         matches!(
@@ -525,7 +525,7 @@ impl AdmissionPolicy {
         )
     }
 
-    /// Efecto que se aplica ahora mismo (regla activa).
+    /// Effect that is applied right now (active rule).
     #[must_use]
     pub fn apply_pull(&self, signed: bool, verified: bool) -> Option<AdmissionEffect> {
         if !self.enabled {
@@ -534,7 +534,7 @@ impl AdmissionPolicy {
         self.preview_pull(signed, verified)
     }
 
-    /// Efecto y motivo si la regla está activa.
+    /// Effect and reason if the rule is active.
     #[must_use]
     pub fn apply_facts(&self, facts: &AdmissionFacts) -> Option<(AdmissionEffect, AdmissionHit)> {
         if !self.enabled {
@@ -565,7 +565,7 @@ fn license_matches(declared: &str, denied: &str) -> bool {
     declared.trim().eq_ignore_ascii_case(denied.trim())
 }
 
-/// Un aviso o una denegación registrados en un pull.
+/// A warning or a denial recorded on a pull.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionEvent {
     id: AdmissionEventId,
@@ -578,7 +578,7 @@ pub struct AdmissionEvent {
 }
 
 impl AdmissionEvent {
-    /// Construye un evento ya persistido o recién emitido.
+    /// Builds an event that is already persisted or just emitted.
     #[must_use]
     pub fn from_parts(
         id: AdmissionEventId,
@@ -600,43 +600,43 @@ impl AdmissionEvent {
         }
     }
 
-    /// Identificador.
+    /// Identifier.
     #[must_use]
     pub fn id(&self) -> AdmissionEventId {
         self.id
     }
 
-    /// Repositorio.
+    /// Repository.
     #[must_use]
     pub fn repository_id(&self) -> RepositoryId {
         self.repository_id
     }
 
-    /// Nombre de la imagen o del paquete.
+    /// Image or package name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Etiqueta, digest o versión.
+    /// Tag, digest, or version.
     #[must_use]
     pub fn reference(&self) -> &str {
         &self.reference
     }
 
-    /// `deny` o `warn`.
+    /// `deny` or `warn`.
     #[must_use]
     pub fn effect(&self) -> AdmissionEffect {
         self.effect
     }
 
-    /// Motivo legible.
+    /// Human-readable reason.
     #[must_use]
     pub fn reason(&self) -> &str {
         &self.reason
     }
 
-    /// Instante RFC 3339.
+    /// RFC 3339 timestamp.
     #[must_use]
     pub fn created_at(&self) -> &str {
         &self.created_at
@@ -644,7 +644,7 @@ impl AdmissionEvent {
 }
 
 impl AdmissionWhen {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -661,7 +661,7 @@ impl AdmissionWhen {
 }
 
 impl AdmissionPredicate {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -680,7 +680,7 @@ impl AdmissionPredicate {
 }
 
 impl AdmissionEffect {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {

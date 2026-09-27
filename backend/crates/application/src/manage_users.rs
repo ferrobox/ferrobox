@@ -7,45 +7,45 @@ use thiserror::Error;
 
 use crate::auth_crypto::{PasswordHashError, hash_password};
 
-/// Motivos por los que crear un usuario puede fallar.
+/// Reasons creating a user can fail.
 #[derive(Debug, Error)]
 pub enum CreateUserError {
-    /// La contraseña no cumple la política de la instancia.
+    /// The password does not meet the instance policy.
     #[error(transparent)]
     InvalidPassword(#[from] ferrobox_domain::user::PasswordPolicyError),
 
-    /// Fallo al hashear la contraseña.
+    /// Failed to hash the password.
     #[error(transparent)]
     PasswordHashing(#[from] PasswordHashError),
 
-    /// Fallo al persistir el usuario (incluye nombre o correo duplicado).
+    /// Failed to persist the user (includes a duplicate name or email).
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 
-    /// Una cuenta robot no puede ser administradora de instancia.
+    /// A robot account cannot be an instance administrator.
     #[error("a robot account cannot be an admin")]
     RobotCannotBeAdmin,
 }
 
-/// Caso de uso: crear un usuario con rol, correo y contraseña.
+/// Use case: create a user with role, email, and password.
 pub struct CreateUserUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl CreateUserUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Crea un usuario nuevo. El correo es obligatorio y la contraseña
-    /// debe cumplir la política de la instancia.
+    /// Creates a new user. Email is required and the password must
+    /// meet the instance policy.
     ///
     /// # Errors
     ///
-    /// Devuelve [`CreateUserError`] si la contraseña es débil, o si el
-    /// hashing o la persistencia fallan.
+    /// Returns [`CreateUserError`] if the password is weak, or if
+    /// hashing or persistence fails.
     pub async fn execute(
         &self,
         username: Username,
@@ -62,13 +62,13 @@ impl CreateUserUseCase {
         Ok(user)
     }
 
-    /// Crea una cuenta robot: sin correo, sin contraseña usable, solo
-    /// tokens de API. No puede ser [`Role::Admin`].
+    /// Creates a robot account: no email, no usable password, API
+    /// tokens only. Cannot be [`Role::Admin`].
     ///
     /// # Errors
     ///
-    /// [`CreateUserError::RobotCannotBeAdmin`] si el rol es admin, o
-    /// un error de hashing / persistencia.
+    /// [`CreateUserError::RobotCannotBeAdmin`] if the role is admin, or
+    /// a hashing / persistence error.
     pub async fn execute_robot(
         &self,
         username: Username,
@@ -86,13 +86,13 @@ impl CreateUserUseCase {
         Ok(user)
     }
 
-    /// Crea un usuario de prueba con correo `{username}@example.com` y
-    /// una contraseña que cumple la política.
+    /// Creates a test user with email `{username}@example.com` and a
+    /// password that meets the policy.
     ///
     /// # Errors
     ///
-    /// Propaga [`CreateUserError`] si el nombre no es válido como
-    /// correo derivado o si falla la persistencia.
+    /// Propagates [`CreateUserError`] if the name is not valid as a
+    /// derived email or if persistence fails.
     #[cfg(any(test, feature = "test-utils"))]
     pub async fn seed(&self, username: &str, role: Role) -> Result<User, CreateUserError> {
         let email = Email::parse(format!("{username}@example.com")).map_err(|err| {
@@ -105,75 +105,76 @@ impl CreateUserUseCase {
     }
 }
 
-/// Motivos por los que listar usuarios puede fallar.
+/// Reasons listing users can fail.
 #[derive(Debug, Error)]
 pub enum ListUsersError {
-    /// Fallo al consultar el almacén.
+    /// Failed to query the store.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Caso de uso: listar todos los usuarios.
+/// Use case: list every user.
 pub struct ListUsersUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl ListUsersUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Lista los usuarios ordenados por nombre.
+    /// Lists users ordered by name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ListUsersError::Persistence`] si el backend falla.
+    /// Returns [`ListUsersError::Persistence`] if the backend fails.
     pub async fn execute(&self) -> Result<Vec<User>, ListUsersError> {
         Ok(self.user_store.find_all().await?)
     }
 }
 
-/// Motivos por los que eliminar un usuario puede fallar.
+/// Reasons deleting a user can fail.
 #[derive(Debug, Error)]
 pub enum DeleteUserError {
-    /// El usuario no existe.
+    /// The user does not exist.
     #[error("user not found")]
     NotFound,
 
-    /// No se puede eliminar el propio usuario autenticado.
+    /// The authenticated user cannot delete themselves.
     #[error("cannot delete your own account")]
     CannotDeleteSelf,
 
-    /// No se puede eliminar el último administrador del sistema.
+    /// The last administrator of the system cannot be deleted.
     #[error("cannot delete the last admin user")]
     CannotDeleteLastAdmin,
 
-    /// Fallo al consultar / actualizar el almacén.
+    /// Failed to query / update the store.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Caso de uso: eliminar un usuario.
+/// Use case: delete a user.
 pub struct DeleteUserUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl DeleteUserUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Elimina el usuario indicado, con salvaguardas para no dejar el
-    /// sistema sin administradores ni borrar la propia cuenta.
+    /// Deletes the given user, with safeguards so the system is not
+    /// left without administrators and the caller's own account is not
+    /// deleted.
     ///
     /// # Errors
     ///
-    /// Devuelve [`DeleteUserError`] si el usuario no existe, es el
-    /// propio actor, es el último admin, o si falla la persistencia.
+    /// Returns [`DeleteUserError`] if the user does not exist, is the
+    /// actor themselves, is the last admin, or if persistence fails.
     pub async fn execute(
         &self,
         actor_id: UserId,
@@ -199,45 +200,46 @@ impl DeleteUserUseCase {
     }
 }
 
-/// Motivos por los que cambiar el rol de un usuario puede fallar.
+/// Reasons changing a user's role can fail.
 #[derive(Debug, Error)]
 pub enum ChangeUserRoleError {
-    /// El usuario no existe.
+    /// The user does not exist.
     #[error("user not found")]
     NotFound,
 
-    /// No se puede degradar el último administrador del sistema.
+    /// The last administrator of the system cannot be demoted.
     #[error("cannot demote the last admin user")]
     CannotDemoteLastAdmin,
 
-    /// Una cuenta robot no puede ser administradora de instancia.
+    /// A robot account cannot be an instance administrator.
     #[error("a robot account cannot be an admin")]
     RobotCannotBeAdmin,
 
-    /// Fallo al consultar / actualizar el almacén.
+    /// Failed to query / update the store.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Caso de uso: cambiar el rol de un usuario.
+/// Use case: change a user's role.
 pub struct ChangeUserRoleUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl ChangeUserRoleUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Cambia el rol del usuario indicado. Degradar al último
-    /// administrador se rechaza para no dejar el sistema sin gestión.
+    /// Changes the role of the given user. Demoting the last
+    /// administrator is rejected so the system is not left unmanaged.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ChangeUserRoleError`] si el usuario no existe, es el
-    /// último admin y se intenta degradarlo, o si falla la persistencia.
+    /// Returns [`ChangeUserRoleError`] if the user does not exist, is
+    /// the last admin and a demotion is attempted, or if persistence
+    /// fails.
     pub async fn execute(
         &self,
         target_id: UserId,
@@ -268,56 +270,55 @@ impl ChangeUserRoleUseCase {
     }
 }
 
-/// Motivos por los que restablecer la contraseña de otro usuario puede
-/// fallar.
+/// Reasons resetting another user's password can fail.
 #[derive(Debug, Error)]
 pub enum ResetUserPasswordError {
-    /// No se puede restablecer la propia contraseña por esta vía.
+    /// The caller cannot reset their own password this way.
     #[error("cannot reset your own password; change it in settings")]
     CannotResetSelf,
 
-    /// El usuario no existe.
+    /// The user does not exist.
     #[error("user not found")]
     NotFound,
 
-    /// La nueva contraseña no cumple la política de la instancia.
+    /// The new password does not meet the instance policy.
     #[error(transparent)]
     InvalidPassword(#[from] ferrobox_domain::user::PasswordPolicyError),
 
-    /// Las cuentas robot no tienen contraseña.
+    /// Robot accounts have no password.
     #[error("a robot account has no password")]
     RobotAccount,
 
-    /// Fallo al hashear la nueva contraseña.
+    /// Failed to hash the new password.
     #[error(transparent)]
     PasswordHashing(#[from] PasswordHashError),
 
-    /// Fallo al consultar / actualizar el almacén.
+    /// Failed to query / update the store.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Caso de uso: un Admin restablece la contraseña de otra cuenta.
+/// Use case: an Admin resets another account's password.
 pub struct ResetUserPasswordUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl ResetUserPasswordUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Sustituye el hash de contraseña del usuario indicado. El actor
-    /// no puede restablecerse a sí mismo: para eso está el cambio de
-    /// contraseña en Configuración.
+    /// Replaces the password hash of the given user. The actor cannot
+    /// reset themselves: that is what the password change in Settings
+    /// is for.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ResetUserPasswordError`] si el objetivo es el propio
-    /// actor, no existe, la contraseña es débil, o falla la
-    /// persistencia.
+    /// Returns [`ResetUserPasswordError`] if the target is the actor
+    /// themselves, does not exist, the password is weak, or
+    /// persistence fails.
     pub async fn execute(
         &self,
         actor_id: UserId,

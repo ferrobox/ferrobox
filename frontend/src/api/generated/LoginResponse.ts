@@ -2,10 +2,10 @@
 import type { UserResponse } from "./UserResponse";
 
 /**
- * Respuesta al iniciar sesión correctamente.
+ * Response after a successful sign-in.
  */
 export type LoginResponse = { 
 /**
- * Secreto del token de sesión (mostrado una sola vez).
+ * Session token secret (shown only once).
  */
 token: string, user: UserResponse, };

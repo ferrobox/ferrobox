@@ -3,39 +3,39 @@ use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::quota::StorageQuota;
 use thiserror::Error;
 
-/// Motivos por los que una operación sobre la cuota puede fallar.
+/// Reasons a quota operation can fail.
 #[derive(Debug, Error)]
 pub enum QuotaStoreError {
-    /// No existe la tabla de cuotas: falta ejecutar la migración SQL.
+    /// The quota table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_quota is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la cuota de almacenamiento de un repositorio.
+/// Persistence port for a repository storage quota.
 #[async_trait]
 pub trait QuotaStore: Send + Sync {
-    /// Devuelve la cuota del repositorio, o «ilimitada» si nunca se configuró.
+    /// Returns the repository quota, or unlimited if it was never configured.
     ///
     /// # Errors
     ///
-    /// Devuelve [`QuotaStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`QuotaStoreError::Backend`] if the underlying backend fails.
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<StorageQuota, QuotaStoreError>;
 
-    /// Inserta o reemplaza la cuota del repositorio.
+    /// Inserts or replaces the repository quota.
     ///
     /// # Errors
     ///
-    /// Devuelve [`QuotaStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`QuotaStoreError::Backend`] if the underlying backend fails.
     async fn save(
         &self,
         repository_id: RepositoryId,

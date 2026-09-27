@@ -1,16 +1,15 @@
-//! Rutas HTTP que implementan el subconjunto del protocolo de registro
-//! de Cargo que `cargo publish`, `cargo yank`, `cargo search`, `cargo add`
-//! y `cargo build` necesitan para publicar paquetes y resolver
-//! dependencias contra `FerroBox` usando el protocolo de índice disperso
-//! (*sparse index*).
+//! HTTP routes that implement the subset of the Cargo registry protocol
+//! that `cargo publish`, `cargo yank`, `cargo search`, `cargo add`,
+//! and `cargo build` need to publish packages and resolve dependencies
+//! against `FerroBox` using the sparse-index protocol.
 //!
-//! Referencia: <https://doc.rust-lang.org/cargo/reference/registries.html>.
+//! Reference: <https://doc.rust-lang.org/cargo/reference/registries.html>.
 //!
-//! Las lecturas (`config.json`, índice, descarga y búsqueda) son
-//! públicas: `cargo build` / `cargo add` no envían credenciales salvo
-//! que `auth-required` sea `true`. Las escrituras (`publish`, `yank`,
-//! `unyank`) exigen `Authorization` (token en crudo, `Bearer` o `Token`)
-//! y rol de escritura.
+//! Reads (`config.json`, index, download, and search) are public:
+//! `cargo build` / `cargo add` do not send credentials unless
+//! `auth-required` is `true`. Writes (`publish`, `yank`, `unyank`)
+//! require `Authorization` (raw token, `Bearer`, or `Token`) and a
+//! write role.
 
 use std::sync::Arc;
 
@@ -34,8 +33,8 @@ use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
-/// Rutas de solo lectura del protocolo de Cargo. Van en el router
-/// público para que `cargo` pueda resolver dependencias sin token.
+/// Read-only Cargo protocol routes. They sit on the public router so
+/// `cargo` can resolve dependencies without a token.
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/cargo/{repository_id}/config.json", get(config_json))
@@ -63,8 +62,8 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura del protocolo de Cargo. Van detrás de
-/// autenticación y de [`require_write_artifacts`].
+/// Write routes for the Cargo protocol. They sit behind
+/// authentication and [`require_write_artifacts`].
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/cargo/{repository_id}/api/v1/crates/new", put(publish))
@@ -85,10 +84,10 @@ fn cargo_strategy(state: &AppState) -> Result<Arc<dyn PackagingStrategy>, ApiErr
         .ok_or_else(|| ApiError::Internal("no Cargo packaging strategy is registered".to_string()))
 }
 
-/// Respuesta de `GET /cargo/{repository_id}/config.json`: le indica a
-/// `cargo` dónde descargar el contenido de un `.crate` (`dl`) y dónde
-/// enviar peticiones de publicación (`api`). `auth-required` es `false`
-/// para que el índice y las descargas no exijan token.
+/// Response of `GET /cargo/{repository_id}/config.json`: tells `cargo`
+/// where to download `.crate` content (`dl`) and where to send publish
+/// requests (`api`). `auth-required` is `false` so the index and
+/// downloads do not require a token.
 #[derive(Serialize)]
 struct RegistryConfig {
     dl: String,
@@ -160,10 +159,10 @@ async fn index_len4(
     serve_index(&state, &headers, repository_id, name, &expected).await
 }
 
-/// Sirve el índice disperso de un crate. `expected_shard` es la ruta de
-/// fragmentación que `cargo` debería haber pedido para `name`; si no
-/// coincide, se responde 404 para no filtrar paquetes por rutas
-/// incorrectas.
+/// Serves the sparse index of a crate. `expected_shard` is the
+/// sharding path `cargo` should have requested for `name`; if it does
+/// not match, a 404 is returned so packages are not leaked through
+/// incorrect paths.
 async fn serve_index(
     state: &AppState,
     headers: &HeaderMap,
@@ -200,9 +199,9 @@ async fn serve_index(
     Ok((headers, body))
 }
 
-/// Cuerpo de respuesta que `cargo publish` espera tras una publicación
-/// correcta. `cargo` no falla si estos campos vienen vacíos, pero sí
-/// espera que el objeto exista.
+/// Response body that `cargo publish` expects after a successful
+/// publish. `cargo` does not fail if these fields are empty, but it
+/// does expect the object to exist.
 #[derive(Serialize, Default)]
 struct PublishWarnings {
     #[serde(rename = "invalid_categories")]
@@ -251,9 +250,9 @@ struct SearchResponse {
     meta: SearchMeta,
 }
 
-/// `PUT /cargo/{repository_id}/api/v1/crates/new`: el endpoint que
-/// `cargo publish` invoca. Acepta el token en crudo (`Authorization: fb_…`,
-/// como lo envía `cargo`) o con esquema `Bearer` / `Token`.
+/// `PUT /cargo/{repository_id}/api/v1/crates/new`: the endpoint that
+/// `cargo publish` invokes. Accepts the token raw (`Authorization: fb_…`,
+/// as `cargo` sends it) or with a `Bearer` / `Token` scheme.
 async fn publish(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, token }: AuthenticatedUser,
@@ -395,7 +394,7 @@ async fn set_yanked(
 }
 
 /// `GET /cargo/{repository_id}/api/v1/crates?q=…&per_page=…`.
-/// `q` vacío lista los paquetes indexados hasta `per_page`.
+/// An empty `q` lists indexed packages up to `per_page`.
 async fn search(
     State(state): State<Arc<AppState>>,
     Path(repository_id): Path<Uuid>,

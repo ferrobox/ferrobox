@@ -3,6 +3,6 @@ import type { ApiTokenCreatedResponse } from "./ApiTokenCreatedResponse";
 import type { UserResponse } from "./UserResponse";
 
 /**
- * Respuesta al crear un robot: la cuenta y el secreto del token inicial.
+ * Response after creating a robot: the account and the initial token secret.
  */
 export type CreateRobotResponse = { user: UserResponse, token: ApiTokenCreatedResponse, };

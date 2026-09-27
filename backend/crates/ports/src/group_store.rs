@@ -4,180 +4,179 @@ use ferrobox_domain::ids::{GroupId, RepositoryId, UserId};
 use ferrobox_domain::user::Role;
 use thiserror::Error;
 
-/// Motivos por los que una operación de persistencia de grupos puede
-/// fallar.
+/// Reasons a group persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum GroupStoreError {
-    /// Ya existe un grupo con ese nombre.
+    /// A group with that name already exists.
     #[error("a group named '{0}' already exists")]
     DuplicateName(GroupName),
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Un grupo asignado a un repositorio, con el rol en ese repositorio.
+/// A group assigned to a repository, with the role in that repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryGroupGrant {
-    /// Repositorio al que aplica el acceso.
+    /// Repository the access applies to.
     pub repository_id: RepositoryId,
-    /// Grupo que recibe el acceso.
+    /// Group that receives the access.
     pub group_id: GroupId,
-    /// Rol del grupo en ese repositorio (`reader` o `developer`).
+    /// Role of the group in that repository (`reader` or `developer`).
     pub role: Role,
 }
 
-/// Puerto de persistencia de grupos, miembros y acceso a repositorios.
+/// Persistence port for groups, members, and repository access.
 #[async_trait]
 pub trait GroupStore: Send + Sync {
-    /// Inserta o actualiza un grupo (nombre).
+    /// Inserts or updates a group (name).
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::DuplicateName`] o [`GroupStoreError::Backend`].
+    /// [`GroupStoreError::DuplicateName`] or [`GroupStoreError::Backend`].
     async fn save(&self, group: &Group) -> Result<(), GroupStoreError>;
 
-    /// Busca un grupo por identificador.
+    /// Looks up a group by identifier.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn find_by_id(&self, id: GroupId) -> Result<Option<Group>, GroupStoreError>;
 
-    /// Busca un grupo por nombre.
+    /// Looks up a group by name.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn find_by_name(&self, name: &GroupName) -> Result<Option<Group>, GroupStoreError>;
 
-    /// Lista todos los grupos, ordenados por nombre.
+    /// Lists every group, ordered by name.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn find_all(&self) -> Result<Vec<Group>, GroupStoreError>;
 
-    /// Elimina un grupo y sus asociaciones. Devuelve `false` si no
-    /// existía.
+    /// Deletes a group and its associations. Returns `false` if it did
+    /// not exist.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn delete(&self, id: GroupId) -> Result<bool, GroupStoreError>;
 
-    /// Sustituye los miembros del grupo por `user_ids`.
+    /// Replaces the group members with `user_ids`.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn set_members(
         &self,
         group_id: GroupId,
         user_ids: &[UserId],
     ) -> Result<(), GroupStoreError>;
 
-    /// Lista los miembros de un grupo.
+    /// Lists the members of a group.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn members(&self, group_id: GroupId) -> Result<Vec<UserId>, GroupStoreError>;
 
-    /// Grupos a los que pertenece un usuario.
+    /// Groups a user belongs to.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn groups_for_user(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError>;
 
-    /// Añade un miembro si aún no lo es.
+    /// Adds a member if they are not one already.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn add_member(
         &self,
         group_id: GroupId,
         user_id: UserId,
     ) -> Result<(), GroupStoreError>;
 
-    /// Quita un miembro. No es un error si no lo era.
+    /// Removes a member. It is not an error if they were not one.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn remove_member(
         &self,
         group_id: GroupId,
         user_id: UserId,
     ) -> Result<(), GroupStoreError>;
 
-    /// Grupos cuya pertenencia de este usuario gestiona el `IdP`.
+    /// Groups whose membership for this user is managed by the `IdP`.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn sso_memberships(&self, user_id: UserId) -> Result<Vec<GroupId>, GroupStoreError>;
 
-    /// Sustituye el conjunto de grupos cuya pertenencia gestiona el `IdP`.
+    /// Replaces the set of groups whose membership is managed by the `IdP`.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn set_sso_memberships(
         &self,
         user_id: UserId,
         group_ids: &[GroupId],
     ) -> Result<(), GroupStoreError>;
 
-    /// Sustituye los repositorios asignados a un grupo.
+    /// Replaces the repositories assigned to a group.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn set_group_repositories(
         &self,
         group_id: GroupId,
         grants: &[(RepositoryId, Role)],
     ) -> Result<(), GroupStoreError>;
 
-    /// Sustituye los grupos asignados a un repositorio.
+    /// Replaces the groups assigned to a repository.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn set_repository_groups(
         &self,
         repository_id: RepositoryId,
         grants: &[(GroupId, Role)],
     ) -> Result<(), GroupStoreError>;
 
-    /// Acceso de grupos a un repositorio concreto.
+    /// Group access to a specific repository.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn grants_for_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError>;
 
-    /// Repositorios asignados a un grupo.
+    /// Repositories assigned to a group.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn grants_for_group(
         &self,
         group_id: GroupId,
     ) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError>;
 
-    /// Todas las asignaciones grupo–repositorio.
+    /// Every group–repository assignment.
     ///
     /// # Errors
     ///
-    /// [`GroupStoreError::Backend`] si el backend falla.
+    /// [`GroupStoreError::Backend`] if the backend fails.
     async fn all_grants(&self) -> Result<Vec<RepositoryGroupGrant>, GroupStoreError>;
 }

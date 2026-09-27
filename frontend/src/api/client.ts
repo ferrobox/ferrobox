@@ -60,16 +60,16 @@ import type { WebhookDeliveryResponse } from "@/api/generated/WebhookDeliveryRes
 import type { WebhookResponse } from "@/api/generated/WebhookResponse";
 
 /**
- * Todas las peticiones se dirigen a `/api`, que el servidor de
- * desarrollo de Vite reenvía a `http://127.0.0.1:3000` (ver
- * `vite.config.ts`), evitando problemas de CORS sin necesidad de
- * codificar ninguna URL absoluta en el cliente.
+ * All requests go to `/api`, which the Vite development server
+ * proxies to `http://127.0.0.1:3000` (see `vite.config.ts`),
+ * avoiding CORS issues without encoding any absolute URL in the
+ * client.
  */
 const API_BASE_URL = "/api";
 
 const TOKEN_STORAGE_KEY = "ferrobox.auth.token";
 
-/** Error tipado lanzado por el cliente HTTP ante cualquier respuesta no exitosa. */
+/** Typed error thrown by the HTTP client on any unsuccessful response. */
 export class ApiError extends Error {
   readonly status: number;
 
@@ -99,7 +99,7 @@ async function extractErrorMessage(response: Response): Promise<string> {
       return body.error;
     }
   } catch {
-    // El cuerpo no era JSON (o estaba vacío) -- se usa el mensaje genérico.
+    // The body was not JSON (or was empty) -- the generic message is used.
   }
   return `${response.status} ${response.statusText}`;
 }
@@ -544,7 +544,7 @@ export async function publishArtifact(
   return (await response.json()) as PublishResponse;
 }
 
-/** Descarga un artefacto con autenticación y dispara el guardado local. */
+/** Downloads an artifact with authentication and triggers a local save. */
 export async function downloadArtifact(artifactId: string, filename?: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}`, {
     headers: authHeaders(),
@@ -566,11 +566,11 @@ export async function downloadArtifact(artifactId: string, filename?: string): P
 }
 
 /**
- * Respuesta de `GET /cargo/{repository_id}/config.json`. No se genera
- * con `ts-rs` porque es un detalle del protocolo de Cargo, no un DTO de
- * la API de gestión que consume este frontend -- pero su forma es
- * estable y pública (la define el propio protocolo de registro de
- * Cargo), así que tipar la respuesta a mano es seguro.
+ * Response of `GET /cargo/{repository_id}/config.json`. It is not
+ * generated with `ts-rs` because it is a Cargo protocol detail, not a
+ * management-API DTO consumed by this frontend -- but its shape is
+ * stable and public (defined by the Cargo registry protocol itself),
+ * so typing the response by hand is safe.
  */
 export interface CargoRegistryConfig {
   dl: string;

@@ -4,137 +4,136 @@ use ferrobox_domain::oidc::OidcIdentity;
 use ferrobox_domain::user::{Email, Role, User, Username};
 use thiserror::Error;
 
-/// Motivos por los que una operación de persistencia de usuarios puede
-/// fallar.
+/// Reasons a user persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum UserStoreError {
-    /// Ya existe un usuario con ese nombre.
+    /// A user with that name already exists.
     #[error("a user named '{0}' already exists")]
     DuplicateUsername(Username),
 
-    /// Ya existe un usuario con ese correo.
+    /// A user with that email already exists.
     #[error("a user with email '{0}' already exists")]
     DuplicateEmail(Email),
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la entidad [`User`] y de sus credenciales.
+/// Persistence port for the [`User`] entity and its credentials.
 ///
-/// El hash de la contraseña viaja junto al usuario en las operaciones
-/// de escritura / lectura de autenticación, pero no forma parte de la
-/// entidad de dominio: es un detalle de credenciales.
+/// The password hash travels with the user in authentication write /
+/// read operations, but it is not part of the domain entity: it is a
+/// credentials detail.
 #[async_trait]
 pub trait UserStore: Send + Sync {
-    /// Guarda un usuario junto con el hash de su contraseña.
+    /// Saves a user together with their password hash.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::DuplicateUsername`] o
-    /// [`UserStoreError::DuplicateEmail`] si ya existe otro usuario con
-    /// el mismo nombre o correo, o [`UserStoreError::Backend`] si el
-    /// backend subyacente falla.
+    /// Returns [`UserStoreError::DuplicateUsername`] or
+    /// [`UserStoreError::DuplicateEmail`] if another user with the same
+    /// name or email already exists, or [`UserStoreError::Backend`] if
+    /// the underlying backend fails.
     async fn save_with_password_hash(
         &self,
         user: &User,
         password_hash: &str,
     ) -> Result<(), UserStoreError>;
 
-    /// Busca un usuario por su identificador.
+    /// Looks up a user by identifier.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_id(&self, id: UserId) -> Result<Option<User>, UserStoreError>;
 
-    /// Busca un usuario por su nombre, junto con el hash de su
-    /// contraseña. Devuelve `None` si no existe.
+    /// Looks up a user by name, together with their password hash.
+    /// Returns `None` if they do not exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_username_with_password_hash(
         &self,
         username: &Username,
     ) -> Result<Option<(User, String)>, UserStoreError>;
 
-    /// Busca un usuario por correo. Devuelve `None` si no existe o el
-    /// correo está vacío.
+    /// Looks up a user by email. Returns `None` if they do not exist or
+    /// the email is empty.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_email(&self, email: &Email) -> Result<Option<User>, UserStoreError>;
 
-    /// Busca el usuario vinculado a una identidad `OIDC`.
+    /// Looks up the user linked to an `OIDC` identity.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_oidc(
         &self,
         identity: &OidcIdentity,
     ) -> Result<Option<User>, UserStoreError>;
 
-    /// Busca un usuario por identificador, junto con el hash de su
-    /// contraseña. Devuelve `None` si no existe.
+    /// Looks up a user by identifier, together with their password hash.
+    /// Returns `None` if they do not exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_id_with_password_hash(
         &self,
         id: UserId,
     ) -> Result<Option<(User, String)>, UserStoreError>;
 
-    /// Lista todos los usuarios, ordenados por nombre.
+    /// Lists every user, ordered by name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_all(&self) -> Result<Vec<User>, UserStoreError>;
 
-    /// Elimina un usuario. No es un error eliminar un identificador
-    /// que no existe; en ese caso devuelve `false`.
+    /// Deletes a user. Deleting a missing identifier is not an error;
+    /// in that case it returns `false`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn delete(&self, id: UserId) -> Result<bool, UserStoreError>;
 
-    /// Sustituye el rol de un usuario existente. Devuelve `false` si el
-    /// identificador no existe.
+    /// Replaces the role of an existing user. Returns `false` if the
+    /// identifier does not exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn update_role(&self, id: UserId, role: Role) -> Result<bool, UserStoreError>;
 
-    /// Cuenta cuántos usuarios existen. Se usa al arrancar para decidir
-    /// si hay que crear el administrador inicial.
+    /// Counts how many users exist. Used at startup to decide whether
+    /// the initial administrator must be created.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn count(&self) -> Result<u64, UserStoreError>;
 
-    /// Cuenta cuántos usuarios tienen rol de administrador.
+    /// Counts how many users have the administrator role.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UserStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`UserStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn count_admins(&self) -> Result<u64, UserStoreError>;
 }
 

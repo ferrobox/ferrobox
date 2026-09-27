@@ -1,45 +1,45 @@
-//! Cuota de almacenamiento de un repositorio.
+//! Storage quota for a repository.
 
 use thiserror::Error;
 
-/// Máximo aceptado al guardar una cuota (10 TiB).
+/// Maximum accepted when saving a quota (10 TiB).
 const MAX_LIMIT_BYTES: u64 = 10 * 1024 * 1024 * 1024 * 1024;
 
-/// Tope de bytes que un repositorio puede ocupar en disco.
+/// Byte cap that a repository may occupy on disk.
 ///
-/// `None` significa sin límite. La cuota cuenta **todos** los binarios
-/// del repositorio, también los que ya no están en el catálogo hasta
-/// que corre la recolección de basura.
+/// `None` means no limit. The quota counts **all** binaries
+/// in the repository, including those no longer in the catalog until
+/// garbage collection runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StorageQuota {
     limit_bytes: Option<u64>,
 }
 
-/// Motivos por los que una cuota no es válida.
+/// Reasons why a quota is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum StorageQuotaError {
-    /// El tope está fuera del rango permitido.
+    /// The cap is outside the allowed range.
     #[error("quota limit must be between 1 and {max} bytes, got {actual}")]
     LimitOutOfRange {
-        /// Máximo permitido.
+        /// Maximum allowed.
         max: u64,
-        /// Valor recibido.
+        /// Value received.
         actual: u64,
     },
 }
 
 impl StorageQuota {
-    /// Sin tope: cualquier `publish` cabe.
+    /// No cap: any `publish` fits.
     #[must_use]
     pub fn unlimited() -> Self {
         Self { limit_bytes: None }
     }
 
-    /// Construye una cuota. `None` = ilimitada.
+    /// Builds a quota. `None` = unlimited.
     ///
     /// # Errors
     ///
-    /// [`StorageQuotaError::LimitOutOfRange`] si el tope es 0 o mayor que 10 TiB.
+    /// [`StorageQuotaError::LimitOutOfRange`] if the cap is 0 or greater than 10 TiB.
     pub fn new(limit_bytes: Option<u64>) -> Result<Self, StorageQuotaError> {
         if let Some(actual) = limit_bytes
             && !(1..=MAX_LIMIT_BYTES).contains(&actual)
@@ -52,13 +52,13 @@ impl StorageQuota {
         Ok(Self { limit_bytes })
     }
 
-    /// Tope en bytes, o `None` si no hay límite.
+    /// Cap in bytes, or `None` if there is no limit.
     #[must_use]
     pub fn limit_bytes(&self) -> Option<u64> {
         self.limit_bytes
     }
 
-    /// `true` si `used + additional` cabe (o no hay tope).
+    /// `true` if `used + additional` fits (or there is no cap).
     #[must_use]
     pub fn allows(&self, used_bytes: u64, additional_bytes: u64) -> bool {
         let Some(limit) = self.limit_bytes else {

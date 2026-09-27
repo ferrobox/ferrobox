@@ -3,68 +3,68 @@ use ferrobox_domain::ids::{RepositoryId, WebhookId};
 use ferrobox_domain::webhook::{Webhook, WebhookDelivery};
 use thiserror::Error;
 
-/// Motivos por los que una operación de persistencia de avisos puede
-/// fallar.
+/// Reasons a webhook persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum WebhookStoreError {
-    /// No existe la tabla: falta ejecutar la migración SQL.
+    /// The table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table webhooks is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de avisos HTTP y de sus envíos.
+/// Persistence port for HTTP webhooks and their deliveries.
 #[async_trait]
 pub trait WebhookStore: Send + Sync {
-    /// Inserta o actualiza un aviso.
+    /// Inserts or updates a webhook.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn save(&self, webhook: &Webhook) -> Result<(), WebhookStoreError>;
 
-    /// Busca un aviso por identificador.
+    /// Looks up a webhook by identifier.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn find_by_id(&self, id: WebhookId) -> Result<Option<Webhook>, WebhookStoreError>;
 
-    /// Lista los avisos de un repositorio, más recientes primero.
+    /// Lists the webhooks of a repository, newest first.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<Vec<Webhook>, WebhookStoreError>;
 
-    /// Elimina un aviso y sus envíos. Devuelve `false` si no existía.
+    /// Deletes a webhook and its deliveries. Returns `false` if it did not
+    /// exist.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn delete(&self, id: WebhookId) -> Result<bool, WebhookStoreError>;
 
-    /// Registra un envío y recorta el historial del aviso a 20 filas.
+    /// Records a delivery and trims the webhook history to 20 rows.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn record_delivery(&self, delivery: &WebhookDelivery) -> Result<(), WebhookStoreError>;
 
-    /// Últimos envíos de un aviso, más recientes primero.
+    /// Latest deliveries of a webhook, newest first.
     ///
     /// # Errors
     ///
-    /// [`WebhookStoreError::Backend`] o [`WebhookStoreError::MissingSchema`].
+    /// [`WebhookStoreError::Backend`] or [`WebhookStoreError::MissingSchema`].
     async fn deliveries(
         &self,
         webhook_id: WebhookId,

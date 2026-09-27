@@ -4,40 +4,40 @@ use thiserror::Error;
 
 const MAX_COMPONENT_LENGTH: usize = 214;
 
-/// Los ecosistemas de paquetes que `FerroBox` puede indexar.
+/// The package ecosystems that `FerroBox` can index.
 ///
-/// A diferencia de `RepositoryKind`, ninguna variante necesita datos
-/// adicionales -- el ecosistema en sí es solo una etiqueta que, a partir
-/// de la Fase 7, determinará qué implementación concreta del patrón
-/// Strategy gestiona la publicación, indexación y descarga de este tipo
-/// de paquete.
+/// Unlike `RepositoryKind`, no variant needs additional data
+/// -- the ecosystem itself is only a label that, from
+/// Phase 7 onward, will determine which concrete Strategy-pattern
+/// implementation manages publication, indexing, and download of this
+/// kind of package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackageEcosystem {
-    /// Artefactos binarios sin ningún formato de paquete específico.
+    /// Binary artifacts with no specific package format.
     Generic,
-    /// Crates de Rust (registro compatible con el protocolo de índice
-    /// disperso de `cargo`).
+    /// Rust crates (registry compatible with the sparse index
+    /// protocol of `cargo`).
     Cargo,
-    /// Paquetes de Node.js.
+    /// Node.js packages.
     Npm,
-    /// Paquetes de Python (Python Package Index).
+    /// Python packages (Python Package Index).
     PyPi,
-    /// Artefactos conformes a la especificación OCI.
+    /// Artifacts conforming to the OCI specification.
     Oci,
-    /// Helm Charts, empaquetados como artefactos OCI.
+    /// Helm Charts, packaged as OCI artifacts.
     Helm,
-    /// Paquetes C/C++ del gestor Conan (API v2 con revisiones).
+    /// C/C++ packages from the Conan manager (v2 API with revisions).
     Conan,
-    /// Artefactos Maven (`groupId:artifactId`, layout HTTP clásico).
+    /// Maven artifacts (`groupId:artifactId`, classic HTTP layout).
     Maven,
-    /// Paquetes `NuGet` (API V3: `dotnet nuget push` / `dotnet restore`).
+    /// `NuGet` packages (V3 API: `dotnet nuget push` / `dotnet restore`).
     Nuget,
-    /// Módulos Go (protocolo `GOPROXY`: `go get` / `go mod download`).
+    /// Go modules (`GOPROXY` protocol: `go get` / `go mod download`).
     Go,
 }
 
 impl PackageEcosystem {
-    /// Descripción breve en una palabra, útil para registros y depuración.
+    /// Brief one-word description, useful for logs and debugging.
     #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
@@ -55,27 +55,27 @@ impl PackageEcosystem {
     }
 }
 
-/// Motivos por los que un nombre o una versión de paquete no son válidos.
+/// Reasons why a package name or version is not valid.
 ///
-/// Solo cubre las reglas comunes a *todos* los ecosistemas. Las reglas
-/// propias de cada uno (por ejemplo, los paquetes con ámbito de npm)
-/// viven en la estrategia de empaquetado correspondiente, no aquí.
+/// Only covers the rules common to *all* ecosystems. Rules
+/// specific to each one (for example, scoped npm packages)
+/// live in the corresponding packaging strategy, not here.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PackageComponentError {
-    /// El valor no puede estar vacío.
+    /// The value cannot be empty.
     #[error("value cannot be empty")]
     Empty,
 
-    /// El valor supera la longitud máxima permitida.
+    /// The value exceeds the maximum allowed length.
     #[error("value cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 
-    /// El valor contiene un espacio en blanco o un carácter de control.
+    /// The value contains a whitespace or control character.
     #[error("value contains a whitespace or control character: {0:?}")]
     InvalidCharacter(char),
 }
@@ -99,26 +99,26 @@ fn validate_component(value: &str) -> Result<(), PackageComponentError> {
     Ok(())
 }
 
-/// Nombre validado de un paquete, sin reglas específicas de ningún
-/// ecosistema concreto.
+/// Validated package name, without rules specific to any
+/// concrete ecosystem.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageName(String);
 
 impl PackageName {
-    /// Valida y construye un nombre de paquete.
+    /// Validates and builds a package name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageComponentError`] si `name` está vacío, supera
-    /// `214` caracteres, o contiene un espacio en blanco o un carácter
-    /// de control.
+    /// Returns [`PackageComponentError`] if `name` is empty, exceeds
+    /// `214` characters, or contains a whitespace or control
+    /// character.
     pub fn parse(name: impl Into<String>) -> Result<Self, PackageComponentError> {
         let name = name.into();
         validate_component(&name)?;
         Ok(Self(name))
     }
 
-    /// Devuelve el nombre como cadena de texto.
+    /// Returns the name as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -131,27 +131,27 @@ impl fmt::Display for PackageName {
     }
 }
 
-/// Versión validada de un paquete, sin ninguna regla de versionado
-/// específica (Semantic Versioning, PEP 440, etc.) todavía -- esas
-/// reglas se aplicarán en la estrategia de empaquetado correspondiente.
+/// Validated package version, without any versioning
+/// rule (Semantic Versioning, PEP 440, etc.) yet -- those
+/// rules will be applied in the corresponding packaging strategy.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageVersion(String);
 
 impl PackageVersion {
-    /// Valida y construye una versión de paquete.
+    /// Validates and builds a package version.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PackageComponentError`] si `version` está vacía, supera
-    /// `214` caracteres, o contiene un espacio en blanco o un carácter
-    /// de control.
+    /// Returns [`PackageComponentError`] if `version` is empty, exceeds
+    /// `214` characters, or contains a whitespace or control
+    /// character.
     pub fn parse(version: impl Into<String>) -> Result<Self, PackageComponentError> {
         let version = version.into();
         validate_component(&version)?;
         Ok(Self(version))
     }
 
-    /// Devuelve la versión como cadena de texto.
+    /// Returns the version as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -164,14 +164,14 @@ impl fmt::Display for PackageVersion {
     }
 }
 
-/// Identifica de forma unívoca una versión concreta de un paquete dentro
-/// de un ecosistema: por ejemplo, `serde` en su versión `1.0.210`, dentro
-/// del ecosistema `Cargo`.
+/// Uniquely identifies a concrete version of a package within
+/// an ecosystem: for example, `serde` at version `1.0.210`, within
+/// the `Cargo` ecosystem.
 ///
-/// Es un Objeto de Valor puro: dos coordenadas con el mismo ecosistema,
-/// nombre y versión son intercambiables, así que `PartialEq` y `Hash` se
-/// derivan directamente -- a diferencia de `Artifact` y `Repository`, no
-/// hay ninguna noción de identidad propia más allá del valor.
+/// It is a pure Value Object: two coordinates with the same ecosystem,
+/// name, and version are interchangeable, so `PartialEq` and `Hash` are
+/// derived directly -- unlike `Artifact` and `Repository`, there
+/// is no notion of identity beyond the value itself.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageCoordinate {
     ecosystem: PackageEcosystem,
@@ -180,14 +180,14 @@ pub struct PackageCoordinate {
 }
 
 impl PackageCoordinate {
-    /// Combina un ecosistema, un nombre y una versión ya validados en
-    /// una coordenada de paquete.
+    /// Combines an already validated ecosystem, name, and version into
+    /// a package coordinate.
     ///
-    /// No devuelve `Result`: a diferencia de `Repository::new`, aquí no
-    /// emerge ningún invariante nuevo al combinar las partes -- cada una
-    /// ya fue validada en su propia construcción, y cualquier
-    /// combinación de un ecosistema, un nombre válido y una versión
-    /// válida es, en sí misma, una coordenada válida.
+    /// Does not return `Result`: unlike `Repository::new`, no
+    /// new invariant emerges when combining the parts -- each one
+    /// was already validated at its own construction, and any
+    /// combination of an ecosystem, a valid name, and a valid
+    /// version is, in itself, a valid coordinate.
     #[must_use]
     pub fn new(ecosystem: PackageEcosystem, name: PackageName, version: PackageVersion) -> Self {
         Self {
@@ -197,19 +197,19 @@ impl PackageCoordinate {
         }
     }
 
-    /// Ecosistema al que pertenece este paquete.
+    /// Ecosystem this package belongs to.
     #[must_use]
     pub fn ecosystem(&self) -> PackageEcosystem {
         self.ecosystem
     }
 
-    /// Nombre del paquete.
+    /// Package name.
     #[must_use]
     pub fn name(&self) -> &PackageName {
         &self.name
     }
 
-    /// Versión del paquete.
+    /// Package version.
     #[must_use]
     pub fn version(&self) -> &PackageVersion {
         &self.version

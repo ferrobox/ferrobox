@@ -2,6 +2,6 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Cuerpo de la petición para cambiar el rol de un usuario.
+ * Request body to change a user's role.
  */
 export type UpdateUserRoleRequest = { role: RoleDto, };

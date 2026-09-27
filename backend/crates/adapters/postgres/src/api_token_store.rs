@@ -8,14 +8,13 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`ApiTokenStore`] contra `PostgreSQL`.
+/// [`ApiTokenStore`] adapter against `PostgreSQL`.
 pub struct PostgresApiTokenStore {
     pool: PgPool,
 }
 
 impl PostgresApiTokenStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones ya
-    /// configurado.
+    /// Builds the adapter from an already configured connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

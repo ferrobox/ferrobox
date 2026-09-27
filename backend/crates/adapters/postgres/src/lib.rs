@@ -1,46 +1,45 @@
-//! Adaptadores de persistencia de `FerroBox` contra `PostgreSQL`, usando
-//! `sqlx`.
+//! FerroBox persistence adapters against `PostgreSQL`, using `sqlx`.
 
-/// Adaptador de `RepositoryStore`.
+/// Adapter for `RepositoryStore`.
 pub mod repository_store;
 
-/// Adaptador de `ArtifactStore`.
+/// Adapter for `ArtifactStore`.
 pub mod artifact_store;
 
-/// Adaptador de `PackageIndexStore`.
+/// Adapter for `PackageIndexStore`.
 pub mod package_index_store;
 
-/// Adaptador de `UserStore`.
+/// Adapter for `UserStore`.
 pub mod user_store;
 
-/// Adaptador de `GroupStore`.
+/// Adapter for `GroupStore`.
 pub mod group_store;
 
-/// Adaptador de `ApiTokenStore`.
+/// Adapter for `ApiTokenStore`.
 pub mod api_token_store;
 
-/// Adaptador de `AssayStore`.
+/// Adapter for `AssayStore`.
 pub mod assay_store;
 
-/// Adaptador de `RetentionStore`.
+/// Adapter for `RetentionStore`.
 pub mod retention_store;
 
-/// Adaptador de `ReplicaStore`.
+/// Adapter for `ReplicaStore`.
 pub mod replica_store;
 
-/// Adaptador de `AdmissionStore`.
+/// Adapter for `AdmissionStore`.
 pub mod admission_store;
 
-/// Adaptador de `AuditStore`.
+/// Adapter for `AuditStore`.
 pub mod audit_store;
 
-/// Adaptador de `QuotaStore`.
+/// Adapter for `QuotaStore`.
 pub mod quota_store;
 
 /// Adapter for `WormStore`.
 pub mod worm_store;
 
-/// Adaptador de `WebhookStore`.
+/// Adapter for `WebhookStore`.
 pub mod webhook_store;
 
 mod ecosystem_column;

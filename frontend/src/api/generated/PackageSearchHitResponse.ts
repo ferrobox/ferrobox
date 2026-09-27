@@ -3,34 +3,34 @@ import type { PackageEcosystemDto } from "./PackageEcosystemDto";
 import type { RepositoryKindDto } from "./RepositoryKindDto";
 
 /**
- * Una coincidencia de la búsqueda global de paquetes.
+ * A match from the global package search.
  */
 export type PackageSearchHitResponse = { 
 /**
- * Repositorio donde está indexado el paquete.
+ * Repository where the package is indexed.
  */
 repository_id: string, 
 /**
- * Nombre del repositorio.
+ * Repository name.
  */
 repository_name: string, 
 /**
- * Forge o Mirror.
+ * Forge or Mirror.
  */
 kind: RepositoryKindDto, 
 /**
- * Ecosistema del paquete.
+ * Package ecosystem.
  */
 ecosystem: PackageEcosystemDto, 
 /**
- * Nombre del paquete.
+ * Package name.
  */
 name: string, 
 /**
- * Versión mostrada.
+ * Displayed version.
  */
 version: string, 
 /**
- * `true` si esa versión está yankada.
+ * `true` if that version is yanked.
  */
 yanked: boolean, };

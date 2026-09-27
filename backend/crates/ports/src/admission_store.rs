@@ -3,49 +3,48 @@ use ferrobox_domain::admission::{AdmissionEvent, AdmissionPolicy};
 use ferrobox_domain::ids::RepositoryId;
 use thiserror::Error;
 
-/// Política persistida junto con las claves Cosign del repositorio.
+/// Persisted policy together with the repository Cosign keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmissionRecord {
-    /// Regla de admisión.
+    /// Admission rule.
     pub policy: AdmissionPolicy,
-    /// PEM de claves públicas Cosign. Vacío: solo se detecta la firma.
+    /// PEM of Cosign public keys. Empty: only the signature is detected.
     pub public_keys_pem: String,
 }
 
-/// Motivos por los que una operación sobre la política de admisión puede
-/// fallar.
+/// Reasons an admission-policy operation can fail.
 #[derive(Debug, Error)]
 pub enum AdmissionStoreError {
-    /// No existe la tabla de políticas: falta ejecutar la migración SQL.
+    /// The policy table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_admission is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la política de admisión de un repositorio.
+/// Persistence port for a repository admission policy.
 #[async_trait]
 pub trait AdmissionStore: Send + Sync {
-    /// Devuelve la política del repositorio, o la inactiva por defecto.
+    /// Returns the repository policy, or the inactive default.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    /// Returns [`AdmissionStoreError::Backend`] if the backend fails.
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<AdmissionRecord, AdmissionStoreError>;
 
-    /// Inserta o reemplaza la política del repositorio.
+    /// Inserts or replaces the repository policy.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    /// Returns [`AdmissionStoreError::Backend`] if the backend fails.
     async fn save(
         &self,
         repository_id: RepositoryId,
@@ -53,19 +52,19 @@ pub trait AdmissionStore: Send + Sync {
         public_keys_pem: &str,
     ) -> Result<(), AdmissionStoreError>;
 
-    /// Registra un aviso o una denegación y recorta el historial a 50
-    /// filas por repositorio.
+    /// Records a warning or a denial and trims history to 50 rows per
+    /// repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    /// Returns [`AdmissionStoreError::Backend`] if the backend fails.
     async fn record_event(&self, event: &AdmissionEvent) -> Result<(), AdmissionStoreError>;
 
-    /// Últimos eventos del repositorio, más recientes primero.
+    /// Latest events for the repository, newest first.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AdmissionStoreError::Backend`] si el backend falla.
+    /// Returns [`AdmissionStoreError::Backend`] if the backend fails.
     async fn list_events(
         &self,
         repository_id: RepositoryId,

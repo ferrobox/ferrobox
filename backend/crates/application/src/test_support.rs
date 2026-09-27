@@ -1,4 +1,4 @@
-//! Dobles en memoria de los puertos, para tests de aplicación y HTTP.
+//! In-memory doubles of the ports, for application and HTTP tests.
 #![allow(missing_docs, clippy::missing_panics_doc, clippy::must_use_candidate)]
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -184,10 +184,10 @@ impl StoragePort for InMemoryStorage {
     }
 }
 
-/// Doble en memoria de [`PackageIndexStore`]. Usa un `Vec`, no un
-/// `HashMap`, deliberadamente: preserva el orden de publicación, tal y
-/// como exige el contrato del puerto y tal y como lo garantiza el
-/// adaptador real (`ORDER BY created_at`).
+/// In-memory double of [`PackageIndexStore`]. Uses a `Vec`, not a
+/// `HashMap`, on purpose: it preserves publication order, as the port
+/// contract requires and as the real adapter guarantees (`ORDER BY
+/// created_at`).
 #[derive(Default)]
 pub struct InMemoryPackageIndexStore {
     entries: Mutex<Vec<IndexRow>>,

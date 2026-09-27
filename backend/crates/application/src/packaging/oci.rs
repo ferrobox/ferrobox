@@ -1,13 +1,13 @@
-//! Estrategia de empaquetado para el ecosistema OCI: implementa el
-//! subconjunto del Distribution Spec v2 que `docker push` y
-//! `docker pull` necesitan contra un repositorio `FerroBox`.
+//! Packaging strategy for the OCI ecosystem: implements the
+//! subset of Distribution Spec v2 that `docker push` and
+//! `docker pull` need against a `FerroBox` repository.
 //!
-//! Referencia: <https://github.com/opencontainers/distribution-spec>.
+//! Reference: <https://github.com/opencontainers/distribution-spec>.
 //!
-//! Cubre **Forge** (blobs, manifiestos, etiquetas y yank), **Mirror**
-//! (caché *pull-through* de un registro OCI como Docker Hub) y lecturas
-//! en **Alloy**. La misma estrategia sirve al ecosistema **Helm**: los
-//! charts se publican con `helm push` como artefactos OCI.
+//! Covers **Forge** (blobs, manifests, tags, and yank), **Mirror**
+//! (*pull-through* cache of an OCI registry such as Docker Hub), and reads
+//! on **Alloy**. The same strategy serves the **Helm** ecosystem: charts
+//! are published with `helm push` as OCI artifacts.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -41,18 +41,18 @@ use crate::content_hash::sha256_checksum;
 use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
-/// Nombre reservado en el índice para los blobs (capas y configs).
+/// Reserved index name for blobs (layers and configs).
 const BLOB_PACKAGE: &str = "_blob";
 
-/// Media type por defecto de un manifiesto OCI.
+/// Default media type of an OCI manifest.
 pub const DEFAULT_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
 
-/// Media type de un índice OCI (listas multi-arch y Referrers API).
+/// Media type of an OCI index (multi-arch lists and Referrers API).
 pub const INDEX_MEDIA_TYPE: &str = "application/vnd.oci.image.index.v1+json";
 
 const MANIFEST_ACCEPT: &str = "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.artifact.manifest.v1+json";
 
-/// Estrategia de empaquetado para OCI y Helm (charts como artefactos OCI).
+/// Packaging strategy for OCI and Helm (charts as OCI artifacts).
 pub struct OciPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -66,7 +66,7 @@ pub struct OciPackagingStrategy {
 }
 
 impl OciPackagingStrategy {
-    /// Construye la estrategia OCI a partir de sus puertos.
+    /// Builds the OCI strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -85,7 +85,7 @@ impl OciPackagingStrategy {
         )
     }
 
-    /// Construye la estrategia para OCI o Helm.
+    /// Builds the strategy for OCI or Helm.
     #[must_use]
     pub fn for_ecosystem(
         ecosystem: PackageEcosystem,
@@ -108,21 +108,21 @@ impl OciPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un manifiesto.
+    /// Connects automatic assay when publishing or caching a manifest.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
         self
     }
 
-    /// Aplica la política de admisión al leer un manifiesto.
+    /// Applies the admission policy when reading a manifest.
     #[must_use]
     pub fn with_admission(mut self, admission: AdmissionService) -> Self {
         self.admission = Some(admission);
@@ -1500,13 +1500,13 @@ impl OciPackagingStrategy {
     }
 }
 
-/// Normaliza un nombre de imagen OCI: minúsculas, componentes
-/// `[a-z0-9]+([._-][a-z0-9]+)*` separados por `/`.
+/// Normalizes an OCI image name: lowercase, components
+/// `[a-z0-9]+([._-][a-z0-9]+)*` separated by `/`.
 ///
 /// # Errors
 ///
-/// Devuelve [`PackagingError::InvalidPayload`] si el nombre está vacío,
-/// es el reservado `_blob`, o un componente no es válido.
+/// Returns [`PackagingError::InvalidPayload`] if the name is empty,
+/// is the reserved `_blob`, or a component is invalid.
 pub fn normalize_oci_name(name: &str) -> Result<String, PackagingError> {
     let name = name.trim().trim_matches('/').to_ascii_lowercase();
     if name.is_empty() || name == BLOB_PACKAGE {
@@ -1522,11 +1522,11 @@ pub fn normalize_oci_name(name: &str) -> Result<String, PackagingError> {
     Ok(name)
 }
 
-/// Valida un digest `sha256:` de 64 hexadecimales.
+/// Validates a `sha256:` digest of 64 hex digits.
 ///
 /// # Errors
 ///
-/// Devuelve [`PackagingError::InvalidPayload`] si el formato no coincide.
+/// Returns [`PackagingError::InvalidPayload`] if the format does not match.
 pub fn parse_oci_digest(value: &str) -> Result<String, PackagingError> {
     let lower = value.trim().to_ascii_lowercase();
     let Some(hex) = lower.strip_prefix("sha256:") else {

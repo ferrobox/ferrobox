@@ -1,12 +1,12 @@
-//! Rutas HTTP que implementan el subconjunto del protocolo de registro
-//! de npm que `npm publish` y `npm install` necesitan.
+//! HTTP routes that implement the subset of the npm registry protocol
+//! that `npm publish` and `npm install` need.
 //!
-//! Referencia:
+//! Reference:
 //! <https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md>.
 //!
-//! Las lecturas (packument, tarball, búsqueda y `/-/ping`) son públicas.
-//! Las escrituras (`PUT` de publicación y yank) exigen `Authorization`
-//! (`Bearer` o `Token`) y rol de escritura.
+//! Reads (packument, tarball, search, and `/-/ping`) are public.
+//! Writes (publish `PUT` and yank) require `Authorization`
+//! (`Bearer` or `Token`) and a write role.
 
 use std::sync::Arc;
 
@@ -30,12 +30,12 @@ use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_public_repo_read, require_repo_write};
 use crate::error::ApiError;
 
-/// Rutas de solo lectura del protocolo de npm.
+/// Read-only npm protocol routes.
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new().route("/npm/{repository_id}/{*path}", get(npm_get))
 }
 
-/// Rutas de escritura del protocolo de npm.
+/// Write routes for the npm protocol.
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new().route(
         "/npm/{repository_id}/{*path}",

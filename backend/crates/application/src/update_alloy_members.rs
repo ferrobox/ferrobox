@@ -7,35 +7,34 @@ use thiserror::Error;
 
 use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 
-/// Motivos por los que actualizar los miembros de un `Alloy` puede
-/// fallar.
+/// Reasons updating the members of an `Alloy` can fail.
 #[derive(Debug, Error)]
 pub enum UpdateAlloyMembersError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     NotFound(RepositoryId),
 
-    /// Solo un `Alloy` tiene miembros que actualizar.
+    /// Only an `Alloy` has members that can be updated.
     #[error("only Alloy repositories have members that can be updated")]
     NotAnAlloy,
 
-    /// Un `Alloy` necesita al menos un repositorio miembro.
+    /// An `Alloy` needs at least one member repository.
     #[error("an Alloy repository must aggregate at least one member repository")]
     EmptyAlloy,
 
-    /// Uno de los miembros indicados no existe.
+    /// One of the given members does not exist.
     #[error("alloy member repository does not exist")]
     MemberNotFound,
 
-    /// Un miembro no comparte el ecosistema del `Alloy`.
+    /// A member does not share the `Alloy` ecosystem.
     #[error("alloy members must use the same package ecosystem")]
     MemberEcosystemMismatch,
 
-    /// Un `Alloy` no puede agregar a otro `Alloy` (evita ciclos).
+    /// An `Alloy` cannot aggregate another `Alloy` (avoids cycles).
     #[error("alloy members must be Forge or Mirror repositories")]
     NestedAlloy,
 
-    /// Fallo al persistir el repositorio.
+    /// Failed to persist the repository.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 }
@@ -52,31 +51,30 @@ impl From<ResolveAlloyMembersError> for UpdateAlloyMembersError {
     }
 }
 
-/// Caso de uso: sustituir los miembros de un repositorio `Alloy`.
+/// Use case: replace the members of an `Alloy` repository.
 pub struct UpdateAlloyMembersUseCase {
     repository_store: Arc<dyn RepositoryStore>,
 }
 
 impl UpdateAlloyMembersUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(repository_store: Arc<dyn RepositoryStore>) -> Self {
         Self { repository_store }
     }
 
-    /// Reemplaza los miembros del `Alloy` indicado, en el orden de
-    /// resolución dado.
+    /// Replaces the members of the given `Alloy`, in the given
+    /// resolution order.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UpdateAlloyMembersError`] si el repositorio no existe,
-    /// no es un `Alloy`, o los miembros no son válidos.
+    /// Returns [`UpdateAlloyMembersError`] if the repository does not
+    /// exist, is not an `Alloy`, or the members are invalid.
     ///
     /// # Panics
     ///
-    /// En la práctica, nunca entra en pánico: los miembros ya están
-    /// validados como un `Alloy` no vacío antes de llamar a
-    /// [`Repository::with_kind`].
+    /// In practice this never panics: the members are already validated
+    /// as a non-empty `Alloy` before calling [`Repository::with_kind`].
     pub async fn execute(
         &self,
         repository_id: RepositoryId,

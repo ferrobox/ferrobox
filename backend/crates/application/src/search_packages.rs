@@ -1,4 +1,4 @@
-//! Búsqueda de paquetes en el catálogo de todos los repositorios.
+//! Search packages in the catalog of every repository.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,38 +15,38 @@ const BLOB_PACKAGE: &str = "_blob";
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 100;
 
-/// Una coincidencia: un paquete en un repositorio concreto.
+/// A match: a package in a specific repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageSearchHit {
-    /// Repositorio donde está indexado.
+    /// Repository where it is indexed.
     pub repository_id: RepositoryId,
-    /// Nombre del repositorio.
+    /// Repository name.
     pub repository_name: RepositoryName,
-    /// Forge o Mirror (los `Alloy` no aparecen: no guardan índice propio).
+    /// Forge or Mirror (`Alloy`s do not appear: they keep no index of their own).
     pub repository_kind: RepositoryKind,
-    /// Ecosistema del paquete.
+    /// Package ecosystem.
     pub ecosystem: PackageEcosystem,
-    /// Nombre del paquete.
+    /// Package name.
     pub name: String,
-    /// Versión mostrada (la última no yankada, o la última yankada).
+    /// Displayed version (the latest non-yanked, or the latest yanked).
     pub version: String,
-    /// `true` si esa versión está yankada.
+    /// `true` if that version is yanked.
     pub yanked: bool,
 }
 
-/// Motivos por los que buscar paquetes puede fallar.
+/// Reasons searching packages can fail.
 #[derive(Debug, Error)]
 pub enum SearchPackagesError {
-    /// Fallo al listar repositorios.
+    /// Failed to list repositories.
     #[error(transparent)]
     Repositories(#[from] RepositoryStoreError),
 
-    /// Fallo al leer el índice de paquetes.
+    /// Failed to read the package index.
     #[error(transparent)]
     Index(#[from] PackageIndexStoreError),
 }
 
-/// Caso de uso: buscar paquetes por nombre en toda la instancia.
+/// Use case: search packages by name across the instance.
 #[allow(clippy::struct_field_names)]
 pub struct SearchPackagesUseCase {
     repository_store: Arc<dyn RepositoryStore>,
@@ -60,7 +60,7 @@ struct IndexYanked {
 }
 
 impl SearchPackagesUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -72,14 +72,14 @@ impl SearchPackagesUseCase {
         }
     }
 
-    /// Devuelve hasta `limit` paquetes cuyo nombre contiene `query`.
+    /// Returns up to `limit` packages whose name contains `query`.
     ///
-    /// Vacío o solo espacios → ninguna coincidencia. No consulta *upstreams*:
-    /// un Mirror solo muestra lo que ya tiene en el índice local.
+    /// Empty or whitespace-only → no matches. Does not query *upstreams*:
+    /// a Mirror only shows what it already has in the local index.
     ///
     /// # Errors
     ///
-    /// [`SearchPackagesError`] si falla un puerto.
+    /// [`SearchPackagesError`] if a port fails.
     pub async fn execute(
         &self,
         query: &str,
@@ -152,7 +152,7 @@ fn is_catalog_package(name: &str, version: &str) -> bool {
     name != BLOB_PACKAGE && !version.starts_with("sha256:")
 }
 
-/// Límite por defecto si el cliente no envía uno.
+/// Default limit if the client does not send one.
 #[must_use]
 pub fn default_search_limit() -> usize {
     DEFAULT_LIMIT

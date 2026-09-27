@@ -12,24 +12,24 @@ use thiserror::Error;
 
 use crate::packaging::{PackagingError, PackagingRegistry, PackagingStrategy};
 
-/// Resultado de un prefetch: se indexó el metadato y, si había
-/// versión, se cacheó el binario.
+/// Result of a prefetch: the metadata was indexed and, if a version
+/// was given, the binary was cached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefetchOutcome {
-    /// Nombre pedido.
+    /// Requested name.
     pub name: String,
-    /// Versión, etiqueta o referencia, si se pidió.
+    /// Version, tag, or reference, if requested.
     pub version: Option<String>,
-    /// `true` si se consultó el índice *upstream*.
+    /// `true` if the *upstream* index was queried.
     pub indexed: bool,
-    /// `true` si se cacheó un binario o un manifiesto.
+    /// `true` if a binary or a manifest was cached.
     pub downloaded: bool,
 }
 
-/// Motivos por los que el prefetch puede fallar.
+/// Reasons prefetch can fail.
 #[derive(Debug, Error)]
 pub enum PrefetchError {
-    /// Solo un `Mirror` puede prefetch.
+    /// Only a `Mirror` can prefetch.
     #[error("cannot prefetch into a {0} repository")]
     NotAMirror(&'static str),
 
@@ -41,28 +41,28 @@ pub enum PrefetchError {
     #[error("version is required to prefetch an OCI image or a Conan recipe")]
     MissingVersion,
 
-    /// No hay estrategia registrada.
+    /// No strategy is registered.
     #[error("no packaging strategy for ecosystem '{0}'")]
     MissingStrategy(&'static str),
 
-    /// Fallo de la estrategia (upstream, índice, almacén).
+    /// Strategy failure (upstream, index, store).
     #[error(transparent)]
     Packaging(#[from] PackagingError),
 }
 
-/// Caso de uso: calentar la caché de un `Mirror` reutilizando el
-/// pull-through de cada ecosistema.
+/// Use case: warm a `Mirror` cache by reusing each ecosystem's
+/// pull-through.
 pub struct PrefetchPackageUseCase;
 
 impl PrefetchPackageUseCase {
-    /// Indexa `name` en el *upstream* y, si `version` está, descarga
-    /// esa versión (o el manifiesto OCI).
+    /// Indexes `name` on the *upstream* and, if `version` is set,
+    /// downloads that version (or the OCI manifest).
     ///
     /// # Errors
     ///
-    /// [`PrefetchError`] si el repositorio no es un `Mirror`, el
-    /// ecosistema no soporta prefetch, falta la etiqueta OCI, o falla
-    /// el *upstream*.
+    /// [`PrefetchError`] if the repository is not a `Mirror`, the
+    /// ecosystem does not support prefetch, the OCI tag is missing, or
+    /// the *upstream* fails.
     pub async fn execute(
         packaging: &PackagingRegistry,
         repository: &Repository,

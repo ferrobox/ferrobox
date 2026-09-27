@@ -1,45 +1,45 @@
-//! Política de retención de versiones de un repositorio.
+//! Version retention policy for a repository.
 
 use thiserror::Error;
 
 const MAX_KEEP_LAST: u32 = 10_000;
 const MAX_KEEP_DAYS: u32 = 3_650;
 
-/// Cuántas versiones conservar por paquete.
+/// How many versions to keep per package.
 ///
-/// Una versión se conserva si cumple **cualquiera** de las reglas
-/// definidas: está entre las `keep_last` más recientes, o se publicó
-/// hace `keep_days` días o menos. Sin reglas, se conserva todo.
+/// A version is kept if it matches **any** of the defined
+/// rules: it is among the `keep_last` most recent, or it was published
+/// `keep_days` days ago or less. With no rules, everything is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetentionPolicy {
     keep_last: Option<u32>,
     keep_days: Option<u32>,
 }
 
-/// Motivos por los que una política de retención no es válida.
+/// Reasons why a retention policy is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RetentionPolicyError {
-    /// `keep_last` está fuera del rango permitido.
+    /// `keep_last` is outside the allowed range.
     #[error("keep_last must be between 1 and {max}, got {actual}")]
     KeepLastOutOfRange {
-        /// Máximo permitido.
+        /// Maximum allowed.
         max: u32,
-        /// Valor recibido.
+        /// Value received.
         actual: u32,
     },
 
-    /// `keep_days` está fuera del rango permitido.
+    /// `keep_days` is outside the allowed range.
     #[error("keep_days must be between 1 and {max}, got {actual}")]
     KeepDaysOutOfRange {
-        /// Máximo permitido.
+        /// Maximum allowed.
         max: u32,
-        /// Valor recibido.
+        /// Value received.
         actual: u32,
     },
 }
 
 impl RetentionPolicy {
-    /// Conserva todas las versiones (no borra nada al aplicar).
+    /// Keeps all versions (deletes nothing when applied).
     #[must_use]
     pub fn keep_all() -> Self {
         Self {
@@ -48,11 +48,11 @@ impl RetentionPolicy {
         }
     }
 
-    /// Construye una política a partir de límites opcionales.
+    /// Builds a policy from optional limits.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RetentionPolicyError`] si un límite está fuera de rango.
+    /// Returns [`RetentionPolicyError`] if a limit is out of range.
     pub fn new(
         keep_last: Option<u32>,
         keep_days: Option<u32>,
@@ -79,28 +79,28 @@ impl RetentionPolicy {
         })
     }
 
-    /// Número máximo de versiones recientes a conservar por paquete.
+    /// Maximum number of recent versions to keep per package.
     #[must_use]
     pub fn keep_last(self) -> Option<u32> {
         self.keep_last
     }
 
-    /// Edad máxima en días de las versiones a conservar.
+    /// Maximum age in days of the versions to keep.
     #[must_use]
     pub fn keep_days(self) -> Option<u32> {
         self.keep_days
     }
 
-    /// `true` si no hay ninguna regla y, por tanto, no se borra nada.
+    /// `true` if there is no rule and, therefore, nothing is deleted.
     #[must_use]
     pub fn is_keep_all(self) -> bool {
         self.keep_last.is_none() && self.keep_days.is_none()
     }
 
-    /// Conserva la versión si encaja en alguna regla.
+    /// Keeps the version if it matches any rule.
     ///
-    /// `rank_from_newest` es 0 para la más reciente del paquete.
-    /// `age_days` es la edad desde que se indexó, en días completos.
+    /// `rank_from_newest` is 0 for the most recent of the package.
+    /// `age_days` is the age since it was indexed, in whole days.
     #[must_use]
     pub fn keeps(self, rank_from_newest: u32, age_days: u64) -> bool {
         match (self.keep_last, self.keep_days) {

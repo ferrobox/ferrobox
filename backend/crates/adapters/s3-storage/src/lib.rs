@@ -1,8 +1,8 @@
-//! Adaptador de `StoragePort` contra cualquier backend compatible con la
-//! interfaz de programación de S3 -- Garage en desarrollo local, y
-//! potencialmente AWS S3 real u otros backends compatibles en producción,
-//! sin cambiar una sola línea de este archivo, solo la configuración con
-//! la que se construye el cliente.
+//! `StoragePort` adapter against any backend compatible with the S3
+//! programming interface -- Garage in local development, and potentially
+//! real AWS S3 or other compatible backends in production, without
+//! changing a single line of this file, only the configuration used to
+//! build the client.
 
 use async_trait::async_trait;
 use aws_sdk_s3::Client;
@@ -12,16 +12,16 @@ use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
 
-/// Adaptador de [`StoragePort`] contra un backend compatible con S3.
+/// [`StoragePort`] adapter against an S3-compatible backend.
 pub struct S3StorageAdapter {
     client: Client,
     bucket: String,
 }
 
 impl S3StorageAdapter {
-    /// Construye el adaptador a partir de un cliente S3 ya configurado
-    /// (credenciales, *endpoint* y estilo de direccionamiento) y el
-    /// nombre del bucket a usar.
+    /// Builds the adapter from an already configured S3 client
+    /// (credentials, *endpoint*, and addressing style) and the
+    /// bucket name to use.
     #[must_use]
     pub fn new(client: Client, bucket: impl Into<String>) -> Self {
         Self {
@@ -30,12 +30,12 @@ impl S3StorageAdapter {
         }
     }
 
-    /// Comprueba que el bucket configurado existe y es alcanzable.
+    /// Checks that the configured bucket exists and is reachable.
     ///
     /// # Errors
     ///
-    /// Devuelve [`StorageError::Backend`] si el *endpoint* no responde,
-    /// las credenciales no sirven o el bucket no existe.
+    /// Returns [`StorageError::Backend`] if the *endpoint* does not
+    /// respond, the credentials are unusable, or the bucket does not exist.
     pub async fn ensure_reachable(&self) -> Result<(), StorageError> {
         self.client
             .head_bucket()

@@ -1,133 +1,133 @@
-//! Registro de auditoría: quién hizo qué sobre usuarios, grupos,
-//! paquetes y la configuración de la instancia.
+//! Audit log: who did what to users, groups,
+//! packages, and instance configuration.
 //!
-//! No es un log de aplicación ni telemetría. Cada fila es una escritura
-//! de negocio que un administrador debe poder revisar.
+//! This is not an application log or telemetry. Each row is a business
+//! write that an administrator must be able to review.
 
 use thiserror::Error;
 
 use crate::ids::{AuditEventId, UserId};
 
-/// Acción registrada. Las etiquetas son estables: viajan en la API y
-/// en la tabla SQL.
+/// Recorded action. Labels are stable: they travel in the API and
+/// in the SQL table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditAction {
-    /// Se creó una cuenta.
+    /// An account was created.
     UserCreated,
-    /// Se eliminó una cuenta.
+    /// An account was deleted.
     UserDeleted,
-    /// Se cambió el rol de una cuenta.
+    /// An account's role was changed.
     UserRoleChanged,
-    /// Un administrador restableció la contraseña de otra cuenta.
+    /// An administrator reset another account's password.
     UserPasswordReset,
-    /// El usuario cambió su propia contraseña.
+    /// The user changed their own password.
     UserPasswordChanged,
-    /// Un usuario inició sesión (o se aprovisionó) vía `OIDC`.
+    /// A user signed in (or was provisioned) via `OIDC`.
     UserSsoSignedIn,
-    /// Se emitió un token de API.
+    /// An API token was issued.
     TokenCreated,
-    /// Se revocó un token de API.
+    /// An API token was revoked.
     TokenRevoked,
-    /// Se creó un grupo.
+    /// A group was created.
     GroupCreated,
-    /// Se eliminó un grupo.
+    /// A group was deleted.
     GroupDeleted,
-    /// Se sustituyó la lista de miembros de un grupo.
+    /// A group's member list was replaced.
     GroupMembersChanged,
-    /// Se sustituyeron los repositorios de un grupo.
+    /// A group's repositories were replaced.
     GroupRepositoriesChanged,
-    /// Se creó un repositorio.
+    /// A repository was created.
     RepositoryCreated,
-    /// Se eliminó un repositorio.
+    /// A repository was deleted.
     RepositoryDeleted,
-    /// Se cambiaron los miembros de un `Alloy`.
+    /// An `Alloy`'s members were changed.
     RepositoryMembersChanged,
-    /// Se publicó un artefacto genérico.
+    /// A generic artifact was published.
     ArtifactPublished,
-    /// Se eliminó un artefacto.
+    /// An artifact was deleted.
     ArtifactDeleted,
-    /// Se publicó un paquete (Cargo, npm, `PyPI`, OCI, Conan).
+    /// A package was published (Cargo, npm, `PyPI`, OCI, Conan).
     PackagePublished,
-    /// Se yankeó un paquete.
+    /// A package was yanked.
     PackageYanked,
-    /// Se deshizo un yank.
+    /// A yank was undone.
     PackageUnyanked,
-    /// Se copió una versión de un Forge a otro.
+    /// A version was copied from one Forge to another.
     PackagePromoted,
-    /// Se cacheó un paquete desde el *upstream* de un `Mirror`.
+    /// A package was cached from a `Mirror`'s *upstream*.
     PackagePrefetched,
-    /// Se exportó un repositorio a un archivo portable.
+    /// A repository was exported to a portable archive.
     RepositoryExported,
-    /// Se importó un archivo portable en un repositorio.
+    /// A portable archive was imported into a repository.
     RepositoryImported,
-    /// Se cambió el intervalo de refresco de un `Mirror`.
+    /// A `Mirror`'s refresh interval was changed.
     MirrorScheduleChanged,
-    /// Se guardó la política de admisión.
+    /// The admission policy was saved.
     AdmissionPolicyChanged,
-    /// Se guardó la política de retención.
+    /// The retention policy was saved.
     RetentionPolicyChanged,
-    /// Se aplicó la retención.
+    /// Retention was applied.
     RetentionApplied,
-    /// Se ejecutó la recolección de basura.
+    /// Garbage collection was run.
     RetentionGarbageCollected,
-    /// Se cambió la cuota de un repositorio.
+    /// A repository's quota was changed.
     QuotaChanged,
-    /// Se activó o desactivó el bloqueo WORM de un repositorio.
+    /// A repository's WORM lock was turned on or off.
     WormPolicyChanged,
-    /// Se creó un aviso HTTP.
+    /// An HTTP webhook was created.
     WebhookCreated,
-    /// Se actualizó un aviso HTTP.
+    /// An HTTP webhook was updated.
     WebhookUpdated,
-    /// Se eliminó un aviso HTTP.
+    /// An HTTP webhook was deleted.
     WebhookDeleted,
-    /// Se guardó el destino de réplica.
+    /// The replica target was saved.
     ReplicaPolicyChanged,
-    /// Se empujó un repositorio a otra instancia.
+    /// A repository was pushed to another instance.
     ReplicaPushed,
-    /// Se tiró un repositorio desde otra instancia.
+    /// A repository was pulled from another instance.
     ReplicaPulled,
 }
 
-/// Clase del objeto sobre el que actúa el evento.
+/// Class of the object the event acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditTargetKind {
-    /// Una cuenta.
+    /// An account.
     User,
-    /// Un token de API.
+    /// An API token.
     Token,
-    /// Un grupo.
+    /// A group.
     Group,
-    /// Un repositorio.
+    /// A repository.
     Repository,
-    /// Un artefacto genérico.
+    /// A generic artifact.
     Artifact,
-    /// Un paquete de un ecosistema.
+    /// A package from an ecosystem.
     Package,
-    /// Un aviso HTTP.
+    /// An HTTP webhook.
     Webhook,
-    /// La política de admisión de un repositorio.
+    /// A repository's admission policy.
     Admission,
-    /// La política de retención o un GC.
+    /// The retention policy or a GC.
     Retention,
-    /// La cuota de un repositorio.
+    /// A repository's quota.
     Quota,
-    /// El bloqueo WORM de un repositorio.
+    /// A repository's WORM lock.
     Worm,
 }
 
-/// Motivos por los que una etiqueta persistida no es válida.
+/// Reasons why a persisted label is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuditParseError {
-    /// La acción no es una de las soportadas.
+    /// The action is not one of the supported ones.
     #[error("unsupported audit action '{0}'")]
     UnknownAction(String),
 
-    /// El tipo de destino no es uno de los soportados.
+    /// The target type is not one of the supported ones.
     #[error("unsupported audit target kind '{0}'")]
     UnknownTargetKind(String),
 }
 
-/// Una fila del registro de auditoría.
+/// A row of the audit log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditEvent {
     id: AuditEventId,
@@ -141,7 +141,7 @@ pub struct AuditEvent {
 }
 
 impl AuditEvent {
-    /// Construye un evento ya persistido o recién emitido.
+    /// Builds an event that is already persisted or just emitted.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -166,49 +166,49 @@ impl AuditEvent {
         }
     }
 
-    /// Identificador.
+    /// Identifier.
     #[must_use]
     pub fn id(&self) -> AuditEventId {
         self.id
     }
 
-    /// Usuario que actuó, si la cuenta sigue existiendo.
+    /// User who acted, if the account still exists.
     #[must_use]
     pub fn actor_id(&self) -> Option<UserId> {
         self.actor_id
     }
 
-    /// Nombre del actor en el momento de la acción.
+    /// Actor name at the time of the action.
     #[must_use]
     pub fn actor_username(&self) -> &str {
         &self.actor_username
     }
 
-    /// Acción.
+    /// Action.
     #[must_use]
     pub fn action(&self) -> AuditAction {
         self.action
     }
 
-    /// Clase del objeto.
+    /// Class of the object.
     #[must_use]
     pub fn target_kind(&self) -> AuditTargetKind {
         self.target_kind
     }
 
-    /// Nombre o identificador del objeto.
+    /// Name or identifier of the object.
     #[must_use]
     pub fn target(&self) -> &str {
         &self.target
     }
 
-    /// Detalle opcional (rol nuevo, recuento, versión…).
+    /// Optional detail (new role, count, version…).
     #[must_use]
     pub fn detail(&self) -> &str {
         &self.detail
     }
 
-    /// Instante RFC 3339.
+    /// RFC 3339 timestamp.
     #[must_use]
     pub fn created_at(&self) -> &str {
         &self.created_at
@@ -216,7 +216,7 @@ impl AuditEvent {
 }
 
 impl AuditAction {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -260,11 +260,11 @@ impl AuditAction {
         }
     }
 
-    /// Parsea la etiqueta persistida.
+    /// Parses the persisted label.
     ///
     /// # Errors
     ///
-    /// [`AuditParseError::UnknownAction`] si la etiqueta no es válida.
+    /// [`AuditParseError::UnknownAction`] if the label is not valid.
     pub fn parse(value: &str) -> Result<Self, AuditParseError> {
         match value {
             "user.created" => Ok(Self::UserCreated),
@@ -310,7 +310,7 @@ impl AuditAction {
 }
 
 impl AuditTargetKind {
-    /// Etiqueta persistida.
+    /// Persisted label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -328,11 +328,11 @@ impl AuditTargetKind {
         }
     }
 
-    /// Parsea la etiqueta persistida.
+    /// Parses the persisted label.
     ///
     /// # Errors
     ///
-    /// [`AuditParseError::UnknownTargetKind`] si la etiqueta no es válida.
+    /// [`AuditParseError::UnknownTargetKind`] if the label is not valid.
     pub fn parse(value: &str) -> Result<Self, AuditParseError> {
         match value {
             "user" => Ok(Self::User),

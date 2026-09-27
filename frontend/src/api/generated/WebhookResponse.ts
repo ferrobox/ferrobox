@@ -2,11 +2,11 @@
 import type { WebhookEventDto } from "./WebhookEventDto";
 
 /**
- * Aviso HTTP de un repositorio.
+ * HTTP notification of a repository.
  */
 export type WebhookResponse = { id: string, name: string, url: string, 
 /**
- * `true` si hay un secreto HMAC configurado. El valor nunca se
- * devuelve.
+ * `true` if an HMAC secret is configured. The value is never
+ * returned.
  */
 has_secret: boolean, events: Array<WebhookEventDto>, enabled: boolean, };

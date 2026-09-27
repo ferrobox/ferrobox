@@ -13,36 +13,35 @@ use crate::content_hash::sha256_checksum;
 use crate::quota::{QuotaError, QuotaService};
 use crate::storage_key::storage_key_for;
 
-/// Motivos por los que publicar un artefacto puede fallar.
+/// Reasons publishing an artifact can fail.
 #[derive(Debug, Error)]
 pub enum PublishArtifactError {
-    /// El repositorio indicado no existe.
+    /// The given repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// El repositorio es de solo lectura (un `Mirror` o un `Alloy`).
+    /// The repository is read-only (a `Mirror` or an `Alloy`).
     #[error("repository is read-only and does not accept publishes")]
     ReadOnlyRepository,
 
-    /// Fallo al consultar el repositorio.
+    /// Failed to query the repository.
     #[error(transparent)]
     RepositoryLookup(#[from] RepositoryStoreError),
 
-    /// Fallo al subir el contenido binario.
+    /// Failed to upload the binary content.
     #[error(transparent)]
     Storage(#[from] StorageError),
 
-    /// Fallo al persistir los metadatos del artefacto.
+    /// Failed to persist the artifact metadata.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
 
-    /// El binario no cabe en la cuota de almacenamiento.
+    /// The binary does not fit in the storage quota.
     #[error(transparent)]
     Quota(#[from] QuotaError),
 }
 
-/// Caso de uso: publicar un artefacto binario en un repositorio
-/// existente.
+/// Use case: publish a binary artifact to an existing repository.
 pub struct PublishArtifactUseCase {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -51,7 +50,7 @@ pub struct PublishArtifactUseCase {
 }
 
 impl PublishArtifactUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -67,16 +66,15 @@ impl PublishArtifactUseCase {
         }
     }
 
-    /// Ejecuta la publicación: verifica que el repositorio existe,
-    /// calcula el checksum del contenido, lo sube al almacenamiento
-    /// binario, y persiste los metadatos del artefacto.
+    /// Runs the publish: verifies that the repository exists, computes
+    /// the content checksum, uploads it to binary storage, and persists
+    /// the artifact metadata.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PublishArtifactError::RepositoryNotFound`] si
-    /// `repository_id` no corresponde a ningún repositorio existente, o
-    /// cualquiera de las demás variantes si falla el puerto
-    /// correspondiente.
+    /// Returns [`PublishArtifactError::RepositoryNotFound`] if
+    /// `repository_id` does not match any existing repository, or any
+    /// of the other variants if the corresponding port fails.
     ///
     pub async fn execute(
         &self,

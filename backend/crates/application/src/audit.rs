@@ -1,4 +1,4 @@
-//! Registro de auditoría: persistir y listar escrituras de negocio.
+//! Audit log: persist and list business writes.
 
 use std::sync::Arc;
 
@@ -9,32 +9,32 @@ use ferrobox_domain::user::User;
 use ferrobox_ports::audit_store::{AuditStore, AuditStoreError};
 use thiserror::Error;
 
-/// Cuántas filas se conservan en el registro.
+/// How many rows are kept in the log.
 pub const AUDIT_HISTORY_LIMIT: usize = 200;
 
-/// Motivos por los que consultar el registro puede fallar.
+/// Reasons querying the log can fail.
 #[derive(Debug, Error)]
 pub enum AuditError {
-    /// Fallo al leer o escribir eventos.
+    /// Failed to read or write events.
     #[error(transparent)]
     Store(#[from] AuditStoreError),
 }
 
-/// Caso de uso: registrar y listar eventos de auditoría.
+/// Use case: record and list audit events.
 #[derive(Clone)]
 pub struct AuditService {
     store: Arc<dyn AuditStore>,
 }
 
 impl AuditService {
-    /// Construye el servicio a partir de su puerto.
+    /// Builds the service from its port.
     #[must_use]
     pub fn new(store: Arc<dyn AuditStore>) -> Self {
         Self { store }
     }
 
-    /// Deja constancia de una escritura. Un fallo de persistencia no se
-    /// propaga: la operación de negocio ya ha terminado.
+    /// Records a write. A persistence failure is not propagated: the
+    /// business operation has already finished.
     pub async fn record(
         &self,
         actor: &User,
@@ -56,11 +56,11 @@ impl AuditService {
         let _ = self.store.record(&event).await;
     }
 
-    /// Últimos eventos de la instancia, más recientes primero.
+    /// Latest events of the instance, newest first.
     ///
     /// # Errors
     ///
-    /// [`AuditError::Store`] si el backend falla (salvo esquema ausente).
+    /// [`AuditError::Store`] if the backend fails (except a missing schema).
     pub async fn list(&self) -> Result<Vec<AuditEvent>, AuditError> {
         match self.store.list(AUDIT_HISTORY_LIMIT).await {
             Ok(events) => Ok(events),

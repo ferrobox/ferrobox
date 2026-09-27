@@ -3,76 +3,75 @@ use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::repository::{Repository, RepositoryName};
 use thiserror::Error;
 
-/// Motivos por los que una operación de persistencia de repositorios
-/// puede fallar.
+/// Reasons a repository persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum RepositoryStoreError {
-    /// Ya existe un repositorio con ese nombre.
+    /// A repository with that name already exists.
     #[error("a repository named '{0}' already exists")]
     DuplicateName(RepositoryName),
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la entidad [`Repository`].
+/// Persistence port for the [`Repository`] entity.
 ///
-/// Se llama deliberadamente `RepositoryStore`, y no `RepositoryRepository`,
-/// para evitar la colisión de nombres entre el patrón de acceso a datos
-/// "Repository" (Martin Fowler, *Patterns of Enterprise Application
-/// Architecture*, 2002) y nuestra propia entidad de dominio `Repository`.
+/// Deliberately named `RepositoryStore`, not `RepositoryRepository`,
+/// to avoid colliding the data-access "Repository" pattern (Martin
+/// Fowler, *Patterns of Enterprise Application Architecture*, 2002)
+/// with our own `Repository` domain entity.
 #[async_trait]
 pub trait RepositoryStore: Send + Sync {
-    /// Guarda un repositorio, insertándolo si es nuevo o actualizando sus
-    /// datos si ya existía uno con el mismo identificador.
+    /// Saves a repository, inserting it if new or updating its data if
+    /// one with the same identifier already existed.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::DuplicateName`] si ya existe otro
-    /// repositorio con el mismo nombre, o
-    /// [`RepositoryStoreError::Backend`] si el backend subyacente falla.
+    /// Returns [`RepositoryStoreError::DuplicateName`] if another
+    /// repository with the same name already exists, or
+    /// [`RepositoryStoreError::Backend`] if the underlying backend fails.
     async fn save(&self, repository: &Repository) -> Result<(), RepositoryStoreError>;
 
-    /// Busca un repositorio por su identificador. Devuelve `None` si no
-    /// existe -- a diferencia de `StoragePort::get`, no encontrar un
-    /// repositorio no es, en sí mismo, una condición de error.
+    /// Looks up a repository by identifier. Returns `None` if it does
+    /// not exist -- unlike `StoragePort::get`, not finding a
+    /// repository is not, by itself, an error condition.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`RepositoryStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn find_by_id(
         &self,
         id: RepositoryId,
     ) -> Result<Option<Repository>, RepositoryStoreError>;
 
-    /// Busca un repositorio por su nombre.
+    /// Looks up a repository by name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`RepositoryStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn find_by_name(
         &self,
         name: &RepositoryName,
     ) -> Result<Option<Repository>, RepositoryStoreError>;
 
-    /// Lista todos los repositorios existentes.
+    /// Lists every existing repository.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`RepositoryStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn find_all(&self) -> Result<Vec<Repository>, RepositoryStoreError>;
 
-    /// Elimina un repositorio. No es un error eliminar un identificador
-    /// que no existe.
+    /// Deletes a repository. Deleting a missing identifier is not an
+    /// error.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`RepositoryStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn delete(&self, id: RepositoryId) -> Result<(), RepositoryStoreError>;
 }
 

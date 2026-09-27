@@ -3,39 +3,39 @@ use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::replica::ReplicaPolicy;
 use thiserror::Error;
 
-/// Motivos por los que persistir la política de réplica puede fallar.
+/// Reasons persisting the replica policy can fail.
 #[derive(Debug, Error)]
 pub enum ReplicaStoreError {
-    /// No existe la tabla: falta ejecutar la migración SQL.
+    /// The table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_replica is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la política de réplica de un repositorio.
+/// Persistence port for a repository replica policy.
 #[async_trait]
 pub trait ReplicaStore: Send + Sync {
-    /// Devuelve la política, o «sin destino» si nunca se configuró.
+    /// Returns the policy, or no target if it was never configured.
     ///
     /// # Errors
     ///
-    /// [`ReplicaStoreError::Backend`] si el backend subyacente falla.
+    /// [`ReplicaStoreError::Backend`] if the underlying backend fails.
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<ReplicaPolicy, ReplicaStoreError>;
 
-    /// Inserta o reemplaza la política. Sin destino borra la fila.
+    /// Inserts or replaces the policy. No target deletes the row.
     ///
     /// # Errors
     ///
-    /// [`ReplicaStoreError::Backend`] si el backend subyacente falla.
+    /// [`ReplicaStoreError::Backend`] if the underlying backend fails.
     async fn save(
         &self,
         repository_id: RepositoryId,

@@ -7,34 +7,34 @@ use crate::ids::{ApiTokenId, UserId};
 
 const MAX_NAME_LENGTH: usize = 100;
 
-/// Nombre descriptivo de un token de API, validado.
+/// Validated descriptive name of an API token.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ApiTokenName(String);
 
-/// Motivos por los que una cadena no es un [`ApiTokenName`] válido.
+/// Reasons why a string is not a valid [`ApiTokenName`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ApiTokenNameError {
-    /// El nombre no puede estar vacío.
+    /// The name cannot be empty.
     #[error("API token name cannot be empty")]
     Empty,
 
-    /// El nombre supera la longitud máxima permitida.
+    /// The name exceeds the maximum allowed length.
     #[error("API token name cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 }
 
 impl ApiTokenName {
-    /// Valida y construye un nombre de token de API.
+    /// Validates and builds an API token name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ApiTokenNameError`] si `name` está vacío o supera
-    /// `100` caracteres.
+    /// Returns [`ApiTokenNameError`] if `name` is empty or exceeds
+    /// `100` characters.
     pub fn parse(name: impl Into<String>) -> Result<Self, ApiTokenNameError> {
         let name = name.into();
 
@@ -52,7 +52,7 @@ impl ApiTokenName {
         Ok(Self(name))
     }
 
-    /// Devuelve el nombre como cadena de texto.
+    /// Returns the name as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -74,7 +74,7 @@ pub enum TokenScope {
     Write,
 }
 
-/// Motivos por los que un scope no es válido.
+/// Reasons why a scope is not valid.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TokenScopeError {
     /// Unknown label.
@@ -172,12 +172,12 @@ impl TokenScopes {
     }
 }
 
-/// Un token de API emitido a un usuario.
+/// An API token issued to a user.
 ///
-/// El secreto en claro solo se muestra una vez al crearlo; en
-/// persistencia se guarda únicamente su hash. Esta entidad conserva un
-/// `prefix` no sensible para que el usuario pueda reconocer el token
-/// en listados posteriores.
+/// The plaintext secret is shown only once at creation; in
+/// persistence only its hash is stored. This entity keeps a
+/// non-sensitive `prefix` so the user can recognize the token
+/// in later listings.
 #[derive(Debug, Clone)]
 pub struct ApiToken {
     id: ApiTokenId,
@@ -189,7 +189,7 @@ pub struct ApiToken {
 }
 
 impl ApiToken {
-    /// Emite un token nuevo, asignándole un identificador nuevo.
+    /// Issues a new token, assigning it a new identifier.
     #[must_use]
     pub fn new(user_id: UserId, name: ApiTokenName, prefix: String) -> Self {
         Self {
@@ -202,8 +202,8 @@ impl ApiToken {
         }
     }
 
-    /// Reconstituye un token ya existente a partir de un identificador
-    /// conocido (por ejemplo, al cargarlo desde persistencia).
+    /// Reconstitutes an already existing token from a known
+    /// identifier (for example, when loading it from persistence).
     #[must_use]
     pub fn from_parts(id: ApiTokenId, user_id: UserId, name: ApiTokenName, prefix: String) -> Self {
         Self {
@@ -216,45 +216,45 @@ impl ApiToken {
         }
     }
 
-    /// Identificador único de este token.
+    /// Unique identifier of this token.
     #[must_use]
     pub fn id(&self) -> ApiTokenId {
         self.id
     }
 
-    /// Identificador del usuario propietario.
+    /// Identifier of the owning user.
     #[must_use]
     pub fn user_id(&self) -> UserId {
         self.user_id
     }
 
-    /// Nombre descriptivo del token.
+    /// Descriptive name of the token.
     #[must_use]
     pub fn name(&self) -> &ApiTokenName {
         &self.name
     }
 
-    /// Prefijo no sensible del secreto, útil para reconocerlo en
-    /// listados.
+    /// Non-sensitive prefix of the secret, useful for recognizing it in
+    /// listings.
     #[must_use]
     pub fn prefix(&self) -> &str {
         &self.prefix
     }
 
-    /// Momento en el que el token deja de ser válido, si tiene
-    /// caducidad.
+    /// Instant at which the token stops being valid, if it has
+    /// an expiry.
     #[must_use]
     pub fn expires_at(&self) -> Option<DateTime<Utc>> {
         self.expires_at
     }
 
-    /// `true` si `now` es posterior o igual a [`Self::expires_at`].
+    /// `true` if `now` is after or equal to [`Self::expires_at`].
     #[must_use]
     pub fn is_expired(&self, now: DateTime<Utc>) -> bool {
         self.expires_at.is_some_and(|at| now >= at)
     }
 
-    /// Devuelve este token con una caducidad distinta.
+    /// Returns this token with a different expiry.
     #[must_use]
     pub fn with_expires_at(self, expires_at: Option<DateTime<Utc>>) -> Self {
         Self { expires_at, ..self }

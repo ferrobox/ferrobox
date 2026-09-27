@@ -1,8 +1,8 @@
-//! Identidad federada (`OIDC`) y el mapeo de roles y grupos del `IdP`
-//! hacia el modelo de `FerroBox`.
+//! Federated identity (`OIDC`) and the mapping of IdP roles and groups
+//! onto the `FerroBox` model.
 //!
-//! No habla HTTP ni interpreta JSON: la capa de aplicación entrega
-//! listas de etiquetas ya extraídas de las *claims*.
+//! It does not speak HTTP or parse JSON: the application layer delivers
+//! lists of labels already extracted from the *claims*.
 
 use crate::group::{GroupName, GroupNameError};
 use crate::user::{Role, Username, UsernameError};
@@ -10,7 +10,7 @@ use crate::user::{Role, Username, UsernameError};
 const MAX_USERNAME_LENGTH: usize = 64;
 const MAX_GROUP_NAME_LENGTH: usize = 64;
 
-/// Cómo se traducen los roles del `IdP` a un [`Role`] de instancia.
+/// How IdP roles are translated into an instance [`Role`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcRoleMapping {
     admin: Vec<String>,
@@ -19,9 +19,9 @@ pub struct OidcRoleMapping {
 }
 
 impl OidcRoleMapping {
-    /// Mapeo por defecto: `ferrobox-admin`, `ferrobox-developer` y
-    /// `ferrobox-reader`. No usa el rol `admin` genérico del `IdP` para
-    /// no promover a cualquiera con privilegios de consola.
+    /// Default mapping: `ferrobox-admin`, `ferrobox-developer`, and
+    /// `ferrobox-reader`. Does not use the generic `admin` role of the IdP so
+    /// as not to promote anyone with console privileges.
     #[must_use]
     pub fn ferrobox_defaults() -> Self {
         Self::new(
@@ -31,8 +31,8 @@ impl OidcRoleMapping {
         )
     }
 
-    /// Construye el mapeo a partir de listas (se normalizan a
-    /// minúsculas y se descartan vacíos).
+    /// Builds the mapping from lists (they are normalized to
+    /// lowercase and empty values are discarded).
     #[must_use]
     pub fn new(
         admin: impl IntoIterator<Item = impl AsRef<str>>,
@@ -46,26 +46,26 @@ impl OidcRoleMapping {
         }
     }
 
-    /// Roles del `IdP` que conceden [`Role::Admin`].
+    /// IdP roles that grant [`Role::Admin`].
     #[must_use]
     pub fn admin(&self) -> &[String] {
         &self.admin
     }
 
-    /// Roles del `IdP` que conceden [`Role::Developer`].
+    /// IdP roles that grant [`Role::Developer`].
     #[must_use]
     pub fn developer(&self) -> &[String] {
         &self.developer
     }
 
-    /// Roles del `IdP` que conceden [`Role::Reader`].
+    /// IdP roles that grant [`Role::Reader`].
     #[must_use]
     pub fn reader(&self) -> &[String] {
         &self.reader
     }
 
-    /// Elige el rol de instancia. Si hay varias coincidencias, gana el
-    /// más privilegiado. Sin coincidencias, [`Role::Reader`].
+    /// Chooses the instance role. If there are several matches, the
+    /// most privileged wins. With no matches, [`Role::Reader`].
     #[must_use]
     pub fn map_role(&self, idp_roles: &[impl AsRef<str>]) -> Role {
         let roles: Vec<String> = idp_roles
@@ -82,12 +82,12 @@ impl OidcRoleMapping {
     }
 }
 
-/// Convierte `preferred_username` (o, en su defecto, `sub`) en un
-/// [`Username`] válido: solo letras, dígitos, `-` y `_`.
+/// Converts `preferred_username` (or, failing that, `sub`) into a
+/// valid [`Username`]: only letters, digits, `-`, and `_`.
 ///
 /// # Errors
 ///
-/// [`UsernameError`] si, tras sanear, el resultado sigue vacío.
+/// [`UsernameError`] if, after sanitizing, the result is still empty.
 pub fn username_from_claims(
     preferred: Option<&str>,
     subject: &str,
@@ -106,13 +106,13 @@ pub fn username_from_claims(
     Username::parse(sanitized)
 }
 
-/// Convierte una ruta o nombre de grupo del `IdP` en un [`GroupName`].
-/// Toma el último segmento (`/org/backend` → `backend`) y sustituye
-/// caracteres fuera del alfabeto por `_`.
+/// Converts an IdP group path or name into a [`GroupName`].
+/// Takes the last segment (`/org/backend` → `backend`) and replaces
+/// characters outside the alphabet with `_`.
 ///
 /// # Errors
 ///
-/// [`GroupNameError`] si el resultado queda vacío o es inválido.
+/// [`GroupNameError`] if the result is empty or invalid.
 pub fn group_name_from_claim(raw: &str) -> Result<GroupName, GroupNameError> {
     let segment = raw.trim().trim_matches('/').rsplit('/').next().unwrap_or("");
     let mut sanitized = sanitize_identifier(segment);
@@ -125,8 +125,8 @@ pub fn group_name_from_claim(raw: &str) -> Result<GroupName, GroupNameError> {
     GroupName::parse(sanitized)
 }
 
-/// Sujeto (`sub`) y emisor ya aceptados: identifican a una cuenta en
-/// un `IdP` concreto.
+/// Subject (`sub`) and issuer already accepted: they identify an account on
+/// a concrete IdP.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OidcIdentity {
     issuer: String,
@@ -134,7 +134,7 @@ pub struct OidcIdentity {
 }
 
 impl OidcIdentity {
-    /// Construye la identidad. El emisor se guarda sin barra final.
+    /// Builds the identity. The issuer is stored without a trailing slash.
     #[must_use]
     pub fn new(issuer: impl Into<String>, subject: impl Into<String>) -> Self {
         Self {
@@ -143,13 +143,13 @@ impl OidcIdentity {
         }
     }
 
-    /// URL del emisor (`iss`), sin barra final.
+    /// Issuer URL (`iss`), without a trailing slash.
     #[must_use]
     pub fn issuer(&self) -> &str {
         &self.issuer
     }
 
-    /// Identificador estable del usuario en el `IdP` (`sub`).
+    /// Stable identifier of the user in the IdP (`sub`).
     #[must_use]
     pub fn subject(&self) -> &str {
         &self.subject

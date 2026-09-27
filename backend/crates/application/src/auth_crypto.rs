@@ -1,5 +1,4 @@
-//! Hashing de contraseñas (Argon2) y de secretos de tokens de API
-//! (SHA-256).
+//! Hashing of passwords (Argon2) and of API token secrets (SHA-256).
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -8,29 +7,29 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-/// Prefijo visible de todos los secretos de token emitidos por
-/// `FerroBox`. Permite reconocerlos a simple vista (por ejemplo, en
-/// `~/.cargo/credentials.toml`) sin filtrar el secreto completo.
+/// Visible prefix of every token secret issued by `FerroBox`. Lets you
+/// recognize them at a glance (for example, in
+/// `~/.cargo/credentials.toml`) without leaking the full secret.
 pub const TOKEN_PREFIX_TAG: &str = "fb_";
 
-/// Número de caracteres del prefijo no sensible que se muestra en
-/// listados (incluye el tag `fb_`).
+/// Number of characters of the non-sensitive prefix shown in listings
+/// (includes the `fb_` tag).
 const VISIBLE_PREFIX_LEN: usize = 11;
 
-/// Motivos por los que el hashing de una contraseña puede fallar.
+/// Reasons hashing a password can fail.
 #[derive(Debug, Error)]
 pub enum PasswordHashError {
-    /// La librería de hashing devolvió un error interno.
+    /// The hashing library returned an internal error.
     #[error("failed to hash password")]
     HashingFailed,
 }
 
-/// Calcula el hash Argon2id de una contraseña en claro.
+/// Computes the Argon2id hash of a plaintext password.
 ///
 /// # Errors
 ///
-/// Devuelve [`PasswordHashError::HashingFailed`] si la librería no
-/// puede generar la sal o el hash.
+/// Returns [`PasswordHashError::HashingFailed`] if the library cannot
+/// generate the salt or the hash.
 pub fn hash_password(password: &str) -> Result<String, PasswordHashError> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
@@ -39,7 +38,7 @@ pub fn hash_password(password: &str) -> Result<String, PasswordHashError> {
         .map_err(|_| PasswordHashError::HashingFailed)
 }
 
-/// Verifica una contraseña en claro contra un hash Argon2 almacenado.
+/// Verifies a plaintext password against a stored Argon2 hash.
 #[must_use]
 pub fn verify_password(password: &str, password_hash: &str) -> bool {
     let Ok(parsed) = PasswordHash::new(password_hash) else {
@@ -51,8 +50,8 @@ pub fn verify_password(password: &str, password_hash: &str) -> bool {
         .is_ok()
 }
 
-/// Genera un secreto de token de API nuevo (`fb_` + 32 bytes en hex)
-/// y su prefijo no sensible para listados.
+/// Generates a new API token secret (`fb_` + 32 bytes in hex) and its
+/// non-sensitive prefix for listings.
 #[must_use]
 pub fn generate_api_token_secret() -> (String, String) {
     let mut bytes = [0_u8; 32];
@@ -62,9 +61,9 @@ pub fn generate_api_token_secret() -> (String, String) {
     (secret, prefix)
 }
 
-/// Calcula el hash SHA-256 (hex) de un secreto de token. Se usa tanto
-/// al emitir como al autenticar, de modo que el secreto en claro nunca
-/// se persiste.
+/// Computes the SHA-256 (hex) hash of a token secret. Used both when
+/// issuing and when authenticating, so the plaintext secret is never
+/// persisted.
 #[must_use]
 pub fn hash_api_token_secret(secret: &str) -> String {
     let digest = Sha256::digest(secret.as_bytes());

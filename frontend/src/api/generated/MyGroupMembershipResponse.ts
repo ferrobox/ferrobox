@@ -2,9 +2,9 @@
 import type { GroupRepositoryGrantResponse } from "./GroupRepositoryGrantResponse";
 
 /**
- * Grupo al que pertenece el usuario autenticado.
+ * Group the authenticated user belongs to.
  *
- * No incluye el resto de miembros: eso solo lo ve un administrador
- * en la ficha del grupo.
+ * Does not include the other members: only an administrator sees
+ * those on the group detail page.
  */
 export type MyGroupMembershipResponse = { id: string, name: string, repositories: Array<GroupRepositoryGrantResponse>, };

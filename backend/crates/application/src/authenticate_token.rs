@@ -9,41 +9,41 @@ use thiserror::Error;
 
 use crate::auth_crypto::hash_api_token_secret;
 
-/// Motivos por los que autenticar un secreto de token puede fallar.
+/// Reasons authenticating a token secret can fail.
 #[derive(Debug, Error)]
 pub enum AuthenticateTokenError {
-    /// El secreto no corresponde a ningún token conocido.
+    /// The secret does not match any known token.
     #[error("invalid or revoked API token")]
     InvalidToken,
 
-    /// Fallo al consultar el almacén de tokens.
+    /// Failed to query the token store.
     #[error(transparent)]
     TokenPersistence(#[from] ApiTokenStoreError),
 
-    /// Fallo al consultar el almacén de usuarios.
+    /// Failed to query the user store.
     #[error(transparent)]
     UserPersistence(#[from] UserStoreError),
 }
 
-/// Resultado de autenticar un secreto de token: el usuario y el token
-/// asociados.
+/// Result of authenticating a token secret: the associated user and
+/// token.
 #[derive(Debug, Clone)]
 pub struct AuthenticatedPrincipal {
-    /// Usuario dueño del token.
+    /// User who owns the token.
     pub user: User,
-    /// Token que autenticó la petición.
+    /// Token that authenticated the request.
     pub token: ApiToken,
 }
 
-/// Caso de uso: resolver un secreto Bearer / Token a un principal
-/// autenticado.
+/// Use case: resolve a Bearer / Token secret to an authenticated
+/// principal.
 pub struct AuthenticateTokenUseCase {
     user_store: Arc<dyn UserStore>,
     api_token_store: Arc<dyn ApiTokenStore>,
 }
 
 impl AuthenticateTokenUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>, api_token_store: Arc<dyn ApiTokenStore>) -> Self {
         Self {
@@ -52,13 +52,13 @@ impl AuthenticateTokenUseCase {
         }
     }
 
-    /// Hashea el secreto, busca el token y carga su usuario.
+    /// Hashes the secret, looks up the token, and loads its user.
     ///
     /// # Errors
     ///
-    /// Devuelve [`AuthenticateTokenError::InvalidToken`] si el secreto
-    /// no existe o el usuario asociado ha desaparecido, o un error de
-    /// persistencia si el backend falla.
+    /// Returns [`AuthenticateTokenError::InvalidToken`] if the secret
+    /// does not exist or the associated user has disappeared, or a
+    /// persistence error if the backend fails.
     pub async fn execute(
         &self,
         plaintext_secret: &str,

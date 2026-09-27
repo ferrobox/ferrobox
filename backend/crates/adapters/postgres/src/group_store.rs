@@ -7,14 +7,13 @@ use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`GroupStore`] contra `PostgreSQL`.
+/// [`GroupStore`] adapter against `PostgreSQL`.
 pub struct PostgresGroupStore {
     pool: PgPool,
 }
 
 impl PostgresGroupStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones ya
-    /// configurado.
+    /// Builds the adapter from an already configured connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

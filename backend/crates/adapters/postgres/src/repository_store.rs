@@ -9,14 +9,13 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-/// Adaptador de [`RepositoryStore`] contra `PostgreSQL`.
+/// [`RepositoryStore`] adapter against `PostgreSQL`.
 pub struct PostgresRepositoryStore {
     pool: PgPool,
 }
 
 impl PostgresRepositoryStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones ya
-    /// configurado.
+    /// Builds the adapter from an already configured connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

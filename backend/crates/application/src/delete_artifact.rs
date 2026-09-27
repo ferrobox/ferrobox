@@ -9,36 +9,36 @@ use thiserror::Error;
 
 use crate::storage_key::storage_key_for;
 
-/// Motivos por los que eliminar un artefacto puede fallar.
+/// Reasons deleting an artifact can fail.
 #[derive(Debug, Error)]
 pub enum DeleteArtifactError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     RepositoryNotFound(RepositoryId),
 
-    /// El artefacto no existe en ese repositorio.
+    /// The artifact does not exist in that repository.
     #[error("artifact {0} does not exist in repository {1}")]
     ArtifactNotFound(ArtifactId, RepositoryId),
 
-    /// Fallo al consultar el almacén de repositorios.
+    /// Failed to query the repository store.
     #[error(transparent)]
     RepositoryPersistence(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar o actualizar el almacén de artefactos.
+    /// Failed to query or update the artifact store.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
 
-    /// Fallo al consultar o actualizar el índice de paquetes.
+    /// Failed to query or update the package index.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
 
-    /// Fallo al eliminar el objeto binario.
+    /// Failed to delete the binary object.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-/// Caso de uso: eliminar un artefacto de un repositorio, incluyendo su
-/// objeto en almacenamiento y cualquier entrada de índice asociada.
+/// Use case: delete an artifact from a repository, including its
+/// storage object and any associated index entry.
 pub struct DeleteArtifactUseCase {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -47,7 +47,7 @@ pub struct DeleteArtifactUseCase {
 }
 
 impl DeleteArtifactUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -63,14 +63,14 @@ impl DeleteArtifactUseCase {
         }
     }
 
-    /// Elimina el artefacto: primero el objeto binario, después el
-    /// índice y por último los metadatos.
+    /// Deletes the artifact: first the binary object, then the index,
+    /// and finally the metadata.
     ///
     /// # Errors
     ///
-    /// Devuelve [`DeleteArtifactError::RepositoryNotFound`] o
-    /// [`DeleteArtifactError::ArtifactNotFound`] si no existen, o
-    /// cualquiera de las demás variantes si falla un puerto.
+    /// Returns [`DeleteArtifactError::RepositoryNotFound`] or
+    /// [`DeleteArtifactError::ArtifactNotFound`] if they do not exist,
+    /// or any of the other variants if a port fails.
     pub async fn execute(
         &self,
         repository_id: RepositoryId,

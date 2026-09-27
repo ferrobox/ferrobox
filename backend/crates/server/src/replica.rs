@@ -1,4 +1,4 @@
-//! Rutas HTTP de réplica push o pull hacia otra instancia.
+//! HTTP routes for push or pull replica toward another instance.
 
 use std::sync::Arc;
 

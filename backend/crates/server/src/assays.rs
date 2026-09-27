@@ -1,4 +1,4 @@
-//! Rutas HTTP del ensaye (`Assay`) de paquetes.
+//! HTTP routes for package assay.
 
 use std::sync::Arc;
 

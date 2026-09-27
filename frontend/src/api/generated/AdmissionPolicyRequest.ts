@@ -4,46 +4,46 @@ import type { AdmissionPredicateDto } from "./AdmissionPredicateDto";
 import type { AdmissionWhenDto } from "./AdmissionWhenDto";
 
 /**
- * Política de admisión enviada al guardar o simular.
+ * Admission policy sent when saving or simulating.
  */
 export type AdmissionPolicyRequest = { 
 /**
- * `true` si la regla se aplica en el pull.
+ * `true` if the rule applies on pull.
  */
 enabled: boolean, 
 /**
- * Momento de evaluación.
+ * Evaluation moment.
  */
 when: AdmissionWhenDto, 
 /**
- * Condición de firma (compatibilidad).
+ * Signature condition (compatibility).
  */
 predicate: AdmissionPredicateDto, 
 /**
- * Efecto si la condición se cumple.
+ * Effect if the condition is met.
  */
 effect: AdmissionEffectDto, 
 /**
- * PEM de claves públicas Cosign (`cosign generate-key-pair`).
+ * PEM of Cosign public keys (`cosign generate-key-pair`).
  */
 public_keys_pem: string, 
 /**
- * Exigir firma Cosign / Notation.
+ * Require a Cosign / Notation signature.
  */
 require_signed: boolean | null, 
 /**
- * Exigir verificación contra las claves PEM.
+ * Require verification against the PEM keys.
  */
 require_verified: boolean | null, 
 /**
- * Umbral de hallazgo (`medium`, `high`, `critical`). Vacío = apagado.
+ * Finding threshold (`medium`, `high`, `critical`). Empty = off.
  */
 min_finding: string | null, 
 /**
- * Licencias SPDX denegadas.
+ * Denied SPDX licenses.
  */
 forbidden_licenses: Array<string>, 
 /**
- * Perfil que rellenó la regla, si se eligió uno.
+ * Profile that filled the rule, if one was chosen.
  */
 profile: string | null, };

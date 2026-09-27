@@ -2,6 +2,6 @@
 import type { AssaySeverityDto } from "./AssaySeverityDto";
 
 /**
- * Hallazgo (impureza) de un ensaye.
+ * Finding (impurity) of an assay.
  */
 export type AssayFindingResponse = { vulnerability_id: string, aliases: Array<string>, title: string, severity: AssaySeverityDto, component_name: string, component_version: string, fixed_version: string | null, details_url: string | null, };

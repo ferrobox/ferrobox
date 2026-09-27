@@ -16,14 +16,13 @@ struct ArtifactRow {
     filename: Option<String>,
 }
 
-/// Adaptador de [`ArtifactStore`] contra `PostgreSQL`.
+/// [`ArtifactStore`] adapter against `PostgreSQL`.
 pub struct PostgresArtifactStore {
     pool: PgPool,
 }
 
 impl PostgresArtifactStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones ya
-    /// configurado.
+    /// Builds the adapter from an already configured connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

@@ -2,10 +2,10 @@
 import type { PackageSearchHitResponse } from "./PackageSearchHitResponse";
 
 /**
- * Resultado de buscar paquetes en toda la instancia.
+ * Result of searching packages across the instance.
  */
 export type SearchResponse = { 
 /**
- * Coincidencias, ya recortadas al límite pedido.
+ * Matches, already trimmed to the requested limit.
  */
 hits: Array<PackageSearchHitResponse>, };

@@ -6,6 +6,6 @@ import type { AssayStatusDto } from "./AssayStatusDto";
 import type { PackageEcosystemDto } from "./PackageEcosystemDto";
 
 /**
- * Ensaye completo de una versión de paquete.
+ * Full assay of a package version.
  */
 export type AssayResponse = { id: string, repository_id: string, ecosystem: PackageEcosystemDto, name: string, version: string, status: AssayStatusDto, scanned_at: string | null, error_message: string | null, counts: AssayCountsDto, components: Array<AssayComponentResponse>, findings: Array<AssayFindingResponse>, };

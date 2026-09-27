@@ -1,15 +1,15 @@
-//! Estrategia de empaquetado para el ecosistema `PyPI`: implementa el
-//! subconjunto del protocolo que `twine upload`, `pip install` y
-//! `uv pip install` necesitan contra un repositorio `FerroBox`.
+//! Packaging strategy for the `PyPI` ecosystem: implements the
+//! subset of the protocol that `twine upload`, `pip install`, and
+//! `uv pip install` need against a `FerroBox` repository.
 //!
-//! Referencias:
-//! - índice simple: <https://peps.python.org/pep-0503/>
-//! - índice JSON: <https://peps.python.org/pep-0691/>
-//! - subida *legacy*: <https://docs.pypi.org/api/upload/>
+//! References:
+//! - simple index: <https://peps.python.org/pep-0503/>
+//! - JSON index: <https://peps.python.org/pep-0691/>
+//! - *legacy* upload: <https://docs.pypi.org/api/upload/>
 //!
-//! Cubre **Forge** (subir sdist/wheel, índice simple, descarga y yank),
-//! **Mirror** (caché *pull-through* de un índice simple como pypi.org)
-//! y lecturas en **Alloy**.
+//! Covers **Forge** (upload sdist/wheel, simple index, download, and yank),
+//! **Mirror** (*pull-through* cache of a simple index such as pypi.org),
+//! and reads on **Alloy**.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -42,7 +42,7 @@ use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema `PyPI`.
+/// Packaging strategy for the `PyPI` ecosystem.
 pub struct PypiPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -55,8 +55,8 @@ pub struct PypiPackagingStrategy {
 }
 
 impl PypiPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos y de la URL
-    /// pública con la que se rellenan los enlaces del índice simple.
+    /// Builds the strategy from its ports and the public
+    /// URL used to fill in the simple-index links.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -78,14 +78,14 @@ impl PypiPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un fichero.
+    /// Connects automatic assay when publishing or caching a file.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -740,8 +740,8 @@ impl PackagingStrategy for PypiPackagingStrategy {
     }
 }
 
-/// Normaliza un nombre de proyecto según PEP 503: minúsculas y rachas
-/// de `-`, `_` o `.` sustituidas por un único `-`.
+/// Normalizes a project name per PEP 503: lowercase, with runs
+/// of `-`, `_`, or `.` replaced by a single `-`.
 #[must_use]
 pub fn normalize_pypi_name(name: &str) -> String {
     let mut normalized = String::new();
@@ -991,7 +991,7 @@ fn has_attr(tag: &str, name: &str) -> bool {
     tag.to_ascii_lowercase().contains(&name.to_ascii_lowercase())
 }
 
-/// Nombre y versión de un wheel o sdist, para evaluar admisión en el pull.
+/// Name and version of a wheel or sdist, for evaluating admission on pull.
 #[must_use]
 pub fn admission_download_target(filename: &str) -> Option<(String, String)> {
     if filename.contains('/') || filename.contains('\\') {
@@ -1069,7 +1069,7 @@ fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'
         .then(|| &value[prefix.len()..])
 }
 
-/// Página raíz PEP 503 (`/simple/`) a partir de coincidencias de búsqueda.
+/// PEP 503 root page (`/simple/`) from search matches.
 #[must_use]
 pub fn simple_root_page(hits: &[PackageSearchHit]) -> Bytes {
     let mut links = Vec::new();
@@ -1083,12 +1083,12 @@ pub fn simple_root_page(hits: &[PackageSearchHit]) -> Bytes {
     Bytes::from(simple_html("Simple Index", &links))
 }
 
-/// Página raíz PEP 691 (`/simple/`) en JSON.
+/// PEP 691 root page (`/simple/`) in JSON.
 ///
 /// # Panics
 ///
-/// Solo si `serde_json` no puede serializar un objeto de forma fija, lo que no
-/// ocurre con este payload.
+/// Only if `serde_json` cannot serialize a fixed-shape object, which does not
+/// happen with this payload.
 #[must_use]
 pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
     let projects: Vec<serde_json::Value> = hits
@@ -1104,17 +1104,17 @@ pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
     )
 }
 
-/// Convierte una página HTML PEP 503 de proyecto al JSON PEP 691.
+/// Converts a PEP 503 project HTML page to PEP 691 JSON.
 ///
 /// # Errors
 ///
-/// Devuelve [`PackagingError::InvalidPayload`] si `html` no es UTF-8, o
-/// [`PackagingError::PackageNotFound`] si no hay ficheros.
+/// Returns [`PackagingError::InvalidPayload`] if `html` is not UTF-8, or
+/// [`PackagingError::PackageNotFound`] if there are no files.
 ///
 /// # Panics
 ///
-/// Solo si `serde_json` no puede serializar un objeto de forma fija, lo que no
-/// ocurre con este payload.
+/// Only if `serde_json` cannot serialize a fixed-shape object, which does not
+/// happen with this payload.
 pub fn project_page_json(
     name: &str,
     html: &[u8],

@@ -1,4 +1,4 @@
-//! Extrae el inventario de componentes a partir de una entrada de índice.
+//! Extracts the component inventory from an index entry.
 
 use ferrobox_domain::assay::{AssayComponent, AssayComponentKind};
 use ferrobox_domain::package_coordinate::PackageEcosystem;
@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::licenses;
 
-/// `true` si `spec` parece una versión concreta (`1.2.3`), no un rango.
+/// `true` if `spec` looks like a concrete version (`1.2.3`), not a range.
 #[must_use]
 pub fn is_exact_version(spec: &str) -> bool {
     let spec = spec.trim();
@@ -28,8 +28,8 @@ pub fn is_exact_version(spec: &str) -> bool {
         && spec.chars().any(|ch| ch.is_ascii_digit())
 }
 
-/// Construye un `purl` (*package URL*) para los ecosistemas que OSV
-/// (*Open Source Vulnerabilities*) entiende.
+/// Builds a `purl` (*package URL*) for the ecosystems that OSV
+/// (*Open Source Vulnerabilities*) understands.
 #[must_use]
 pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Option<String> {
     let encoded = match ecosystem {
@@ -57,7 +57,7 @@ pub fn purl_for(ecosystem: PackageEcosystem, name: &str, version: &str) -> Optio
     Some(format!("{prefix}{encoded}@{version}"))
 }
 
-/// Ecosistema de OSV correspondiente, si el ensaye aplica.
+/// Matching OSV ecosystem, if the assay applies.
 #[must_use]
 pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
     match ecosystem {
@@ -74,10 +74,10 @@ pub fn osv_ecosystem(ecosystem: PackageEcosystem) -> Option<&'static str> {
     }
 }
 
-/// Ecosistema de OSV a consultar para un componente concreto.
+/// OSV ecosystem to query for a specific component.
 ///
-/// Los paquetes de distro (Alpine, Debian, Ubuntu) van en el `purl`;
-/// npm / `PyPI` / Cargo usan el ecosistema del repositorio.
+/// Distro packages (Alpine, Debian, Ubuntu) go in the `purl`;
+/// npm / `PyPI` / Cargo use the repository ecosystem.
 #[must_use]
 pub fn osv_query_target(
     component: &AssayComponent,
@@ -142,9 +142,9 @@ fn ecosystem_from_purl(purl: &str) -> Option<&'static str> {
     }
 }
 
-/// Inserta o concreta un componente. Si ya había un rango declarado,
-/// una versión exacta del lockfile la sustituye y conserva el papel
-/// (`direct`). Las nuevas entradas de lockfile van como `transitive`.
+/// Inserts or concretizes a component. If a range was already
+/// declared, an exact lockfile version replaces it and keeps the
+/// role (`direct`). New lockfile entries go as `transitive`.
 pub(crate) fn merge_component(
     components: &mut Vec<AssayComponent>,
     name: String,
@@ -175,7 +175,7 @@ pub(crate) fn merge_component(
     components.push(AssayComponent::new(name, version, purl, kind));
 }
 
-/// Inventario a partir de la entrada de índice del ecosistema.
+/// Inventory from the ecosystem index entry.
 #[must_use]
 pub fn extract_components(
     ecosystem: PackageEcosystem,

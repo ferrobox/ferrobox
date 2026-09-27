@@ -3,71 +3,69 @@ use ferrobox_domain::api_token::ApiToken;
 use ferrobox_domain::ids::{ApiTokenId, UserId};
 use thiserror::Error;
 
-/// Vista de un token de API con metadatos de persistencia no sensibles.
+/// View of an API token with non-sensitive persistence metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiTokenRecord {
-    /// Entidad de dominio del token.
+    /// Domain entity of the token.
     pub token: ApiToken,
-    /// Momento de creación en formato RFC 3339.
+    /// Creation time in RFC 3339 format.
     pub created_at_rfc3339: String,
-    /// Caducidad en RFC 3339, o `None` si no caduca.
+    /// Expiry in RFC 3339, or `None` if it does not expire.
     pub expires_at_rfc3339: Option<String>,
 }
 
-/// Motivos por los que una operación de persistencia de tokens puede
-/// fallar.
+/// Reasons a token persistence operation can fail.
 #[derive(Debug, Error)]
 pub enum ApiTokenStoreError {
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la entidad [`ApiToken`].
+/// Persistence port for the [`ApiToken`] entity.
 ///
-/// El secreto en claro nunca atraviesa este puerto: solo se persiste su
-/// hash criptográfico, y la búsqueda de autenticación se hace por ese
-/// hash.
+/// The plaintext secret never crosses this port: only its cryptographic
+/// hash is persisted, and authentication lookup is done by that hash.
 #[async_trait]
 pub trait ApiTokenStore: Send + Sync {
-    /// Guarda un token junto con el hash de su secreto.
+    /// Saves a token together with the hash of its secret.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ApiTokenStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`ApiTokenStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn save(&self, token: &ApiToken, token_hash: &str) -> Result<(), ApiTokenStoreError>;
 
-    /// Busca un token por el hash de su secreto. Devuelve `None` si no
-    /// existe.
+    /// Looks up a token by the hash of its secret. Returns `None` if it
+    /// does not exist.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ApiTokenStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`ApiTokenStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn find_by_token_hash(
         &self,
         token_hash: &str,
     ) -> Result<Option<ApiToken>, ApiTokenStoreError>;
 
-    /// Lista los tokens de un usuario, sin secretos.
+    /// Lists a user's tokens, without secrets.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ApiTokenStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`ApiTokenStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn list_for_user(
         &self,
         user_id: UserId,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenStoreError>;
 
-    /// Elimina un token perteneciente al usuario indicado. Devuelve
-    /// `true` si existía y se borró.
+    /// Deletes a token belonging to the given user. Returns `true` if
+    /// it existed and was removed.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ApiTokenStoreError::Backend`] si el backend
-    /// subyacente falla.
+    /// Returns [`ApiTokenStoreError::Backend`] if the underlying
+    /// backend fails.
     async fn delete_for_user(
         &self,
         token_id: ApiTokenId,

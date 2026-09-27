@@ -1,4 +1,4 @@
-//! Rutas HTTP de configuración de la instancia.
+//! HTTP routes for instance settings.
 
 use std::sync::Arc;
 

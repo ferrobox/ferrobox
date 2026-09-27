@@ -1,8 +1,8 @@
-//! Rutas HTTP del protocolo Conan v2 (`conan upload` / `conan install`).
+//! HTTP routes for the Conan v2 protocol (`conan upload` / `conan install`).
 //!
-//! El remoto se monta en `/conan/<UUID>/`. `GET /v1/ping` declara las
-//! capacidades `revisions` y `complex_search`. Las lecturas son públicas;
-//! las escrituras exigen token de API y rol de escritura.
+//! The remote is mounted at `/conan/<UUID>/`. `GET /v1/ping` declares the
+//! `revisions` and `complex_search` capabilities. Reads are public;
+//! writes require an API token and a write role.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::error::ApiError;
 const CONAN_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 static CONAN_CAPABILITIES: HeaderName = HeaderName::from_static("x-conan-server-capabilities");
 
-/// Rutas de solo lectura (ping, auth, recetas, binarios, búsqueda).
+/// Read-only routes (ping, auth, recipes, binaries, search).
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/conan/{repository_id}/v1/ping", get(ping))
@@ -54,7 +54,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura (`PUT` de ficheros y yank).
+/// Write routes (file `PUT` and yank).
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/conan/{repository_id}/v2/conans/{*rest}", put(conan_put))

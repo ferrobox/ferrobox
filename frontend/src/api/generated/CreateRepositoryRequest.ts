@@ -3,10 +3,10 @@ import type { CreateRepositoryKindDto } from "./CreateRepositoryKindDto";
 import type { PackageEcosystemDto } from "./PackageEcosystemDto";
 
 /**
- * Cuerpo de la petición para crear un repositorio.
+ * Request body to create a repository.
  */
 export type CreateRepositoryRequest = { name: string, ecosystem: PackageEcosystemDto, 
 /**
- * Tipo de repositorio. Si se omite, se crea un `Forge`.
+ * Repository type. If omitted, a `Forge` is created.
  */
 kind?: CreateRepositoryKindDto, };

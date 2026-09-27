@@ -3,43 +3,42 @@ use ferrobox_domain::ids::RepositoryId;
 use ferrobox_domain::retention::RetentionPolicy;
 use thiserror::Error;
 
-/// Motivos por los que una operación sobre la política de retención puede
-/// fallar.
+/// Reasons a retention-policy operation can fail.
 #[derive(Debug, Error)]
 pub enum RetentionStoreError {
-    /// No existe la tabla de políticas: falta ejecutar la migración SQL.
+    /// The policy table is missing: the SQL migration has not been run.
     #[error(
         "missing SQL migration: run `sqlx migrate run` from the backend directory \
          (table repository_retention is missing)"
     )]
     MissingSchema,
 
-    /// El backend de persistencia concreto devolvió un error propio.
+    /// The concrete persistence backend returned its own error.
     #[error("persistence backend failure")]
     Backend(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Puerto de persistencia de la política de retención de un repositorio.
+/// Persistence port for a repository retention policy.
 #[async_trait]
 pub trait RetentionStore: Send + Sync {
-    /// Devuelve la política del repositorio, o «conservar todo» si nunca
-    /// se configuró.
+    /// Returns the repository policy, or "keep everything" if it was never
+    /// configured.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RetentionStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`RetentionStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn find_by_repository(
         &self,
         repository_id: RepositoryId,
     ) -> Result<RetentionPolicy, RetentionStoreError>;
 
-    /// Inserta o reemplaza la política del repositorio.
+    /// Inserts or replaces the repository policy.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RetentionStoreError::Backend`] si el backend subyacente
-    /// falla.
+    /// Returns [`RetentionStoreError::Backend`] if the underlying backend
+    /// fails.
     async fn save(
         &self,
         repository_id: RepositoryId,

@@ -1,4 +1,4 @@
-//! Inventario a partir de capas OCI, charts Helm y recetas Conan.
+//! Inventory from OCI layers, Helm charts, and Conan recipes.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
@@ -87,7 +87,7 @@ struct LayerFiles {
     pacman_descs: Vec<String>,
 }
 
-/// Inventario del paquete, incluyendo capas o receta cuando aplica.
+/// Package inventory, including layers or recipe when they apply.
 pub async fn extract_inventory(
     storage: &dyn StoragePort,
     index: &dyn PackageIndexStore,

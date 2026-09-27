@@ -1,4 +1,4 @@
-//! Rutas HTTP de retención y recolección de basura.
+//! HTTP routes for retention and garbage collection.
 
 use std::sync::Arc;
 

@@ -4,42 +4,42 @@ use thiserror::Error;
 
 const SHA256_HEX_LENGTH: usize = 64;
 
-/// Un checksum SHA-256 validado: siempre exactamente 64 caracteres
-/// hexadecimales en minúsculas.
+/// A validated SHA-256 checksum: always exactly 64
+/// lowercase hexadecimal characters.
 ///
-/// La única forma de obtener una instancia es a través de [`Self::parse`],
-/// que garantiza el invariante en el momento de la construcción -- una vez
-/// que existe un `Sha256Checksum`, el resto del sistema puede confiar en
-/// que es válido sin volver a comprobarlo.
+/// The only way to obtain an instance is through [`Self::parse`],
+/// which guarantees the invariant at construction time -- once
+/// a `Sha256Checksum` exists, the rest of the system can trust that
+/// it is valid without checking it again.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sha256Checksum(String);
 
-/// Motivos por los que una cadena no es un [`Sha256Checksum`] válido.
+/// Reasons why a string is not a valid [`Sha256Checksum`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ChecksumError {
-    /// El texto no tiene la longitud exacta esperada.
+    /// The text does not have the exact expected length.
     #[error("checksum must be exactly {expected} hexadecimal characters, got {actual}")]
     InvalidLength {
-        /// Longitud esperada, en caracteres.
+        /// Expected length, in characters.
         expected: usize,
-        /// Longitud real recibida, en caracteres.
+        /// Actual length received, in characters.
         actual: usize,
     },
 
-    /// El texto contiene un carácter fuera del alfabeto hexadecimal.
+    /// The text contains a character outside the hexadecimal alphabet.
     #[error("checksum contains a non-hexadecimal character: '{0}'")]
     InvalidCharacter(char),
 }
 
 impl Sha256Checksum {
-    /// Valida y construye un checksum a partir de su representación
-    /// hexadecimal, normalizando cualquier letra en mayúscula a minúscula.
+    /// Validates and builds a checksum from its hexadecimal
+    /// representation, normalizing any uppercase letter to lowercase.
     ///
     /// # Errors
     ///
-    /// Devuelve [`ChecksumError`] si `hex` no tiene exactamente 64
-    /// caracteres, o si contiene algún carácter fuera del alfabeto
-    /// hexadecimal.
+    /// Returns [`ChecksumError`] if `hex` does not have exactly 64
+    /// characters, or if it contains any character outside the
+    /// hexadecimal alphabet.
     pub fn parse(hex: impl Into<String>) -> Result<Self, ChecksumError> {
         let hex = hex.into();
 
@@ -57,7 +57,7 @@ impl Sha256Checksum {
         Ok(Self(hex.to_ascii_lowercase()))
     }
 
-    /// Devuelve la representación hexadecimal en minúsculas.
+    /// Returns the hexadecimal representation in lowercase.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

@@ -6,48 +6,46 @@ use thiserror::Error;
 
 use crate::auth_crypto::{hash_password, PasswordHashError};
 
-/// Motivos por los que el arranque del administrador inicial puede
-/// fallar.
+/// Reasons bootstrapping the initial administrator can fail.
 #[derive(Debug, Error)]
 pub enum BootstrapAdminError {
-    /// Fallo al hashear la contraseña del administrador.
+    /// Failed to hash the administrator password.
     #[error(transparent)]
     PasswordHashing(#[from] PasswordHashError),
 
-    /// Fallo al persistir el usuario administrador.
+    /// Failed to persist the administrator user.
     #[error(transparent)]
     Persistence(#[from] UserStoreError),
 }
 
-/// Resultado de intentar crear el administrador inicial.
+/// Result of attempting to create the initial administrator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootstrapAdminOutcome {
-    /// Ya existía al menos un usuario: no se creó nada.
+    /// At least one user already existed: nothing was created.
     AlreadyInitialized,
-    /// Se creó el administrador con las credenciales indicadas.
+    /// The administrator was created with the given credentials.
     Created,
 }
 
-/// Caso de uso: crear el usuario administrador la primera vez que el
-/// sistema arranca sin usuarios.
+/// Use case: create the administrator user the first time the system
+/// starts with no users.
 pub struct BootstrapAdminUseCase {
     user_store: Arc<dyn UserStore>,
 }
 
 impl BootstrapAdminUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(user_store: Arc<dyn UserStore>) -> Self {
         Self { user_store }
     }
 
-    /// Si no hay usuarios, crea uno con rol [`Role::Admin`] y las
-    /// credenciales indicadas. Si ya hay usuarios, no hace nada.
+    /// If there are no users, creates one with role [`Role::Admin`] and
+    /// the given credentials. If users already exist, does nothing.
     ///
     /// # Errors
     ///
-    /// Devuelve [`BootstrapAdminError`] si el hashing o la
-    /// persistencia fallan.
+    /// Returns [`BootstrapAdminError`] if hashing or persistence fails.
     pub async fn execute(
         &self,
         username: Username,

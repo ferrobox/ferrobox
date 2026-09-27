@@ -9,28 +9,28 @@ use crate::package_coordinate::PackageEcosystem;
 
 const MAX_NAME_LENGTH: usize = 100;
 
-/// Nombre validado de un repositorio: no vacío, con longitud acotada, y
-/// restringido a caracteres seguros para aparecer en una URL.
+/// Validated repository name: non-empty, with a bounded length, and
+/// restricted to characters safe to appear in a URL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RepositoryName(String);
 
-/// Motivos por los que una cadena no es un [`RepositoryName`] válido.
+/// Reasons why a string is not a valid [`RepositoryName`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RepositoryNameError {
-    /// El nombre no puede estar vacío.
+    /// The name cannot be empty.
     #[error("repository name cannot be empty")]
     Empty,
 
-    /// El nombre supera la longitud máxima permitida.
+    /// The name exceeds the maximum allowed length.
     #[error("repository name cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 
-    /// El nombre contiene un carácter fuera del alfabeto permitido.
+    /// The name contains a character outside the allowed alphabet.
     #[error(
         "repository name contains an invalid character: '{0}' \
          (only ASCII letters, digits, '-' and '_' are allowed)"
@@ -39,13 +39,13 @@ pub enum RepositoryNameError {
 }
 
 impl RepositoryName {
-    /// Valida y construye un nombre de repositorio.
+    /// Validates and builds a repository name.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryNameError`] si `name` está vacío, supera
-    /// `100` caracteres, o contiene algún carácter fuera del alfabeto
-    /// permitido (letras y dígitos ASCII, `-` y `_`).
+    /// Returns [`RepositoryNameError`] if `name` is empty, exceeds
+    /// `100` characters, or contains any character outside the
+    /// allowed alphabet (ASCII letters and digits, `-` and `_`).
     pub fn parse(name: impl Into<String>) -> Result<Self, RepositoryNameError> {
         let name = name.into();
 
@@ -70,7 +70,7 @@ impl RepositoryName {
         Ok(Self(name))
     }
 
-    /// Devuelve el nombre como cadena de texto.
+    /// Returns the name as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -91,39 +91,39 @@ impl TryFrom<String> for RepositoryName {
     }
 }
 
-/// La estrategia de origen y almacenamiento de un repositorio.
+/// The origin and storage strategy of a repository.
 ///
-/// A diferencia de una enumeración al estilo C (una simple lista de
-/// etiquetas), cada variante de este tipo lleva datos propios y
-/// distintos -- es un *tipo algebraico de datos*: el compilador conoce,
-/// para cada variante, exactamente qué campos existen, y exige manejar
-/// todas las variantes explícitamente en cualquier `match` sobre este
-/// tipo.
+/// Unlike a C-style enumeration (a simple list of
+/// labels), each variant of this type carries its own distinct
+/// data -- it is an *algebraic data type*: the compiler knows,
+/// for each variant, exactly which fields exist, and requires every
+/// variant to be handled explicitly in any `match` on this
+/// type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepositoryKind {
-    /// Almacenamiento propio: `FerroBox` es la fuente de verdad del
-    /// contenido publicado directamente aquí.
+    /// Owned storage: `FerroBox` is the source of truth of the
+    /// content published directly here.
     Forge,
 
-    /// Réplica cacheada de una fuente externa. La primera petición de un
-    /// artefacto ausente se resuelve contra `upstream`; las peticiones
-    /// posteriores se sirven desde la copia ya almacenada localmente.
+    /// Cached replica of an external source. The first request for a
+    /// missing artifact is resolved against `upstream`; later
+    /// requests are served from the copy already stored locally.
     Mirror {
-        /// URL base del repositorio externo que se está replicando.
+        /// Base URL of the external repository being replicated.
         upstream: Url,
     },
 
-    /// Punto de acceso único que agrega varios repositorios (`Forge`
-    /// y/o `Mirror`) bajo una sola URL, resolviendo internamente contra
-    /// cuál de ellos responder.
+    /// Single access point that aggregates several repositories (`Forge`
+    /// and/or `Mirror`) under one URL, resolving internally against
+    /// which of them to respond.
     Alloy {
-        /// Repositorios agregados, en el orden en que se consultan.
+        /// Aggregated repositories, in the order they are consulted.
         members: Vec<RepositoryId>,
     },
 }
 
 impl RepositoryKind {
-    /// Descripción breve en una palabra, útil para registros y depuración.
+    /// Brief one-word description, useful for logs and debugging.
     #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
@@ -134,22 +134,21 @@ impl RepositoryKind {
     }
 }
 
-/// Un repositorio de artefactos: agrupa una estrategia de origen
-/// (`RepositoryKind`) y un ecosistema de paquetes (`PackageEcosystem`)
-/// bajo un nombre único.
+/// A repository of artifacts: groups an origin strategy
+/// (`RepositoryKind`) and a package ecosystem (`PackageEcosystem`)
+/// under a unique name.
 ///
-/// `RepositoryKind` y `PackageEcosystem` son deliberadamente dos campos
-/// independientes, no una sola jerarquía: el primero responde a "¿de
-/// dónde viene el contenido y cómo se almacena?" (almacenamiento propio,
-/// réplica cacheada, o agregación de otros repositorios), mientras que
-/// el segundo responde a "¿qué formato de paquete contiene?" (Cargo,
-/// npm, genérico...). Ambas preguntas son ortogonales -- un repositorio
-/// `Mirror` puede replicar tanto un registro de Cargo como uno de npm, y
-/// un repositorio `Forge` de Cargo se comporta, en cuanto a
-/// almacenamiento, igual que uno `Forge` genérico. Nexus y Artifactory
-/// modelan esta misma distinción con dos ejes independientes
-/// (tipo de repositorio y formato de paquete); `FerroBox` sigue el mismo
-/// principio de diseño con su propio vocabulario.
+/// `RepositoryKind` and `PackageEcosystem` are deliberately two
+/// independent fields, not a single hierarchy: the first answers "where
+/// does the content come from and how is it stored?" (owned storage,
+/// cached replica, or aggregation of other repositories), while the
+/// second answers "what package format does it contain?" (Cargo,
+/// npm, generic...). Both questions are orthogonal -- a `Mirror`
+/// repository can replicate a Cargo registry as well as an npm one, and
+/// a Cargo `Forge` behaves, as far as storage is concerned, the same
+/// as a generic `Forge`. `FerroBox` models this same distinction with
+/// two independent axes (repository kind and package format) and its
+/// own vocabulary.
 #[derive(Debug, Clone)]
 pub struct Repository {
     id: RepositoryId,
@@ -160,22 +159,22 @@ pub struct Repository {
     last_prefetch_at: Option<DateTime<Utc>>,
 }
 
-/// Motivos por los que una combinación de nombre y tipo no forma un
-/// [`Repository`] válido.
+/// Reasons why a combination of name and kind does not form a
+/// valid [`Repository`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RepositoryError {
-    /// Un repositorio `Alloy` sin miembros no agrega nada -- es una
-    /// promesa vacía, así que se rechaza en la propia construcción.
+    /// An `Alloy` repository with no members aggregates nothing -- it is an
+    /// empty promise, so it is rejected at construction.
     #[error("an Alloy repository must aggregate at least one member repository")]
     EmptyAlloy,
 }
 
 impl Repository {
-    /// Registra un repositorio nuevo, asignándole un identificador nuevo.
+    /// Registers a new repository, assigning it a new identifier.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryError`] si `kind` es un `Alloy` sin miembros.
+    /// Returns [`RepositoryError`] if `kind` is an `Alloy` with no members.
     pub fn new(
         name: RepositoryName,
         kind: RepositoryKind,
@@ -192,15 +191,15 @@ impl Repository {
         })
     }
 
-    /// Reconstituye un repositorio ya existente a partir de un
-    /// identificador conocido (por ejemplo, al cargarlo desde
-    /// persistencia).
+    /// Reconstitutes an already existing repository from a
+    /// known identifier (for example, when loading it from
+    /// persistence).
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryError`] si `kind` es un `Alloy` sin
-    /// miembros -- incluso al reconstituir, no confiamos ciegamente en
-    /// que los datos persistidos cumplan el invariante.
+    /// Returns [`RepositoryError`] if `kind` is an `Alloy` with no
+    /// members -- even when reconstituting, we do not blindly trust
+    /// that persisted data satisfies the invariant.
     pub fn from_parts(
         id: RepositoryId,
         name: RepositoryName,
@@ -227,55 +226,55 @@ impl Repository {
         Ok(())
     }
 
-    /// Identificador único de este repositorio.
+    /// Unique identifier of this repository.
     #[must_use]
     pub fn id(&self) -> RepositoryId {
         self.id
     }
 
-    /// Nombre del repositorio.
+    /// Repository name.
     #[must_use]
     pub fn name(&self) -> &RepositoryName {
         &self.name
     }
 
-    /// Estrategia de origen y almacenamiento de este repositorio.
+    /// Origin and storage strategy of this repository.
     #[must_use]
     pub fn kind(&self) -> &RepositoryKind {
         &self.kind
     }
 
-    /// Ecosistema de paquetes que este repositorio indexa.
+    /// Package ecosystem this repository indexes.
     #[must_use]
     pub fn ecosystem(&self) -> PackageEcosystem {
         self.ecosystem
     }
 
-    /// Sustituye la estrategia de origen, conservando identidad, nombre
-    /// y ecosistema. Sirve para actualizar los miembros de un `Alloy`.
+    /// Replaces the origin strategy, keeping identity, name,
+    /// and ecosystem. Used to update the members of an `Alloy`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RepositoryError`] si `kind` es un `Alloy` sin miembros.
+    /// Returns [`RepositoryError`] if `kind` is an `Alloy` with no members.
     pub fn with_kind(self, kind: RepositoryKind) -> Result<Self, RepositoryError> {
         Self::validate(&kind)?;
         Ok(Self { kind, ..self })
     }
 
-    /// Horas entre refrescos programados del *upstream*. `None` = no hay
+    /// Hours between scheduled *upstream* refreshes. `None` = there is no
     /// cron.
     #[must_use]
     pub fn prefetch_interval_hours(&self) -> Option<u32> {
         self.prefetch_interval_hours
     }
 
-    /// Último refresco programado, si ya corrió alguna vez.
+    /// Last scheduled refresh, if it has already run once.
     #[must_use]
     pub fn last_prefetch_at(&self) -> Option<DateTime<Utc>> {
         self.last_prefetch_at
     }
 
-    /// Intervalo y marca de último refresco. Solo tiene efecto en un
+    /// Interval and last-refresh mark. Only has effect on a
     /// [`RepositoryKind::Mirror`].
     #[must_use]
     pub fn with_prefetch_schedule(
@@ -290,7 +289,7 @@ impl Repository {
         }
     }
 
-    /// `true` si es un Mirror con intervalo y ya toca refrescar.
+    /// `true` if it is a Mirror with an interval and it is time to refresh.
     #[must_use]
     pub fn prefetch_is_due(&self, now: DateTime<Utc>) -> bool {
         if !matches!(self.kind, RepositoryKind::Mirror { .. }) {

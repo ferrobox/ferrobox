@@ -1,4 +1,4 @@
-//! Inventario a partir de lockfiles y metadatos dentro del artefacto.
+//! Inventory from lockfiles and metadata inside the artifact.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
@@ -21,7 +21,7 @@ use crate::storage_key::storage_key_for;
 const MAX_LOCKFILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_COMPONENTS: usize = 400;
 
-/// Añade componentes resueltos desde lockfiles o metadatos del binario.
+/// Appends components resolved from lockfiles or binary metadata.
 pub async fn append_from_stored_package(
     storage: &dyn StoragePort,
     index: &dyn PackageIndexStore,

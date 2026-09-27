@@ -1,11 +1,11 @@
-//! Estrategia de empaquetado para módulos Go: protocolo `GOPROXY`
-//! (`go get`, `go mod download`) contra un repositorio `FerroBox`.
+//! Packaging strategy for Go modules: `GOPROXY` protocol
+//! (`go get`, `go mod download`) against a `FerroBox` repository.
 //!
-//! Cubre **Forge** (subida del zip del módulo, listado, `.info` / `.mod`
-//! / `.zip`, `@latest` y yank), **Mirror** (caché *pull-through* de un
-//! proxy V3) y lecturas en **Alloy**. Las versiones son inmutables; el
-//! yank las oculta de `@v/list` y `@latest` pero el zip sigue
-//! descargable.
+//! Covers **Forge** (module zip upload, listing, `.info` / `.mod`
+//! / `.zip`, `@latest`, and yank), **Mirror** (*pull-through* cache of a
+//! V3 proxy), and reads on **Alloy**. Versions are immutable; yank
+//! hides them from `@v/list` and `@latest` but the zip remains
+//! downloadable.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -39,7 +39,7 @@ use crate::content_hash::sha256_checksum;
 use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema Go.
+/// Packaging strategy for the Go ecosystem.
 pub struct GoPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -51,7 +51,7 @@ pub struct GoPackagingStrategy {
 }
 
 impl GoPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos.
+    /// Builds the strategy from its ports.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -71,14 +71,14 @@ impl GoPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un módulo.
+    /// Connects automatic assay when publishing or caching a module.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -687,7 +687,7 @@ fn upstream_url(upstream: &Url, escaped_module: &str, suffix: &str) -> String {
     format!("{base}/{escaped_module}/{suffix}")
 }
 
-/// Codifica mayúsculas como `!` + minúscula (`Azure` → `!azure`).
+/// Encodes uppercase as `!` + lowercase (`Azure` → `!azure`).
 #[must_use]
 pub fn escape_module_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
@@ -706,12 +706,12 @@ fn escaped_module_path(path: &str) -> String {
     escape_module_path(path)
 }
 
-/// Decodifica un módulo o versión del protocolo `GOPROXY`.
+/// Decodes a module or version from the `GOPROXY` protocol.
 ///
 /// # Errors
 ///
-/// Devuelve [`PackagingError::InvalidPayload`] si un `!` no va seguido
-/// de una letra minúscula.
+/// Returns [`PackagingError::InvalidPayload`] if a `!` is not followed
+/// by a lowercase letter.
 pub fn unescape_module_path(path: &str) -> Result<String, PackagingError> {
     let mut out = String::with_capacity(path.len());
     let mut chars = path.chars();
@@ -733,7 +733,7 @@ pub fn unescape_module_path(path: &str) -> Result<String, PackagingError> {
     Ok(out)
 }
 
-/// Módulo y versión de un `.zip`. `.info`, `.mod` y `list` no disparan.
+/// Module and version of a `.zip`. `.info`, `.mod`, and `list` do not trigger.
 #[must_use]
 pub fn admission_download_target(path: &str) -> Option<(String, String)> {
     match parse_go_path(path).ok()? {
@@ -874,7 +874,7 @@ fn validate_go_version(version: &str) -> Result<(), PackagingError> {
     Ok(())
 }
 
-/// `true` si la versión Go es una prerelease (`v1.0.0-rc.1`).
+/// `true` if the Go version is a prerelease (`v1.0.0-rc.1`).
 #[must_use]
 pub fn is_prerelease_version(version: &str) -> bool {
     let core = version
@@ -916,11 +916,11 @@ fn version_key(version: &str) -> (u64, u64, u64, bool, String) {
     (major, minor, patch, pre.is_empty(), pre.to_string())
 }
 
-/// Construye un zip de módulo mínimo para pruebas.
+/// Builds a minimal module zip for tests.
 ///
 /// # Panics
 ///
-/// Entra en pánico si no se puede escribir el zip en memoria.
+/// Panics if the zip cannot be written in memory.
 #[must_use]
 pub fn build_module_zip(module: &str, version: &str) -> Bytes {
     let prefix = format!("{module}@{version}");

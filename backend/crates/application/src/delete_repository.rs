@@ -9,36 +9,35 @@ use thiserror::Error;
 
 use crate::storage_key::storage_key_for;
 
-/// Motivos por los que eliminar un repositorio puede fallar.
+/// Reasons deleting a repository can fail.
 #[derive(Debug, Error)]
 pub enum DeleteRepositoryError {
-    /// El repositorio no existe.
+    /// The repository does not exist.
     #[error("repository {0} does not exist")]
     NotFound(RepositoryId),
 
-    /// Fallo al consultar o actualizar el almacén de repositorios.
+    /// Failed to query or update the repository store.
     #[error(transparent)]
     RepositoryPersistence(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar o actualizar el almacén de artefactos.
+    /// Failed to query or update the artifact store.
     #[error(transparent)]
     ArtifactPersistence(#[from] ArtifactStoreError),
 
-    /// Fallo al consultar o actualizar el índice de paquetes.
+    /// Failed to query or update the package index.
     #[error(transparent)]
     IndexPersistence(#[from] PackageIndexStoreError),
 
-    /// Fallo al eliminar un objeto binario.
+    /// Failed to delete a binary object.
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
 
-/// Caso de uso: eliminar un repositorio y todo su contenido.
+/// Use case: delete a repository and all of its content.
 ///
-/// El orden es deliberado: primero los objetos binarios en
-/// almacenamiento, después las filas de índice y de artefactos (que
-/// referencian al repositorio sin `ON DELETE CASCADE`), y por último el
-/// propio repositorio.
+/// The order is deliberate: first the binary objects in storage, then
+/// the index and artifact rows (which reference the repository without
+/// `ON DELETE CASCADE`), and finally the repository itself.
 pub struct DeleteRepositoryUseCase {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -47,7 +46,7 @@ pub struct DeleteRepositoryUseCase {
 }
 
 impl DeleteRepositoryUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -63,12 +62,12 @@ impl DeleteRepositoryUseCase {
         }
     }
 
-    /// Elimina el repositorio y todo lo que cuelga de él.
+    /// Deletes the repository and everything hanging off it.
     ///
     /// # Errors
     ///
-    /// Devuelve [`DeleteRepositoryError::NotFound`] si el repositorio no
-    /// existe, o cualquiera de las demás variantes si falla un puerto.
+    /// Returns [`DeleteRepositoryError::NotFound`] if the repository
+    /// does not exist, or any of the other variants if a port fails.
     pub async fn execute(&self, repository_id: RepositoryId) -> Result<(), DeleteRepositoryError> {
         if self
             .repository_store

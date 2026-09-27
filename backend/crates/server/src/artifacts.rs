@@ -1,5 +1,5 @@
-//! Rutas HTTP para publicar, listar y descargar artefactos genéricos
-//! (sin ningún protocolo de ecosistema de por medio).
+//! HTTP routes to publish, list, and download generic artifacts
+//! (without any ecosystem protocol in between).
 
 use std::sync::Arc;
 

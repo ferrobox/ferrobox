@@ -1,4 +1,4 @@
-//! Extractor y middleware de autenticación Bearer / Token / Basic.
+//! Bearer / Token / Basic authentication extractor and middleware.
 
 use std::sync::Arc;
 
@@ -16,19 +16,19 @@ use ferrobox_domain::user::User;
 use crate::AppState;
 use crate::dto::ErrorResponse;
 
-/// Token Bearer que `GET /v2/token` emite sin credenciales cuando el
-/// `scope` es solo `pull` (o no hay scope). Las escrituras lo rechazan:
-/// no es un secreto de API real, y Helm/ORAS no reintenta tras un 401.
+/// Bearer token that `GET /v2/token` issues without credentials when the
+/// `scope` is only `pull` (or there is no scope). Writes reject it: it is
+/// not a real API secret, and Helm/ORAS do not retry after a 401.
 pub(crate) const OCI_ANONYMOUS_TOKEN: &str = "anonymous";
 
-/// URL base del `realm` Bearer que Docker usa para pedir el token.
+/// Base URL of the Bearer `realm` that Docker uses to request the token.
 ///
-/// Docker solo reenvía las credenciales de `docker login` al `realm` si
-/// el host coincide con el del registro. `PUBLIC_BASE_URL` puede ser
-/// `localhost` mientras el cliente usa `127.0.0.1` (o al revés), y el
-/// push falla entonces con `missing Authorization credentials`.
-/// Preferimos `Host` / `X-Forwarded-Host`. El esquema sale de
-/// `X-Forwarded-Proto` o, si el host coincide, de `PUBLIC_BASE_URL`.
+/// Docker only forwards `docker login` credentials to the `realm` if the
+/// host matches the registry. `PUBLIC_BASE_URL` may be `localhost` while
+/// the client uses `127.0.0.1` (or the other way around), and the push
+/// then fails with `missing Authorization credentials`.
+/// Prefer `Host` / `X-Forwarded-Host`. The scheme comes from
+/// `X-Forwarded-Proto` or, if the host matches, from `PUBLIC_BASE_URL`.
 pub(crate) fn oci_realm_base(public_base_url: &str, headers: &HeaderMap) -> String {
     let public = public_base_url.trim_end_matches('/');
     let (public_scheme, public_host) = split_url_scheme_host(public);
@@ -58,8 +58,8 @@ pub(crate) fn oci_realm_base(public_base_url: &str, headers: &HeaderMap) -> Stri
     }
 }
 
-/// Construye el desafío Bearer que Docker espera: un `realm` con URL
-/// absoluta hacia el emisor de tokens.
+/// Builds the Bearer challenge Docker expects: a `realm` with an
+/// absolute URL to the token issuer.
 pub(crate) fn oci_bearer_challenge(public_base_url: &str, path: &str) -> HeaderValue {
     let realm = format!("{}/v2/token", public_base_url.trim_end_matches('/'));
     let value = match oci_repository_scope(path) {
@@ -137,7 +137,7 @@ fn strip_distribution_suffix(remainder: &str) -> Option<&str> {
         .filter(|name| !name.is_empty())
 }
 
-/// 401 del Distribution Spec con `WWW-Authenticate` usable por Docker.
+/// Distribution Spec 401 with a `WWW-Authenticate` usable by Docker.
 pub(crate) fn oci_unauthorized_response(
     public_base_url: &str,
     request_headers: &HeaderMap,
@@ -172,15 +172,15 @@ pub(crate) fn oci_unauthorized_response(
         .into_response()
 }
 
-/// Usuario (y token) autenticados extraídos de la cabecera
-/// `Authorization`.
+/// Authenticated user (and token) extracted from the `Authorization`
+/// header.
 #[derive(Clone)]
 pub(crate) struct AuthenticatedUser {
     pub(crate) user: User,
     pub(crate) token: ApiToken,
 }
 
-/// Error de autenticación HTTP.
+/// HTTP authentication error.
 pub(crate) enum AuthError {
     Missing,
     Invalid,
@@ -227,8 +227,8 @@ impl FromRequestParts<Arc<AppState>> for AuthenticatedUser {
     }
 }
 
-/// Middleware que exige un token Bearer / Token válido y lo deja en
-/// las extensiones de la petición para los extractores posteriores.
+/// Middleware that requires a valid Bearer / Token token and stores it
+/// in the request extensions for later extractors.
 pub(crate) async fn require_auth(
     State(state): State<Arc<AppState>>,
     mut request: Request,
@@ -279,11 +279,11 @@ pub(crate) async fn require_auth(
     Ok(next.run(request).await)
 }
 
-/// Extrae el secreto de `Authorization`.
+/// Extracts the secret from `Authorization`.
 ///
-/// `cargo publish` envía el token **tal cual** (`Authorization: fb_…`),
-/// sin esquema. La UI y curl suelen usar `Bearer` o `Token`. `twine`
-/// envía HTTP Basic (`__token__` / `fb_…`): se usa la contraseña.
+/// `cargo publish` sends the token **as-is** (`Authorization: fb_…`),
+/// with no scheme. The UI and curl usually use `Bearer` or `Token`.
+/// `twine` sends HTTP Basic (`__token__` / `fb_…`): the password is used.
 pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     if let Some(key) = headers
         .get("x-nuget-apikey")

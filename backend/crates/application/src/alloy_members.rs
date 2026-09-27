@@ -6,37 +6,37 @@ use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
-/// Motivos por los que un conjunto de miembros de `Alloy` no es válido.
+/// Reasons a set of `Alloy` members is invalid.
 #[derive(Debug, Error)]
 pub enum ResolveAlloyMembersError {
-    /// Un `Alloy` necesita al menos un repositorio miembro.
+    /// An `Alloy` needs at least one member repository.
     #[error("an Alloy repository must aggregate at least one member repository")]
     EmptyAlloy,
 
-    /// Uno de los miembros indicados no existe.
+    /// One of the given members does not exist.
     #[error("alloy member repository does not exist")]
     MemberNotFound,
 
-    /// Un miembro no comparte el ecosistema del `Alloy`.
+    /// A member does not share the `Alloy` ecosystem.
     #[error("alloy members must use the same package ecosystem")]
     MemberEcosystemMismatch,
 
-    /// Un `Alloy` no puede agregar a otro `Alloy` (evita ciclos).
+    /// An `Alloy` cannot aggregate another `Alloy` (avoids cycles).
     #[error("alloy members must be Forge or Mirror repositories")]
     NestedAlloy,
 
-    /// Fallo al consultar el almacén de repositorios.
+    /// Failed to query the repository store.
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 }
 
-/// Valida y deduplica los miembros de un `Alloy`: mismo ecosistema,
-/// solo `Forge` o `Mirror`, y al menos uno.
+/// Validates and deduplicates the members of an `Alloy`: same ecosystem,
+/// only `Forge` or `Mirror`, and at least one.
 ///
 /// # Errors
 ///
-/// Devuelve [`ResolveAlloyMembersError`] si la lista está vacía, un
-/// miembro no existe, no comparte ecosistema, o es otro `Alloy`.
+/// Returns [`ResolveAlloyMembersError`] if the list is empty, a member
+/// does not exist, does not share the ecosystem, or is another `Alloy`.
 pub async fn resolve_alloy_members(
     repository_store: &dyn RepositoryStore,
     ecosystem: PackageEcosystem,

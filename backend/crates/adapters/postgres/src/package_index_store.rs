@@ -13,14 +13,13 @@ use uuid::Uuid;
 
 use crate::ecosystem_column;
 
-/// Adaptador de [`PackageIndexStore`] contra `PostgreSQL`.
+/// [`PackageIndexStore`] adapter against `PostgreSQL`.
 pub struct PostgresPackageIndexStore {
     pool: PgPool,
 }
 
 impl PostgresPackageIndexStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones ya
-    /// configurado.
+    /// Builds the adapter from an already configured connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -435,11 +434,10 @@ mod tests {
             .unwrap();
         assert_eq!(entries.len(), 1);
 
-        // Igual que `artifacts`, `package_index_entries` referencia
-        // `repositories` y `artifacts` sin `ON DELETE CASCADE`
-        // deliberadamente -- hay que deshacer las filas dependientes a
-        // mano antes de poder borrar el repositorio y el artefacto de
-        // prueba.
+        // Same as `artifacts`, `package_index_entries` references
+        // `repositories` and `artifacts` without `ON DELETE CASCADE`
+        // on purpose -- dependent rows must be undone by hand before
+        // the test repository and artifact can be deleted.
         sqlx::query!(
             "DELETE FROM package_index_entries WHERE repository_id = $1",
             Uuid::from(repository.id()),

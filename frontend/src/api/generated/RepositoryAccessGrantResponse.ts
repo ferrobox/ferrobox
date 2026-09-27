@@ -2,6 +2,6 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Grupo con acceso a un repositorio.
+ * Group with access to a repository.
  */
 export type RepositoryAccessGrantResponse = { group_id: string, group_name: string, role: RoleDto, };

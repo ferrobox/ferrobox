@@ -2,19 +2,19 @@
 import type { RoleDto } from "./RoleDto";
 
 /**
- * Representación de un usuario en las respuestas de la API.
+ * Representation of a user in API responses.
  */
 export type UserResponse = { id: string, username: string, 
 /**
- * Correo de la cuenta, o `null` si el administrador de arranque
- * no tiene uno.
+ * Account email, or `null` if the bootstrap administrator has
+ * none.
  */
 email: string | null, role: RoleDto, 
 /**
- * `true` si la cuenta está vinculada a un emisor `OIDC`.
+ * `true` if the account is linked to an `OIDC` issuer.
  */
 sso: boolean, 
 /**
- * `true` si es una cuenta robot (CI).
+ * `true` if this is a robot account (CI).
  */
 robot: boolean, };

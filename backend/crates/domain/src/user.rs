@@ -9,25 +9,25 @@ const MAX_USERNAME_LENGTH: usize = 64;
 const MAX_EMAIL_LENGTH: usize = 254;
 const MIN_PASSWORD_LENGTH: usize = 8;
 
-/// Rol de autorización de un usuario en `FerroBox`.
+/// Authorization role of a user in `FerroBox`.
 ///
-/// Los roles son deliberadamente pocos y ordenados por privilegio:
-/// `Admin` gestiona cuentas (crear, borrar, cambiar rol, restablecer
-/// contraseñas ajenas) y puede escribir; `Developer` puede publicar y
-/// crear repositorios; `Reader` solo lee.
+/// Roles are deliberately few and ordered by privilege:
+/// `Admin` manages accounts (create, delete, change role, reset
+/// other people's passwords) and can write; `Developer` can publish and
+/// create repositories; `Reader` only reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
-    /// Gestión completa: usuarios, repositorios y publicación.
+    /// Full management: users, repositories, and publication.
     Admin,
-    /// Puede crear repositorios y publicar artefactos; no gestiona
-    /// usuarios.
+    /// Can create repositories and publish artifacts; does not manage
+    /// users.
     Developer,
-    /// Solo lectura de repositorios y artefactos.
+    /// Read-only access to repositories and artifacts.
     Reader,
 }
 
 impl Role {
-    /// Etiqueta estable usada en persistencia y en la API HTTP.
+    /// Stable label used in persistence and in the HTTP API.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -37,11 +37,11 @@ impl Role {
         }
     }
 
-    /// Parsea la etiqueta estable de un rol.
+    /// Parses the stable label of a role.
     ///
     /// # Errors
     ///
-    /// Devuelve [`RoleError::Unknown`] si la etiqueta no es conocida.
+    /// Returns [`RoleError::Unknown`] if the label is not known.
     pub fn parse(value: &str) -> Result<Self, RoleError> {
         match value {
             "admin" => Ok(Self::Admin),
@@ -51,14 +51,14 @@ impl Role {
         }
     }
 
-    /// `true` si este rol puede gestionar usuarios.
+    /// `true` if this role can manage users.
     #[must_use]
     pub fn can_manage_users(self) -> bool {
         matches!(self, Self::Admin)
     }
 
-    /// `true` si este rol puede crear repositorios y publicar
-    /// artefactos.
+    /// `true` if this role can create repositories and publish
+    /// artifacts.
     #[must_use]
     pub fn can_write_artifacts(self) -> bool {
         matches!(self, Self::Admin | Self::Developer)
@@ -71,36 +71,36 @@ impl fmt::Display for Role {
     }
 }
 
-/// Motivos por los que una cadena no es un [`Role`] válido.
+/// Reasons why a string is not a valid [`Role`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RoleError {
-    /// Etiqueta de rol desconocida.
+    /// Unknown role label.
     #[error("unknown role: '{0}'")]
     Unknown(String),
 }
 
-/// Nombre de usuario validado: no vacío, con longitud acotada, y
-/// restringido a caracteres seguros para identificadores.
+/// Validated username: non-empty, with a bounded length, and
+/// restricted to characters safe for identifiers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Username(String);
 
-/// Motivos por los que una cadena no es un [`Username`] válido.
+/// Reasons why a string is not a valid [`Username`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum UsernameError {
-    /// El nombre de usuario no puede estar vacío.
+    /// The username cannot be empty.
     #[error("username cannot be empty")]
     Empty,
 
-    /// El nombre de usuario supera la longitud máxima permitida.
+    /// The username exceeds the maximum allowed length.
     #[error("username cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 
-    /// El nombre contiene un carácter fuera del alfabeto permitido.
+    /// The name contains a character outside the allowed alphabet.
     #[error(
         "username contains an invalid character: '{0}' \
          (only ASCII letters, digits, '-' and '_' are allowed)"
@@ -109,13 +109,13 @@ pub enum UsernameError {
 }
 
 impl Username {
-    /// Valida y construye un nombre de usuario.
+    /// Validates and builds a username.
     ///
     /// # Errors
     ///
-    /// Devuelve [`UsernameError`] si `username` está vacío, supera
-    /// `64` caracteres, o contiene algún carácter fuera del alfabeto
-    /// permitido (letras y dígitos ASCII, `-` y `_`).
+    /// Returns [`UsernameError`] if `username` is empty, exceeds
+    /// `64` characters, or contains any character outside the
+    /// allowed alphabet (ASCII letters and digits, `-` and `_`).
     pub fn parse(username: impl Into<String>) -> Result<Self, UsernameError> {
         let username = username.into();
 
@@ -140,7 +140,7 @@ impl Username {
         Ok(Self(username))
     }
 
-    /// Devuelve el nombre de usuario como cadena de texto.
+    /// Returns the username as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -161,41 +161,41 @@ impl TryFrom<String> for Username {
     }
 }
 
-/// Correo electrónico validado, normalizado a minúsculas ASCII.
+/// Validated email address, normalized to ASCII lowercase.
 ///
-/// El administrador inicial creado al arrancar puede no tener correo
-/// (`None` en [`User`]). Las cuentas que crea un Admin sí lo requieren.
+/// The initial administrator created at startup may have no email
+/// (`None` on [`User`]). Accounts created by an Admin do require one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Email(String);
 
-/// Motivos por los que una cadena no es un [`Email`] válido.
+/// Reasons why a string is not a valid [`Email`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum EmailError {
-    /// El correo no puede estar vacío.
+    /// The email cannot be empty.
     #[error("email cannot be empty")]
     Empty,
 
-    /// El correo supera la longitud máxima permitida.
+    /// The email exceeds the maximum allowed length.
     #[error("email cannot exceed {max} characters, got {actual}")]
     TooLong {
-        /// Longitud máxima permitida.
+        /// Maximum allowed length.
         max: usize,
-        /// Longitud real recibida.
+        /// Actual length received.
         actual: usize,
     },
 
-    /// El correo no tiene forma `local@dominio.tld`.
+    /// The email does not have the form `local@domain.tld`.
     #[error("email is not a valid address")]
     Invalid,
 }
 
 impl Email {
-    /// Valida y normaliza un correo electrónico.
+    /// Validates and normalizes an email address.
     ///
     /// # Errors
     ///
-    /// Devuelve [`EmailError`] si está vacío, es demasiado largo o no
-    /// tiene forma de dirección.
+    /// Returns [`EmailError`] if it is empty, too long, or does not
+    /// have the form of an address.
     pub fn parse(email: impl Into<String>) -> Result<Self, EmailError> {
         let email = email.into();
         let trimmed = email.trim();
@@ -233,7 +233,7 @@ impl Email {
         Ok(Self(normalized))
     }
 
-    /// Devuelve el correo como cadena de texto.
+    /// Returns the email as a text string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -246,30 +246,30 @@ impl fmt::Display for Email {
     }
 }
 
-/// Motivos por los que una contraseña no cumple la política de la
-/// instancia.
+/// Reasons why a password does not meet the instance
+/// policy.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PasswordPolicyError {
-    /// Menos de ocho caracteres, o le falta minúscula, mayúscula o
-    /// dígito.
+    /// Fewer than eight characters, or missing a lowercase, uppercase, or
+    /// digit.
     #[error(
         "password must be at least {min} characters and include a lowercase letter, \
          an uppercase letter, and a digit"
     )]
     TooWeak {
-        /// Longitud mínima exigida.
+        /// Required minimum length.
         min: usize,
     },
 }
 
-/// Comprueba que `password` tenga al menos 8 caracteres, una minúscula,
-/// una mayúscula y un dígito. Aplica a crear cuentas, restablecer y
-/// cambiar la propia contraseña; no al administrador inicial de
-/// arranque.
+/// Checks that `password` has at least 8 characters, a lowercase,
+/// an uppercase, and a digit. Applies to creating accounts, resetting, and
+/// changing one's own password; not to the initial
+/// bootstrap administrator.
 ///
 /// # Errors
 ///
-/// Devuelve [`PasswordPolicyError::TooWeak`] si no cumple la política.
+/// Returns [`PasswordPolicyError::TooWeak`] if it does not meet the policy.
 pub fn validate_password_policy(password: &str) -> Result<(), PasswordPolicyError> {
     let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
     let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
@@ -284,12 +284,12 @@ pub fn validate_password_policy(password: &str) -> Result<(), PasswordPolicyErro
     }
 }
 
-/// Un usuario de `FerroBox`: identidad autenticable con un rol de
-/// autorización, que puede poseer tokens de API.
+/// A `FerroBox` user: an authenticable identity with an authorization
+/// role, which may own API tokens.
 ///
-/// El hash de la contraseña no forma parte de esta entidad: es un
-/// detalle de credenciales que vive en la capa de aplicación /
-/// persistencia, no un concepto del modelo de negocio.
+/// The password hash is not part of this entity: it is a
+/// credential detail that lives in the application /
+/// persistence layer, not a concept of the business model.
 #[derive(Debug, Clone)]
 pub struct User {
     id: UserId,
@@ -301,9 +301,9 @@ pub struct User {
 }
 
 impl User {
-    /// Registra un usuario nuevo, asignándole un identificador nuevo.
-    /// El correo queda vacío: úsalo para el administrador de arranque
-    /// o llama a [`User::with_email`].
+    /// Registers a new user, assigning it a new identifier.
+    /// The email is left empty: use this for the bootstrap administrator
+    /// or call [`User::with_email`].
     #[must_use]
     pub fn new(username: Username, role: Role) -> Self {
         Self {
@@ -316,9 +316,9 @@ impl User {
         }
     }
 
-    /// Reconstituye un usuario ya existente a partir de un
-    /// identificador conocido (por ejemplo, al cargarlo desde
-    /// persistencia).
+    /// Reconstitutes an already existing user from a
+    /// known identifier (for example, when loading it from
+    /// persistence).
     #[must_use]
     pub fn from_parts(
         id: UserId,
@@ -336,56 +336,56 @@ impl User {
         }
     }
 
-    /// Identificador único de este usuario.
+    /// Unique identifier of this user.
     #[must_use]
     pub fn id(&self) -> UserId {
         self.id
     }
 
-    /// Nombre de usuario.
+    /// Username.
     #[must_use]
     pub fn username(&self) -> &Username {
         &self.username
     }
 
-    /// Correo electrónico, si la cuenta lo tiene.
+    /// Email address, if the account has one.
     #[must_use]
     pub fn email(&self) -> Option<&Email> {
         self.email.as_ref()
     }
 
-    /// Rol de autorización de este usuario.
+    /// Authorization role of this user.
     #[must_use]
     pub fn role(&self) -> Role {
         self.role
     }
 
-    /// Devuelve este usuario con un correo distinto. La identidad no
-    /// cambia.
+    /// Returns this user with a different email. Identity does not
+    /// change.
     #[must_use]
     pub fn with_email(self, email: Option<Email>) -> Self {
         Self { email, ..self }
     }
 
-    /// Devuelve este usuario con un rol distinto. La identidad no cambia.
+    /// Returns this user with a different role. Identity does not change.
     #[must_use]
     pub fn with_role(self, role: Role) -> Self {
         Self { role, ..self }
     }
 
-    /// Identidad federada, si la cuenta se ha vinculado a un `IdP`.
+    /// Federated identity, if the account has been linked to an IdP.
     #[must_use]
     pub fn oidc(&self) -> Option<&OidcIdentity> {
         self.oidc.as_ref()
     }
 
-    /// `true` si la cuenta está vinculada a un emisor `OIDC`.
+    /// `true` if the account is linked to an `OIDC` issuer.
     #[must_use]
     pub fn is_sso_linked(&self) -> bool {
         self.oidc.is_some()
     }
 
-    /// Devuelve este usuario vinculado a una identidad `OIDC`.
+    /// Returns this user linked to an `OIDC` identity.
     #[must_use]
     pub fn with_oidc(self, identity: Option<OidcIdentity>) -> Self {
         Self {
@@ -394,14 +394,14 @@ impl User {
         }
     }
 
-    /// `true` si es una cuenta robot (CI): no entra con contraseña ni
-    /// `SSO`, solo con tokens de API.
+    /// `true` if it is a robot account (CI): it does not sign in with a password or
+    /// `SSO`, only with API tokens.
     #[must_use]
     pub fn is_robot(&self) -> bool {
         self.robot
     }
 
-    /// Marca o desmarca la cuenta como robot. Un robot no puede ser
+    /// Marks or unmarks the account as a robot. A robot cannot be
     /// [`Role::Admin`].
     #[must_use]
     pub fn with_robot(self, robot: bool) -> Self {

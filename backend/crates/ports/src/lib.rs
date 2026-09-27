@@ -1,54 +1,54 @@
-//! Puertos de `FerroBox`.
+//! Ports of `FerroBox`.
 //!
-//! Define los contratos basados en traits ("puertos") que la capa de
-//! aplicación requiere del mundo exterior. Los adaptadores concretos
-//! implementan estos traits; este crate nunca depende de ningún
-//! adaptador.
+//! Defines the trait-based contracts ("ports") that the application
+//! layer requires from the outside world. Concrete adapters
+//! implement these traits; this crate never depends on any
+//! adapter.
 
-/// El puerto de almacenamiento de contenido binario.
+/// Binary content storage port.
 pub mod storage;
 
-/// El puerto de persistencia de la entidad `Repository`.
+/// Persistence port for the `Repository` entity.
 pub mod repository_store;
 
-/// El puerto de persistencia de la entidad `Artifact`.
+/// Persistence port for the `Artifact` entity.
 pub mod artifact_store;
 
-/// El puerto de persistencia del índice de paquetes por ecosistema.
+/// Persistence port for the per-ecosystem package index.
 pub mod package_index_store;
 
-/// El puerto de persistencia de la entidad `User` y sus credenciales.
+/// Persistence port for the `User` entity and its credentials.
 pub mod user_store;
 
-/// El puerto de persistencia de grupos y su acceso a repositorios.
+/// Persistence port for groups and their repository access.
 pub mod group_store;
 
-/// El puerto de persistencia de avisos HTTP y sus envíos.
+/// Persistence port for HTTP webhooks and their deliveries.
 pub mod webhook_store;
 
-/// El puerto de persistencia de la entidad `ApiToken`.
+/// Persistence port for the `ApiToken` entity.
 pub mod api_token_store;
 
-/// El puerto de persistencia de la entidad `Assay`.
+/// Persistence port for the `Assay` entity.
 pub mod assay_store;
 
-/// El puerto de persistencia de la política de retención.
+/// Persistence port for the retention policy.
 pub mod retention_store;
 
-/// El puerto de persistencia de la política de réplica.
+/// Persistence port for the replica policy.
 pub mod replica_store;
 
-/// El puerto de persistencia de la política de admisión.
+/// Persistence port for the admission policy.
 pub mod admission_store;
 
-/// El puerto de persistencia del registro de auditoría.
+/// Persistence port for the audit log.
 pub mod audit_store;
 
-/// El puerto de persistencia de la cuota de almacenamiento.
+/// Persistence port for the storage quota.
 pub mod quota_store;
 
 /// Persistence port for a repository WORM lock.
 pub mod worm_store;
 
-/// El puerto de cliente HTTP saliente.
+/// Outbound HTTP client port.
 pub mod http_client;

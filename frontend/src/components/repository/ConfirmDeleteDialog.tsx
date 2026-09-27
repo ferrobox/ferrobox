@@ -37,7 +37,7 @@ export function ConfirmDeleteDialog({
       await onConfirm();
       setOpen(false);
     } catch {
-      // El llamador muestra el error; el diálogo permanece abierto.
+      // The caller shows the error; the dialog stays open.
     }
   }
 

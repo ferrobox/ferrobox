@@ -1,4 +1,4 @@
-//! Rutas HTTP de autenticación: login, perfil y gestión de tokens.
+//! HTTP routes for authentication: login, profile, and token management.
 
 use std::sync::Arc;
 

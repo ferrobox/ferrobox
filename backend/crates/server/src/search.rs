@@ -1,4 +1,4 @@
-//! Búsqueda global de paquetes en el catálogo.
+//! Global package search across the catalog.
 
 use std::sync::Arc;
 

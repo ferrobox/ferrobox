@@ -6,13 +6,13 @@ use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Adaptador de [`RetentionStore`] contra `PostgreSQL`.
+/// [`RetentionStore`] adapter against `PostgreSQL`.
 pub struct PostgresRetentionStore {
     pool: PgPool,
 }
 
 impl PostgresRetentionStore {
-    /// Construye el adaptador a partir de un `pool` de conexiones.
+    /// Builds the adapter from a connection `pool`.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

@@ -9,37 +9,37 @@ use url::Url;
 
 use crate::alloy_members::{resolve_alloy_members, ResolveAlloyMembersError};
 
-/// Motivos por los que crear un repositorio puede fallar.
+/// Reasons creating a repository can fail.
 #[derive(Debug, Error)]
 pub enum CreateRepositoryError {
-    /// Un `Mirror` no está soportado para `generic`.
+    /// A `Mirror` is not supported for `generic`.
     #[error(
         "mirror repositories currently require the cargo, npm, pypi, oci, helm, conan, maven, nuget or go ecosystem"
     )]
     UnsupportedMirrorEcosystem,
 
-    /// La URL *upstream* de un `Mirror` no es válida.
+    /// The *upstream* URL of a `Mirror` is not valid.
     #[error("invalid upstream URL: {0}")]
     InvalidUpstream(String),
 
-    /// Un `Alloy` necesita al menos un repositorio miembro.
+    /// An `Alloy` needs at least one member repository.
     #[error("an Alloy repository must aggregate at least one member repository")]
     EmptyAlloy,
 
-    /// Uno de los miembros indicados no existe.
+    /// One of the given members does not exist.
     #[error("alloy member repository does not exist")]
     MemberNotFound,
 
-    /// Un miembro no comparte el ecosistema del `Alloy`.
+    /// A member does not share the `Alloy` ecosystem.
     #[error("alloy members must use the same package ecosystem")]
     MemberEcosystemMismatch,
 
-    /// Un `Alloy` no puede agregar a otro `Alloy` (evita ciclos).
+    /// An `Alloy` cannot aggregate another `Alloy` (avoids cycles).
     #[error("alloy members must be Forge or Mirror repositories")]
     NestedAlloy,
 
-    /// Fallo al persistir el repositorio (incluye el caso de nombre
-    /// duplicado).
+    /// Failed to persist the repository (includes a duplicate-name
+    /// case).
     #[error(transparent)]
     Persistence(#[from] RepositoryStoreError),
 }
@@ -56,51 +56,51 @@ impl From<ResolveAlloyMembersError> for CreateRepositoryError {
     }
 }
 
-/// Descripción del tipo de repositorio a crear.
+/// Description of the repository kind to create.
 #[derive(Debug, Clone)]
 pub enum CreateRepositoryKind {
-    /// Almacenamiento propio.
+    /// Own storage.
     Forge,
-    /// Réplica cacheada de un *upstream*.
+    /// Cached replica of an *upstream*.
     Mirror {
-        /// URL base del registro remoto (índice sparse de Cargo,
-        /// registro npm, índice simple de `PyPI`, registro OCI o charts Helm).
+        /// Base URL of the remote registry (Cargo sparse index, npm
+        /// registry, `PyPI` simple index, OCI registry, or Helm charts).
         upstream: String,
     },
-    /// Agregación de otros repositorios `Forge` o `Mirror`.
+    /// Aggregation of other `Forge` or `Mirror` repositories.
     Alloy {
-        /// Identificadores de los repositorios miembro, en orden de
-        /// resolución.
+        /// Identifiers of the member repositories, in resolution
+        /// order.
         members: Vec<RepositoryId>,
     },
 }
 
-/// Caso de uso: crear un nuevo repositorio (`Forge`, `Mirror` o `Alloy`).
+/// Use case: create a new repository (`Forge`, `Mirror`, or `Alloy`).
 pub struct CreateRepositoryUseCase {
     repository_store: Arc<dyn RepositoryStore>,
 }
 
 impl CreateRepositoryUseCase {
-    /// Construye el caso de uso a partir de su puerto.
+    /// Builds the use case from its port.
     #[must_use]
     pub fn new(repository_store: Arc<dyn RepositoryStore>) -> Self {
         Self { repository_store }
     }
 
-    /// Crea un repositorio con el nombre, ecosistema y tipo indicados.
+    /// Creates a repository with the given name, ecosystem, and kind.
     ///
     /// # Errors
     ///
-    /// Devuelve [`CreateRepositoryError`] si el tipo no está soportado,
-    /// la URL *upstream* es inválida, un `Alloy` no tiene miembros
-    /// válidos, el nombre ya está en uso, o el backend falla.
+    /// Returns [`CreateRepositoryError`] if the kind is not supported,
+    /// the *upstream* URL is invalid, an `Alloy` has no valid members,
+    /// the name is already in use, or the backend fails.
     ///
     /// # Panics
     ///
-    /// En la práctica, nunca entra en pánico: `Forge`, un `Mirror` con
-    /// *upstream* válido y un `Alloy` con al menos un miembro no pueden
-    /// violar el invariante de "Alloy sin miembros" que `Repository::new`
-    /// valida.
+    /// In practice this never panics: a `Forge`, a `Mirror` with a
+    /// valid *upstream*, and an `Alloy` with at least one member cannot
+    /// violate the "Alloy without members" invariant that
+    /// `Repository::new` validates.
     pub async fn execute(
         &self,
         name: RepositoryName,

@@ -1,13 +1,13 @@
-//! Estrategia de empaquetado para el ecosistema npm: implementa el
-//! subconjunto del protocolo de registro que `npm publish` y `npm install`
-//! necesitan para publicar paquetes y resolver dependencias contra un
-//! repositorio `FerroBox`.
+//! Packaging strategy for the npm ecosystem: implements the
+//! subset of the registry protocol that `npm publish` and `npm install`
+//! need to publish packages and resolve dependencies against a
+//! `FerroBox` repository.
 //!
-//! Referencia: <https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md>.
+//! Reference: <https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md>.
 //!
-//! Cubre **Forge** (publicar, packument, tarball y yank/deprecate),
-//! **Mirror** (caché *pull-through* de un registro npm como
-//! registry.npmjs.org) y lecturas en **Alloy** (unión de miembros).
+//! Covers **Forge** (publish, packument, tarball, and yank/deprecate),
+//! **Mirror** (*pull-through* cache of an npm registry such as
+//! registry.npmjs.org), and reads on **Alloy** (union of members).
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
 use crate::storage_key::storage_key_for;
 
-/// Estrategia de empaquetado para el ecosistema npm.
+/// Packaging strategy for the npm ecosystem.
 pub struct NpmPackagingStrategy {
     artifact_store: Arc<dyn ArtifactStore>,
     package_index_store: Arc<dyn PackageIndexStore>,
@@ -51,8 +51,8 @@ pub struct NpmPackagingStrategy {
 }
 
 impl NpmPackagingStrategy {
-    /// Construye la estrategia a partir de sus puertos y de la URL
-    /// pública con la que se rellenan los `dist.tarball` del packument.
+    /// Builds the strategy from its ports and the public
+    /// URL used to fill in the packument `dist.tarball` fields.
     #[must_use]
     pub fn new(
         artifact_store: Arc<dyn ArtifactStore>,
@@ -74,14 +74,14 @@ impl NpmPackagingStrategy {
         }
     }
 
-    /// Conecta el ensaye automático al publicar o cachear un tarball.
+    /// Connects automatic assay when publishing or caching a tarball.
     #[must_use]
     pub fn with_assays(mut self, assays: AssayService) -> Self {
         self.assays = Some(assays);
         self
     }
 
-    /// Aplica la cuota de almacenamiento al publicar o cachear.
+    /// Applies the storage quota when publishing or caching.
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
@@ -647,14 +647,14 @@ impl PackagingStrategy for NpmPackagingStrategy {
     }
 }
 
-/// Codifica un nombre npm para usarlo en una URL de packument/tarball
+/// Encodes an npm name for use in a packument/tarball URL
 /// (`@scope/pkg` → `%40scope%2Fpkg`).
 #[must_use]
 pub fn encode_npm_name(name: &str) -> String {
     name.replace('@', "%40").replace('/', "%2F")
 }
 
-/// Nombre del fichero `.tgz` que npm pide en `/{name}/-/{file}`.
+/// Filename of the `.tgz` that npm requests at `/{name}/-/{file}`.
 #[must_use]
 pub fn tarball_filename(name: &str, version: &str) -> String {
     let unscoped = name.rsplit('/').next().unwrap_or(name);
@@ -959,8 +959,8 @@ fn resolve_dist_tags(
     tags
 }
 
-/// Compara versiones npm por `major.minor.patch`, no por orden
-/// lexicográfico (`"4.9.0"` > `"4.17.21"` como cadenas).
+/// Compares npm versions by `major.minor.patch`, not by
+/// lexicographic order (`"4.9.0"` > `"4.17.21"` as strings).
 fn parse_release_tuple(version: &str) -> Option<(u64, u64, u64, bool)> {
     let version = version.split_once('+').map_or(version, |(core, _)| core);
     let (core, prerelease) = version

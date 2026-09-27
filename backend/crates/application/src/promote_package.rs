@@ -1,5 +1,5 @@
-//! Copia una versión publicada (o un binario genérico) de un repositorio
-//! `Forge` a otro `Forge` del mismo ecosistema.
+//! Copies a published version (or a generic binary) from one `Forge`
+//! repository to another `Forge` of the same ecosystem.
 
 use std::sync::Arc;
 
@@ -18,90 +18,90 @@ use crate::packaging::{
 };
 use crate::quota::{QuotaError, QuotaService};
 
-/// Resultado de una promoción: recuento de binarios y bytes copiados.
+/// Result of a promotion: count of binaries and bytes copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromoteOutcome {
-    /// Nombre de paquete, si el ecosistema indexa por coordenada.
+    /// Package name, if the ecosystem indexes by coordinate.
     pub name: Option<String>,
-    /// Versión (o etiqueta OCI) copiada.
+    /// Copied version (or OCI tag).
     pub version: Option<String>,
-    /// Binarios nuevos creados en el destino.
+    /// New binaries created in the destination.
     pub artifacts_copied: u32,
-    /// Bytes escritos en el almacenamiento del destino.
+    /// Bytes written to the destination storage.
     pub bytes_copied: u64,
 }
 
-/// Motivos por los que promover una versión puede fallar.
+/// Reasons promoting a version can fail.
 #[derive(Debug, Error)]
 pub enum PromoteError {
-    /// El repositorio de origen no existe.
+    /// The source repository does not exist.
     #[error("source repository {0} does not exist")]
     SourceNotFound(RepositoryId),
 
-    /// El repositorio de destino no existe.
+    /// The destination repository does not exist.
     #[error("target repository {0} does not exist")]
     TargetNotFound(RepositoryId),
 
-    /// Origen y destino son el mismo repositorio.
+    /// Source and destination are the same repository.
     #[error("source and target repositories must be different")]
     SameRepository,
 
-    /// El origen no es un `Forge`.
+    /// The source is not a `Forge`.
     #[error("cannot promote from a {0} repository")]
     SourceNotForge(&'static str),
 
-    /// El destino no es un `Forge`.
+    /// The destination is not a `Forge`.
     #[error("cannot promote into a {0} repository")]
     TargetNotForge(&'static str),
 
-    /// Origen y destino no comparten ecosistema.
+    /// Source and destination do not share an ecosystem.
     #[error("source ecosystem '{source_ecosystem}' does not match target ecosystem '{target_ecosystem}'")]
     EcosystemMismatch {
-        /// Ecosistema del origen.
+        /// Source ecosystem.
         source_ecosystem: &'static str,
-        /// Ecosistema del destino.
+        /// Destination ecosystem.
         target_ecosystem: &'static str,
     },
 
-    /// Faltan nombre y versión para un ecosistema indexado.
+    /// Name and version are missing for an indexed ecosystem.
     #[error("name and version are required to promote this package")]
     MissingCoordinate,
 
-    /// Falta el identificador del binario genérico.
+    /// The generic binary identifier is missing.
     #[error("artifact_id is required to promote a generic artifact")]
     MissingArtifact,
 
-    /// El binario no existe.
+    /// The binary does not exist.
     #[error("artifact {0} was not found")]
     ArtifactNotFound(ArtifactId),
 
-    /// El binario no pertenece al repositorio de origen.
+    /// The binary does not belong to the source repository.
     #[error("artifact {0} does not belong to the source repository")]
     ArtifactRepositoryMismatch(ArtifactId),
 
-    /// Fallo al consultar repositorios.
+    /// Failed to query repositories.
     #[error(transparent)]
     Repository(#[from] RepositoryStoreError),
 
-    /// Fallo al consultar o persistir artefactos.
+    /// Failed to query or persist artifacts.
     #[error(transparent)]
     Artifact(#[from] ArtifactStoreError),
 
-    /// Fallo al copiar bytes.
+    /// Failed to copy bytes.
     #[error(transparent)]
     Storage(#[from] StorageError),
 
-    /// El destino no admite más binarios.
+    /// The destination cannot accept more binaries.
     #[error(transparent)]
     Quota(#[from] QuotaError),
 
-    /// Fallo de la estrategia de empaquetado (versión inexistente, ya
-    /// publicada, payload inválido, …).
+    /// Packaging strategy failure (missing version, already
+    /// published, invalid payload, …).
     #[error(transparent)]
     Packaging(#[from] PackagingError),
 }
 
-/// Caso de uso: promover una versión (o un binario genérico) entre Forges.
+/// Use case: promote a version (or a generic binary) between Forges.
 pub struct PromotePackageUseCase {
     repository_store: Arc<dyn RepositoryStore>,
     artifact_store: Arc<dyn ArtifactStore>,
@@ -110,7 +110,7 @@ pub struct PromotePackageUseCase {
 }
 
 impl PromotePackageUseCase {
-    /// Construye el caso de uso a partir de sus puertos.
+    /// Builds the use case from its ports.
     #[must_use]
     pub fn new(
         repository_store: Arc<dyn RepositoryStore>,
@@ -126,14 +126,15 @@ impl PromotePackageUseCase {
         }
     }
 
-    /// Copia la versión `name`/`version` (o el binario `artifact_id` en
-    /// un repositorio genérico) de `source_id` a `target_id`.
+    /// Copies the `name`/`version` version (or the `artifact_id` binary
+    /// in a generic repository) from `source_id` to `target_id`.
     ///
     /// # Errors
     ///
-    /// Devuelve [`PromoteError`] si los repositorios no son dos Forges
-    /// distintos del mismo ecosistema, falta la coordenada, la versión
-    /// ya existe en el destino, o falla un puerto.
+    /// Returns [`PromoteError`] if the repositories are not two
+    /// distinct Forges of the same ecosystem, the coordinate is
+    /// missing, the version already exists in the destination, or a
+    /// port fails.
     #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,

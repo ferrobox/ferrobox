@@ -1,9 +1,9 @@
-//! Rutas HTTP de la API V3 de `NuGet` (`dotnet nuget push` /
+//! HTTP routes for the `NuGet` V3 API (`dotnet nuget push` /
 //! `dotnet restore` / unlist).
 //!
-//! El origen se monta en `/nuget/<UUID>/v3/`. Las lecturas son públicas;
-//! el *push* y el unlist exigen token de API (`X-NuGet-ApiKey`, Bearer,
-//! Token o Basic) y rol de escritura.
+//! The origin is mounted at `/nuget/<UUID>/v3/`. Reads are public;
+//! *push* and unlist require an API token (`X-NuGet-ApiKey`, Bearer,
+//! Token, or Basic) and a write role.
 
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ use crate::error::ApiError;
 
 const NUGET_UPLOAD_LIMIT: usize = 512 * 1024 * 1024;
 
-/// Rutas de solo lectura (índice de servicio, flat container, search).
+/// Read-only routes (service index, flat container, search).
 pub(crate) fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -42,7 +42,7 @@ pub(crate) fn public_router() -> Router<Arc<AppState>> {
         )
 }
 
-/// Rutas de escritura (push, unlist y relist).
+/// Write routes (push, unlist, and relist).
 pub(crate) fn write_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(

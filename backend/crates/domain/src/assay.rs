@@ -1,24 +1,24 @@
-//! Ensaye de un paquete: composición (inventario) e impurezas
-//! (vulnerabilidades conocidas).
+//! Assay of a package: composition (inventory) and impurities
+//! (known vulnerabilities).
 
 use crate::ids::{AssayId, RepositoryId};
 use crate::package_coordinate::PackageCoordinate;
 
-/// Resultado de un ensaye.
+/// Result of an assay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssayStatus {
-    /// Inventario y consulta de vulnerabilidades completados.
+    /// Inventory and vulnerability lookup completed.
     Ready,
-    /// El inventario se obtuvo, pero falló la consulta de vulnerabilidades.
+    /// The inventory was obtained, but the vulnerability lookup failed.
     Failed,
-    /// Este ecosistema todavía no admite ensaye.
+    /// This ecosystem does not yet support assay.
     Unsupported,
-    /// Encolado o ejecutándose; el inventario previo se conserva.
+    /// Queued or running; the previous inventory is kept.
     Running,
 }
 
 impl AssayStatus {
-    /// Etiqueta estable usada en persistencia y en la API HTTP.
+    /// Stable label used in persistence and in the HTTP API.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -29,7 +29,7 @@ impl AssayStatus {
         }
     }
 
-    /// Parsea la etiqueta estable.
+    /// Parses the stable label.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -42,24 +42,24 @@ impl AssayStatus {
     }
 }
 
-/// Severidad de un hallazgo, alineada con la escala habitual de
-/// puntuación CVSS (*Common Vulnerability Scoring System*).
+/// Severity of a finding, aligned with the usual
+/// CVSS (*Common Vulnerability Scoring System*) scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AssaySeverity {
-    /// 9.0 o más, o etiqueta `CRITICAL`.
+    /// 9.0 or more, or the `CRITICAL` label.
     Critical,
-    /// 7.0–8.9, o etiqueta `HIGH`.
+    /// 7.0–8.9, or the `HIGH` label.
     High,
-    /// 4.0–6.9, o etiqueta `MEDIUM` / `MODERATE`.
+    /// 4.0–6.9, or the `MEDIUM` / `MODERATE` label.
     Medium,
-    /// 0.1–3.9, o etiqueta `LOW`.
+    /// 0.1–3.9, or the `LOW` label.
     Low,
-    /// Sin puntuación conocida.
+    /// No known score.
     Unknown,
 }
 
 impl AssaySeverity {
-    /// Etiqueta estable usada en persistencia y en la API HTTP.
+    /// Stable label used in persistence and in the HTTP API.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -71,7 +71,7 @@ impl AssaySeverity {
         }
     }
 
-    /// Parsea la etiqueta estable o una etiqueta de asesoría (`CRITICAL`…).
+    /// Parses the stable label or an advisory label (`CRITICAL`…).
     #[must_use]
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -83,15 +83,15 @@ impl AssaySeverity {
         }
     }
 
-    /// `true` si esta severidad alcanza el umbral (Critical es la más grave).
+    /// `true` if this severity meets the threshold (Critical is the most severe).
     ///
-    /// `Unknown` no dispara ningún umbral: sin puntuación no se bloquea.
+    /// `Unknown` does not trip any threshold: without a score nothing is blocked.
     #[must_use]
     pub fn meets_threshold(self, threshold: Self) -> bool {
         !matches!(self, Self::Unknown) && self <= threshold
     }
 
-    /// Traduce una puntuación CVSS 3.x (0–10) a severidad.
+    /// Translates a CVSS 3.x score (0–10) to a severity.
     #[must_use]
     pub fn from_cvss_score(score: f64) -> Self {
         if score >= 9.0 {
@@ -108,19 +108,19 @@ impl AssaySeverity {
     }
 }
 
-/// Papel de un componente en el inventario.
+/// Role of a component in the inventory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssayComponentKind {
-    /// El paquete ensayado.
+    /// The assayed package.
     Root,
-    /// Dependencia declarada de primer nivel.
+    /// First-level declared dependency.
     Direct,
-    /// Dependencia resuelta desde un lockfile (no declarada en el manifiesto).
+    /// Dependency resolved from a lockfile (not declared in the manifest).
     Transitive,
 }
 
 impl AssayComponentKind {
-    /// Etiqueta estable.
+    /// Stable label.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -130,7 +130,7 @@ impl AssayComponentKind {
         }
     }
 
-    /// Parsea la etiqueta estable.
+    /// Parses the stable label.
     #[must_use]
     pub fn parse(value: &str) -> Self {
         match value {
@@ -141,7 +141,7 @@ impl AssayComponentKind {
     }
 }
 
-/// Un componente del inventario del ensaye.
+/// A component of the assay inventory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssayComponent {
     name: String,
@@ -152,7 +152,7 @@ pub struct AssayComponent {
 }
 
 impl AssayComponent {
-    /// Construye un componente del inventario.
+    /// Builds an inventory component.
     #[must_use]
     pub fn new(
         name: impl Into<String>,
@@ -169,7 +169,7 @@ impl AssayComponent {
         }
     }
 
-    /// Añade licencias declaradas, sin duplicar.
+    /// Adds declared licenses, without duplicates.
     pub fn add_licenses(&mut self, licenses: impl IntoIterator<Item = String>) {
         for license in licenses {
             let license = license.trim();
@@ -186,7 +186,7 @@ impl AssayComponent {
         }
     }
 
-    /// Sustituye las licencias declaradas.
+    /// Replaces the declared licenses.
     #[must_use]
     pub fn with_licenses(mut self, licenses: Vec<String>) -> Self {
         self.licenses.clear();
@@ -194,38 +194,38 @@ impl AssayComponent {
         self
     }
 
-    /// Nombre del componente.
+    /// Component name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Versión o rango declarado.
+    /// Declared version or range.
     #[must_use]
     pub fn version(&self) -> &str {
         &self.version
     }
 
-    /// Identificador `purl` (*package URL*), si se pudo construir.
+    /// `purl` (*package URL*) identifier, if one could be built.
     #[must_use]
     pub fn purl(&self) -> Option<&str> {
         self.purl.as_deref()
     }
 
-    /// Papel en el inventario.
+    /// Role in the inventory.
     #[must_use]
     pub fn kind(&self) -> AssayComponentKind {
         self.kind
     }
 
-    /// Licencias declaradas (SPDX u otras etiquetas del manifiesto).
+    /// Declared licenses (SPDX or other manifest labels).
     #[must_use]
     pub fn licenses(&self) -> &[String] {
         &self.licenses
     }
 }
 
-/// Una impureza: vulnerabilidad conocida que afecta a un componente.
+/// An impurity: a known vulnerability that affects a component.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssayFinding {
     vulnerability_id: String,
@@ -239,7 +239,7 @@ pub struct AssayFinding {
 }
 
 impl AssayFinding {
-    /// Construye un hallazgo.
+    /// Builds a finding.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
@@ -264,72 +264,72 @@ impl AssayFinding {
         }
     }
 
-    /// Identificador principal (`CVE-…`, `GHSA-…`, `RUSTSEC-…`).
+    /// Primary identifier (`CVE-…`, `GHSA-…`, `RUSTSEC-…`).
     #[must_use]
     pub fn vulnerability_id(&self) -> &str {
         &self.vulnerability_id
     }
 
-    /// Otros identificadores equivalentes.
+    /// Other equivalent identifiers.
     #[must_use]
     pub fn aliases(&self) -> &[String] {
         &self.aliases
     }
 
-    /// Título corto.
+    /// Short title.
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Severidad.
+    /// Severity.
     #[must_use]
     pub fn severity(&self) -> AssaySeverity {
         self.severity
     }
 
-    /// Componente afectado.
+    /// Affected component.
     #[must_use]
     pub fn component_name(&self) -> &str {
         &self.component_name
     }
 
-    /// Versión del componente afectado.
+    /// Version of the affected component.
     #[must_use]
     pub fn component_version(&self) -> &str {
         &self.component_version
     }
 
-    /// Primera versión que corrige el hallazgo, si se conoce.
+    /// First version that fixes the finding, if known.
     #[must_use]
     pub fn fixed_version(&self) -> Option<&str> {
         self.fixed_version.as_deref()
     }
 
-    /// Enlace a la ficha pública (NVD, GitHub Advisory, …).
+    /// Link to the public advisory (NVD, GitHub Advisory, …).
     #[must_use]
     pub fn details_url(&self) -> Option<&str> {
         self.details_url.as_deref()
     }
 }
 
-/// Recuento de hallazgos por severidad.
+/// Finding count by severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AssayCounts {
-    /// Críticos.
+    /// Critical.
     pub critical: u32,
-    /// Altos.
+    /// High.
     pub high: u32,
-    /// Medios.
+    /// Medium.
     pub medium: u32,
-    /// Bajos.
+    /// Low.
     pub low: u32,
-    /// Sin puntuación.
+    /// Unscored.
     pub unknown: u32,
 }
 
 impl AssayCounts {
-    /// Suma de todos los hallazgos.
+    /// Sum of all findings.
     #[must_use]
     pub fn total(self) -> u32 {
         self.critical
@@ -340,7 +340,7 @@ impl AssayCounts {
     }
 }
 
-/// Ensaye de una versión de paquete en un repositorio.
+/// Assay of a package version in a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assay {
     id: AssayId,
@@ -354,7 +354,7 @@ pub struct Assay {
 }
 
 impl Assay {
-    /// Construye un ensaye completo.
+    /// Builds a complete assay.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn from_parts(
@@ -379,55 +379,55 @@ impl Assay {
         }
     }
 
-    /// Identificador del ensaye.
+    /// Assay identifier.
     #[must_use]
     pub fn id(&self) -> AssayId {
         self.id
     }
 
-    /// Repositorio que almacena el paquete ensayado.
+    /// Repository that stores the assayed package.
     #[must_use]
     pub fn repository_id(&self) -> RepositoryId {
         self.repository_id
     }
 
-    /// Coordenada ensayada.
+    /// Assayed coordinate.
     #[must_use]
     pub fn coordinate(&self) -> &PackageCoordinate {
         &self.coordinate
     }
 
-    /// Estado del ensaye.
+    /// Assay status.
     #[must_use]
     pub fn status(&self) -> AssayStatus {
         self.status
     }
 
-    /// Instante RFC 3339 del último ensaye, si lo hay.
+    /// RFC 3339 timestamp of the last assay, if any.
     #[must_use]
     pub fn scanned_at(&self) -> Option<&str> {
         self.scanned_at.as_deref()
     }
 
-    /// Detalle si el ensaye falló o no aplica.
+    /// Detail if the assay failed or does not apply.
     #[must_use]
     pub fn error_message(&self) -> Option<&str> {
         self.error_message.as_deref()
     }
 
-    /// Inventario de componentes.
+    /// Component inventory.
     #[must_use]
     pub fn components(&self) -> &[AssayComponent] {
         &self.components
     }
 
-    /// Hallazgos (impurezas).
+    /// Findings (impurities).
     #[must_use]
     pub fn findings(&self) -> &[AssayFinding] {
         &self.findings
     }
 
-    /// Misma fila, marcada como en curso (el inventario previo se queda).
+    /// Same row, marked as in progress (the previous inventory stays).
     #[must_use]
     pub fn mark_running(&self) -> Self {
         Self {
@@ -437,7 +437,7 @@ impl Assay {
         }
     }
 
-    /// Recuento por severidad.
+    /// Count by severity.
     #[must_use]
     pub fn counts(&self) -> AssayCounts {
         let mut counts = AssayCounts::default();
