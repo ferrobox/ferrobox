@@ -1,7 +1,11 @@
-# Image built from the repo-root Dockerfile (`ferrobox:local` in compose).
+# Published image, built and pushed by CI on release. For local
+# development, `docker compose` still builds `ferrobox:local` from the
+# repo-root Dockerfile; override repository/tag here if you want the
+# chart to deploy that local build instead.
 image:
-  repository: ferrobox
-  tag: local
+  repository: ghcr.io/ferrobox/ferrobox
+  # Keep in sync with Chart.yaml's appVersion.
+  tag: "0.1.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
