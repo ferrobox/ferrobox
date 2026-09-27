@@ -242,11 +242,14 @@ impl ListRepositoryArtifactsUseCase {
                     .iter()
                     .any(|digest| cosign::digest_matches_checksum(digest, &checksum));
                 Some(ListedArtifact {
+                    filename: meta
+                        .as_ref()
+                        .and_then(|item| item.filename.clone())
+                        .or_else(|| artifact.filename().map(ToOwned::to_owned)),
                     artifact,
                     package_name: meta.as_ref().map(|item| item.name.clone()),
                     package_version: meta.as_ref().map(|item| item.version.clone()),
                     yanked: meta.as_ref().is_some_and(|item| item.yanked),
-                    filename: meta.and_then(|item| item.filename),
                     signed,
                     verified,
                 })
@@ -612,6 +615,31 @@ mod tests {
             .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].artifact(), &uploaded);
+        assert_eq!(result[0].package_name(), None);
+        assert_eq!(result[0].filename(), None);
+    }
+
+    #[tokio::test]
+    async fn lists_original_filename_for_unindexed_uploads() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("crates").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repository_store.save(&repository).await.unwrap();
+        let uploaded = Artifact::new(repository.id(), checksum(), 4)
+            .with_filename(Some("firefox-142.0.1.tar.xz".to_string()));
+        artifact_store.save(&uploaded).await.unwrap();
+
+        let result = use_case(repository_store, artifact_store, package_index_store)
+            .execute(repository.id())
+            .await
+            .unwrap();
+        assert_eq!(result[0].filename(), Some("firefox-142.0.1.tar.xz"));
         assert_eq!(result[0].package_name(), None);
     }
 

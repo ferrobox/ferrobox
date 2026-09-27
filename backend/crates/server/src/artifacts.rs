@@ -7,7 +7,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::{Multipart, Path, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use bytes::Bytes;
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
@@ -27,12 +27,20 @@ pub(crate) async fn publish_artifact(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, Json<PublishResponse>), ApiError> {
     let repository_id = RepositoryId::from(repository_id);
     require_repo_write(&state.groups, &user, &token, repository_id).await?;
 
-    let artifact_id = state.publish_artifact.execute(repository_id, body).await?;
+    let filename = headers
+        .get(CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(filename_from_content_disposition);
+    let artifact_id = state
+        .publish_artifact
+        .execute_named(repository_id, body, filename.as_deref())
+        .await?;
 
     crate::audit::record(
         &state,
@@ -193,7 +201,11 @@ pub(crate) async fn prefetch_package(
 
     let name = ferrobox_domain::package_coordinate::PackageName::parse(payload.name.trim())
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
-    let version = match payload.version.as_deref().map(str::trim).filter(|item| !item.is_empty())
+    let version = match payload
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
     {
         Some(value) => Some(
             ferrobox_domain::package_coordinate::PackageVersion::parse(value)
@@ -258,10 +270,9 @@ pub(crate) async fn export_repository(
     let disposition = format!("attachment; filename=\"{}\"", bundle.filename);
     let mut response = Response::new(Body::from(bundle.bytes));
     *response.status_mut() = StatusCode::OK;
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("application/gzip"),
-    );
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/gzip"));
     response.headers_mut().insert(
         CONTENT_DISPOSITION,
         HeaderValue::from_str(&disposition)
@@ -293,11 +304,13 @@ pub(crate) async fn import_repository(
             bundle = Some(bytes);
         }
     }
-    let bundle = bundle.ok_or_else(|| {
-        ApiError::BadRequest("multipart field 'bundle' is required".to_string())
-    })?;
+    let bundle = bundle
+        .ok_or_else(|| ApiError::BadRequest("multipart field 'bundle' is required".to_string()))?;
 
-    let outcome = state.repository_bundle.import(repository_id, bundle).await?;
+    let outcome = state
+        .repository_bundle
+        .import(repository_id, bundle)
+        .await?;
     crate::audit::record(
         &state,
         &user,
@@ -317,4 +330,92 @@ pub(crate) async fn import_repository(
         skipped: outcome.skipped,
         bytes_copied: outcome.bytes_copied,
     }))
+}
+
+fn filename_from_content_disposition(value: &str) -> Option<String> {
+    for part in value.split(';').skip(1) {
+        let part = part.trim();
+        let Some((key, raw)) = part.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.eq_ignore_ascii_case("filename*") {
+            let encoded = raw.trim().trim_matches('"');
+            let bytes = encoded.split_once("''").map_or(encoded, |(_, rest)| rest);
+            if let Ok(decoded) = percent_decode(bytes) {
+                if !decoded.is_empty() {
+                    return Some(decoded);
+                }
+            }
+        }
+    }
+    for part in value.split(';').skip(1) {
+        let part = part.trim();
+        let Some((key, raw)) = part.split_once('=') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("filename") {
+            let name = unquote_disposition(raw.trim());
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+fn unquote_disposition(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return inner.replace("\\\"", "\"").replace("\\\\", "\\");
+    }
+    trimmed.to_string()
+}
+
+fn percent_decode(input: &str) -> Result<String, ()> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).map_err(|_| ())?;
+                out.push(u8::from_str_radix(hex, 16).map_err(|_| ())?);
+                index += 3;
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod filename_tests {
+    use super::filename_from_content_disposition;
+
+    #[test]
+    fn reads_quoted_filename() {
+        assert_eq!(
+            filename_from_content_disposition(r#"attachment; filename="firefox-142.0.1.tar.xz""#)
+                .as_deref(),
+            Some("firefox-142.0.1.tar.xz")
+        );
+    }
+
+    #[test]
+    fn prefers_rfc5987_filename() {
+        assert_eq!(
+            filename_from_content_disposition(
+                r#"attachment; filename="fallback.bin"; filename*=UTF-8''caf%C3%A9.bin"#
+            )
+            .as_deref(),
+            Some("café.bin")
+        );
+    }
 }
