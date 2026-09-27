@@ -39,9 +39,17 @@
     "spanish": "Español"
   },
   "health": {
+    "title": "Backend",
     "checking": "Checking connection…",
     "ok": "Backend connected",
     "down": "Backend unavailable"
+  },
+  "storage": {
+    "title": "Storage",
+    "used": "{{used}} used",
+    "usedOfInstance": "{{used}} used by published binaries",
+    "usedHint": "Every binary on this instance, including those no longer in a catalog until garbage collection runs.",
+    "usedAria": "Storage used: {{used}}. Open settings"
   },
   "roles": {
     "admin": "Admin",

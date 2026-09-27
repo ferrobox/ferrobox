@@ -120,6 +120,16 @@ impl ArtifactStore for PostgresArtifactStore {
 
         Ok(())
     }
+
+    async fn total_size_bytes(&self) -> Result<u64, ArtifactStoreError> {
+        let row = sqlx::query("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM artifacts")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| backend_error(err.to_string()))?;
+        let total: i64 = sqlx::Row::try_get(&row, "total")
+            .map_err(|err| backend_error(err.to_string()))?;
+        u64::try_from(total).map_err(|err| backend_error(err.to_string()))
+    }
 }
 
 #[cfg(test)]

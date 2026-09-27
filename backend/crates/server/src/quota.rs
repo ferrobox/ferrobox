@@ -12,8 +12,16 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
 use crate::authz::{require_repo_read, require_repo_write};
-use crate::dto::{QuotaRequest, QuotaResponse};
+use crate::dto::{QuotaRequest, QuotaResponse, StorageResponse};
 use crate::error::ApiError;
+
+pub(crate) async fn get_storage(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { .. }: AuthenticatedUser,
+) -> Result<Json<StorageResponse>, ApiError> {
+    let used_bytes = state.quota.instance_used_bytes().await?;
+    Ok(Json(StorageResponse { used_bytes }))
+}
 
 pub(crate) async fn get_quota(
     State(state): State<Arc<AppState>>,
@@ -364,5 +372,71 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["limit_bytes"], 4);
         assert_eq!(json["used_bytes"], 0);
+    }
+
+    #[tokio::test]
+    async fn storage_sums_published_binaries_and_requires_auth() {
+        let (app, token, _, repo) = fixture().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/storage")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/storage")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["used_bytes"], 0);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/artifacts"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::from("seven!!"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/storage")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["used_bytes"], 7);
     }
 }

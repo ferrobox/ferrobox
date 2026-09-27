@@ -267,6 +267,7 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         .route("/auth/me/groups", get(groups::my_groups))
         .route("/auth/password", post(auth::change_password))
         .route("/settings", get(settings::get_settings))
+        .route("/storage", get(quota::get_storage))
         .route(
             "/auth/tokens",
             get(auth::list_tokens).post(auth::create_token),

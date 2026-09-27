@@ -39,9 +39,17 @@
     "spanish": "Español"
   },
   "health": {
+    "title": "Backend",
     "checking": "Comprobando conexión…",
     "ok": "Backend conectado",
     "down": "Backend no disponible"
+  },
+  "storage": {
+    "title": "Almacenamiento",
+    "used": "{{used}} usados",
+    "usedOfInstance": "{{used}} usados por binarios publicados",
+    "usedHint": "Todos los binarios de esta instancia, también los que ya no están en el catálogo hasta que corre la recolección de basura.",
+    "usedAria": "Almacenamiento usado: {{used}}. Abrir configuración"
   },
   "roles": {
     "admin": "Admin",

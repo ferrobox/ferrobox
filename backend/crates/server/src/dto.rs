@@ -750,6 +750,15 @@ impl From<ferrobox_application::quota::QuotaSnapshot> for QuotaResponse {
     }
 }
 
+/// Instance-wide storage occupied by published binaries.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct StorageResponse {
+    /// Sum of every artifact on the instance.
+    #[ts(type = "number")]
+    pub(crate) used_bytes: u64,
+}
+
 /// WORM lock sent when saving.
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]

@@ -36,6 +36,7 @@ export const queryKeys = {
   myGroups: ["auth", "me", "groups"] as const,
   repositoryAccess: (id: string) => ["repositories", id, "access"] as const,
   settings: ["settings"] as const,
+  storage: ["storage"] as const,
   oidc: ["auth", "oidc"] as const,
   assays: ["assays"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
@@ -109,6 +110,7 @@ export function useDeleteRepository() {
     mutationFn: (repositoryId: string) => api.deleteRepository(repositoryId),
     onSuccess: (_data, repositoryId) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
       void queryClient.removeQueries({ queryKey: queryKeys.repository(repositoryId) });
       void queryClient.removeQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
@@ -142,6 +144,7 @@ export function usePublishArtifact(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -155,6 +158,7 @@ export function useDeleteArtifact(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -553,6 +557,14 @@ export function useSettings() {
   });
 }
 
+export function useStorage() {
+  return useQuery({
+    queryKey: queryKeys.storage,
+    queryFn: api.getStorage,
+    refetchInterval: 30_000,
+  });
+}
+
 export function useOidcStatus() {
   return useQuery({
     queryKey: queryKeys.oidc,
@@ -786,6 +798,7 @@ export function useApplyRetention(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryAssays(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -802,6 +815,7 @@ export function useCollectGarbage(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryQuota(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -820,6 +834,7 @@ export function useCollectGarbageAll() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({ queryKey: queryKeys.assays });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }

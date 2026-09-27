@@ -41,6 +41,7 @@ import type { ReplicaPushResponse } from "@/api/generated/ReplicaPushResponse";
 import type { CleanupPreviewResponse } from "@/api/generated/CleanupPreviewResponse";
 import type { CleanupReportResponse } from "@/api/generated/CleanupReportResponse";
 import type { SettingsResponse } from "@/api/generated/SettingsResponse";
+import type { StorageResponse } from "@/api/generated/StorageResponse";
 import type { OidcStatusResponse } from "@/api/generated/OidcStatusResponse";
 import type { UpdateAlloyMembersRequest } from "@/api/generated/UpdateAlloyMembersRequest";
 import type { UpdateUserRoleRequest } from "@/api/generated/UpdateUserRoleRequest";
@@ -168,6 +169,10 @@ export function changePassword(payload: ChangePasswordRequest): Promise<void> {
 
 export function getSettings(): Promise<SettingsResponse> {
   return request<SettingsResponse>("/settings");
+}
+
+export function getStorage(): Promise<StorageResponse> {
+  return request<StorageResponse>("/storage");
 }
 
 export function listApiTokens(): Promise<ApiTokenResponse[]> {

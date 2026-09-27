@@ -141,6 +141,16 @@ impl ArtifactStore for InMemoryArtifactStore {
         self.artifacts.lock().unwrap().remove(&id);
         Ok(())
     }
+
+    async fn total_size_bytes(&self) -> Result<u64, ArtifactStoreError> {
+        Ok(self
+            .artifacts
+            .lock()
+            .unwrap()
+            .values()
+            .map(Artifact::size_bytes)
+            .sum())
+    }
 }
 
 #[derive(Default)]

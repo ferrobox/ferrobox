@@ -5,9 +5,11 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useChangePassword, useMyGroups, useSettings } from "@/api/queries";
+import { useChangePassword, useMyGroups, useSettings, useStorage } from "@/api/queries";
+import { HealthIndicator } from "@/components/layout/HealthIndicator";
 import { useAuth } from "@/auth/AuthProvider";
 import { passwordMeetsPolicy } from "@/auth/passwordPolicy";
+import { formatBytes } from "@/lib/format";
 import { canManageUsers, roleLabel } from "@/auth/roles";
 import { GarbageCollectionCard } from "@/components/cleanup/GarbageCollectionCard";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -23,6 +25,7 @@ export function SettingsPage() {
   const { user } = useAuth();
   const { t } = useTranslation();
   const { data: settings, isPending } = useSettings();
+  const { data: storage } = useStorage();
   const changePassword = useChangePassword();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -191,6 +194,21 @@ export function SettingsPage() {
                   <p className="mt-1 font-mono text-sm text-foreground">
                     {settings?.version ?? "—"}
                   </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{t("storage.title")}</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    {storage
+                      ? t("storage.usedOfInstance", { used: formatBytes(storage.used_bytes) })
+                      : "—"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("storage.usedHint")}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{t("health.title")}</p>
+                  <div className="mt-1">
+                    <HealthIndicator />
+                  </div>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">{t("settings.sso")}</p>
