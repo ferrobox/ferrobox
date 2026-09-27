@@ -52,4 +52,12 @@ pub trait ArtifactStore: Send + Sync {
     /// Devuelve [`ArtifactStoreError::Backend`] si el backend subyacente
     /// falla.
     async fn delete(&self, id: ArtifactId) -> Result<(), ArtifactStoreError>;
+
+    /// Sum of every stored binary on the instance, including blobs that
+    /// are no longer in a catalog until garbage collection runs.
+    ///
+    /// # Errors
+    ///
+    /// [`ArtifactStoreError::Backend`] if the underlying backend fails.
+    async fn total_size_bytes(&self) -> Result<u64, ArtifactStoreError>;
 }

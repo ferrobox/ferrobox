@@ -6,8 +6,8 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthProvider";
 import { roleLabel } from "@/auth/roles";
-import { HealthIndicator } from "@/components/layout/HealthIndicator";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
+import { StorageUsage } from "@/components/layout/StorageUsage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ export function Topbar() {
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card px-6">
-      <HealthIndicator />
+      <StorageUsage />
 
       <TopbarSearch key={urlQuery} initial={urlQuery} />
 

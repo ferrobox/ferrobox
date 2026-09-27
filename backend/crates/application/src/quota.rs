@@ -133,6 +133,15 @@ impl QuotaService {
         self.get_snapshot(repository_id).await
     }
 
+    /// Bytes occupied by every binary on the instance.
+    ///
+    /// # Errors
+    ///
+    /// A port failure while summing artifacts.
+    pub async fn instance_used_bytes(&self) -> Result<u64, QuotaError> {
+        Ok(self.artifact_store.total_size_bytes().await?)
+    }
+
     /// Rechaza un `publish` o un cacheo que no quepa en el tope.
     ///
     /// # Errors
@@ -219,6 +228,7 @@ mod tests {
         artifacts.save(&artifact).await.unwrap();
 
         let service = QuotaService::new(repositories, artifacts, quotas);
+        assert_eq!(service.instance_used_bytes().await.unwrap(), 80);
         service
             .ensure_can_store(repository.id(), 1_000)
             .await
