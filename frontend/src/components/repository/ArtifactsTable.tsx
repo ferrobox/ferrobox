@@ -81,7 +81,7 @@ function downloadName(artifact: ArtifactResponse, ecosystem: PackageEcosystemDto
 }
 
 function displayName(artifact: ArtifactResponse, unnamed: string): string {
-  return artifact.name ?? unnamed;
+  return artifact.name ?? artifact.filename ?? unnamed;
 }
 
 function isNugetPrerelease(version: string | null | undefined): boolean {
@@ -128,7 +128,7 @@ function groupArtifacts(
     if (isHiddenOciReference(artifact, ecosystem)) {
       continue;
     }
-    const key = artifact.name ?? artifact.id;
+    const key = artifact.name ?? artifact.filename ?? artifact.id;
     const existing = byName.get(key) ?? [];
     existing.push(artifact);
     byName.set(key, existing);
@@ -516,7 +516,7 @@ function VersionRows({
               </Badge>
             ) : (
               <span className="font-mono text-xs text-muted-foreground">
-                {truncateMiddle(representative.id)}
+                {representative.filename ?? truncateMiddle(representative.id)}
               </span>
             )}
             {ecosystem === "maven" && bucket.version?.endsWith("-SNAPSHOT") ? (

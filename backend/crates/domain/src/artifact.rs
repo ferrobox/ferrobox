@@ -14,6 +14,7 @@ pub struct Artifact {
     repository_id: RepositoryId,
     checksum: Sha256Checksum,
     size_bytes: u64,
+    filename: Option<String>,
 }
 
 impl Artifact {
@@ -25,6 +26,7 @@ impl Artifact {
             repository_id,
             checksum,
             size_bytes,
+            filename: None,
         }
     }
 
@@ -43,7 +45,21 @@ impl Artifact {
             repository_id,
             checksum,
             size_bytes,
+            filename: None,
         }
+    }
+
+    /// Original upload name, when the client sent one.
+    #[must_use]
+    pub fn with_filename(mut self, filename: Option<String>) -> Self {
+        self.filename = filename.filter(|name| !name.is_empty());
+        self
+    }
+
+    /// Original upload name, if one was stored.
+    #[must_use]
+    pub fn filename(&self) -> Option<&str> {
+        self.filename.as_deref()
     }
 
     /// Identificador único de este artefacto.
@@ -110,5 +126,12 @@ mod tests {
         let corrected_size = Artifact::from_parts(id, repository_id, dummy_checksum(), 2048);
 
         assert_eq!(original, corrected_size);
+    }
+
+    #[test]
+    fn with_filename_keeps_a_non_empty_name() {
+        let artifact = Artifact::new(RepositoryId::new(), dummy_checksum(), 8)
+            .with_filename(Some("firefox-142.0.1.tar.xz".to_string()));
+        assert_eq!(artifact.filename(), Some("firefox-142.0.1.tar.xz"));
     }
 }

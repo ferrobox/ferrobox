@@ -40,7 +40,13 @@ pub(crate) async fn save_quota(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<QuotaRequest>,
 ) -> Result<Json<QuotaResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let quota = StorageQuota::new(payload.limit_bytes)?;
     let snapshot = state
         .quota
@@ -438,5 +444,46 @@ mod tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["used_bytes"], 7);
+    }
+
+    #[tokio::test]
+    async fn publish_keeps_content_disposition_filename() {
+        let (app, token, _, repo) = fixture().await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/repositories/{repo}/artifacts"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header(
+                        "content-disposition",
+                        r#"attachment; filename="firefox-142.0.1.tar.xz""#,
+                    )
+                    .body(Body::from("seven!!"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repositories/{repo}/artifacts"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json[0]["filename"], "firefox-142.0.1.tar.xz");
+        assert_eq!(json[0]["name"], Value::Null);
     }
 }

@@ -83,6 +83,20 @@ impl PublishArtifactUseCase {
         repository_id: RepositoryId,
         content: Bytes,
     ) -> Result<ArtifactId, PublishArtifactError> {
+        self.execute_named(repository_id, content, None).await
+    }
+
+    /// Like [`Self::execute`], storing `filename` when the client sent one.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::execute`].
+    pub async fn execute_named(
+        &self,
+        repository_id: RepositoryId,
+        content: Bytes,
+        filename: Option<&str>,
+    ) -> Result<ArtifactId, PublishArtifactError> {
         let Some(repository) = self.repository_store.find_by_id(repository_id).await? else {
             return Err(PublishArtifactError::RepositoryNotFound(repository_id));
         };
@@ -94,7 +108,8 @@ impl PublishArtifactUseCase {
         }
 
         let checksum = sha256_checksum(&content);
-        let artifact = Artifact::new(repository_id, checksum, content.len() as u64);
+        let artifact = Artifact::new(repository_id, checksum, content.len() as u64)
+            .with_filename(filename.and_then(sanitize_filename));
 
         self.quota
             .ensure_can_store(repository_id, content.len() as u64)
@@ -107,6 +122,18 @@ impl PublishArtifactUseCase {
 
         Ok(artifact.id())
     }
+}
+
+fn sanitize_filename(raw: &str) -> Option<String> {
+    let name = raw.replace('\\', "/");
+    let name = name.rsplit('/').next().unwrap_or("").trim();
+    if name.is_empty() || name == "." || name == ".." {
+        return None;
+    }
+    if name.chars().any(char::is_control) || name.len() > 214 {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 use ferrobox_domain::ids::ArtifactId;
@@ -249,22 +276,43 @@ mod tests {
             .save(repository.id(), StorageQuota::new(Some(4)).unwrap())
             .await
             .unwrap();
-        let quota = QuotaService::new(
-            repository_store.clone(),
-            artifact_store.clone(),
-            quotas,
-        );
-        let use_case = PublishArtifactUseCase::new(
-            repository_store,
-            artifact_store,
-            storage,
-            quota,
-        );
+        let quota = QuotaService::new(repository_store.clone(), artifact_store.clone(), quotas);
+        let use_case =
+            PublishArtifactUseCase::new(repository_store, artifact_store, storage, quota);
 
         let err = use_case
             .execute(repository.id(), Bytes::from_static(b"too-big"))
             .await
             .unwrap_err();
-        assert!(matches!(err, PublishArtifactError::Quota(QuotaError::Exceeded { .. })));
+        assert!(matches!(
+            err,
+            PublishArtifactError::Quota(QuotaError::Exceeded { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn stores_a_sanitized_upload_filename() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let storage = Arc::new(InMemoryStorage::default());
+        let repository = forge("binaries");
+        repository_store.save(&repository).await.unwrap();
+        let use_case = use_case(repository_store, artifact_store.clone(), storage);
+
+        let artifact_id = use_case
+            .execute_named(
+                repository.id(),
+                Bytes::from_static(b"hello"),
+                Some(r"C:\Downloads\firefox-142.0.1.tar.xz"),
+            )
+            .await
+            .unwrap();
+
+        let stored = artifact_store
+            .find_by_id(artifact_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.filename(), Some("firefox-142.0.1.tar.xz"));
     }
 }

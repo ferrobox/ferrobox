@@ -519,13 +519,21 @@ export function unyankGo(
   );
 }
 
+function contentDisposition(filename: string): string {
+  const escaped = filename.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `attachment; filename="${escaped}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 export async function publishArtifact(
   repositoryId: string,
   file: File,
 ): Promise<PublishResponse> {
   const response = await fetch(`${API_BASE_URL}/repositories/${repositoryId}/artifacts`, {
     method: "POST",
-    headers: authHeaders({ "content-type": "application/octet-stream" }),
+    headers: authHeaders({
+      "content-type": "application/octet-stream",
+      "content-disposition": contentDisposition(file.name),
+    }),
     body: file,
   });
 

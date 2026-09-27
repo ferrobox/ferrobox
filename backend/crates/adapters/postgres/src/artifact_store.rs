@@ -7,6 +7,15 @@ use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct ArtifactRow {
+    id: Uuid,
+    repository_id: Uuid,
+    checksum: String,
+    size_bytes: i64,
+    filename: Option<String>,
+}
+
 /// Adaptador de [`ArtifactStore`] contra `PostgreSQL`.
 pub struct PostgresArtifactStore {
     pool: PgPool,
@@ -34,6 +43,7 @@ fn row_to_artifact(
     repository_id: Uuid,
     checksum: String,
     size_bytes: i64,
+    filename: Option<String>,
 ) -> Result<Artifact, ArtifactStoreError> {
     let checksum = Sha256Checksum::parse(checksum).map_err(|err| backend_error(err.to_string()))?;
     let size_bytes = u64::try_from(size_bytes)
@@ -44,7 +54,8 @@ fn row_to_artifact(
         RepositoryId::from(repository_id),
         checksum,
         size_bytes,
-    ))
+    )
+    .with_filename(filename))
 }
 
 #[async_trait]
@@ -55,20 +66,22 @@ impl ArtifactStore for PostgresArtifactStore {
         let size_bytes = i64::try_from(artifact.size_bytes())
             .map_err(|err| backend_error(format!("size_bytes too large: {err}")))?;
 
-        sqlx::query!(
+        sqlx::query(
             r#"
-            INSERT INTO artifacts (id, repository_id, checksum, size_bytes)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO artifacts (id, repository_id, checksum, size_bytes, filename)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO UPDATE
             SET repository_id = EXCLUDED.repository_id,
                 checksum = EXCLUDED.checksum,
-                size_bytes = EXCLUDED.size_bytes
+                size_bytes = EXCLUDED.size_bytes,
+                filename = EXCLUDED.filename
             "#,
-            id,
-            repository_id,
-            artifact.checksum().as_str(),
-            size_bytes,
         )
+        .bind(id)
+        .bind(repository_id)
+        .bind(artifact.checksum().as_str())
+        .bind(size_bytes)
+        .bind(artifact.filename())
         .execute(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
@@ -79,15 +92,15 @@ impl ArtifactStore for PostgresArtifactStore {
     async fn find_by_id(&self, id: ArtifactId) -> Result<Option<Artifact>, ArtifactStoreError> {
         let id: Uuid = id.into();
 
-        let row = sqlx::query!(
-            r#"SELECT id, repository_id, checksum, size_bytes FROM artifacts WHERE id = $1"#,
-            id
+        let row = sqlx::query_as::<_, ArtifactRow>(
+            r#"SELECT id, repository_id, checksum, size_bytes, filename FROM artifacts WHERE id = $1"#,
         )
+        .bind(id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
-        row.map(|r| row_to_artifact(r.id, r.repository_id, r.checksum, r.size_bytes))
+        row.map(|r| row_to_artifact(r.id, r.repository_id, r.checksum, r.size_bytes, r.filename))
             .transpose()
     }
 
@@ -97,16 +110,16 @@ impl ArtifactStore for PostgresArtifactStore {
     ) -> Result<Vec<Artifact>, ArtifactStoreError> {
         let repository_id: Uuid = repository_id.into();
 
-        let rows = sqlx::query!(
-            r#"SELECT id, repository_id, checksum, size_bytes FROM artifacts WHERE repository_id = $1 ORDER BY created_at"#,
-            repository_id
+        let rows = sqlx::query_as::<_, ArtifactRow>(
+            r#"SELECT id, repository_id, checksum, size_bytes, filename FROM artifacts WHERE repository_id = $1 ORDER BY created_at"#,
         )
+        .bind(repository_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
 
         rows.into_iter()
-            .map(|r| row_to_artifact(r.id, r.repository_id, r.checksum, r.size_bytes))
+            .map(|r| row_to_artifact(r.id, r.repository_id, r.checksum, r.size_bytes, r.filename))
             .collect()
     }
 

@@ -516,7 +516,8 @@ pub(crate) async fn copy_stored_artifact(
 
     let size_bytes = source.size_bytes();
     ensure_quota(quota, target_repository_id, size_bytes).await?;
-    let copied = Artifact::new(target_repository_id, source.checksum().clone(), size_bytes);
+    let copied = Artifact::new(target_repository_id, source.checksum().clone(), size_bytes)
+        .with_filename(source.filename().map(ToOwned::to_owned));
     storage
         .put(&crate::storage_key::storage_key_for(copied.id()), content)
         .await?;
