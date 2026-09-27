@@ -197,6 +197,7 @@ export function useImportRepository(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryAssays(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -213,6 +214,7 @@ export function usePrefetchPackage(repositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryAssays(repositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -234,6 +236,7 @@ export function usePromotePackage(sourceRepositoryId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(targetRepositoryId),
       });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
     },
   });
 }
@@ -728,6 +731,7 @@ function invalidateReplica(queryClient: ReturnType<typeof useQueryClient>, repos
   void queryClient.invalidateQueries({
     queryKey: queryKeys.repositoryArtifacts(repositoryId),
   });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
 }
 
 export function usePushReplica(repositoryId: string) {

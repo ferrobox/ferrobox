@@ -185,7 +185,7 @@ impl ListRepositoryArtifactsUseCase {
                 .repository_store
                 .find_by_id(id)
                 .await?
-                .is_some_and(|repository| repository.ecosystem() != PackageEcosystem::Generic);
+                .is_some_and(|repository| hides_unindexed_artifacts(repository.ecosystem()));
             listed.extend(self.list_one(id, hide_unindexed, keys_override).await?);
         }
         sort_listed(&mut listed);
@@ -455,6 +455,21 @@ fn apply_index_item(
     }
 }
 
+/// OCI, Helm, Conan, Maven, NuGet, and Go hide leftover blobs. Cargo,
+/// npm, PyPI, and Generic still list unindexed uploads because the UI
+/// offers a generic publish on those forges.
+fn hides_unindexed_artifacts(ecosystem: PackageEcosystem) -> bool {
+    matches!(
+        ecosystem,
+        PackageEcosystem::Oci
+            | PackageEcosystem::Helm
+            | PackageEcosystem::Conan
+            | PackageEcosystem::Maven
+            | PackageEcosystem::Nuget
+            | PackageEcosystem::Go
+    )
+}
+
 fn sort_listed(listed: &mut [ListedArtifact]) {
     listed.sort_by(
         |left, right| match (left.package_name(), right.package_name()) {
@@ -555,14 +570,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hides_unindexed_artifacts_in_package_ecosystems() {
+    async fn hides_unindexed_artifacts_in_oci() {
         let repository_store = Arc::new(InMemoryRepositoryStore::default());
         let artifact_store = Arc::new(InMemoryArtifactStore::default());
         let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
         let repository = Repository::new(
-            RepositoryName::parse("crates").unwrap(),
+            RepositoryName::parse("images").unwrap(),
             RepositoryKind::Forge,
-            PackageEcosystem::Cargo,
+            PackageEcosystem::Oci,
         )
         .unwrap();
         repository_store.save(&repository).await.unwrap();
@@ -574,6 +589,30 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lists_unindexed_uploads_on_cargo() {
+        let repository_store = Arc::new(InMemoryRepositoryStore::default());
+        let artifact_store = Arc::new(InMemoryArtifactStore::default());
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = Repository::new(
+            RepositoryName::parse("crates").unwrap(),
+            RepositoryKind::Forge,
+            PackageEcosystem::Cargo,
+        )
+        .unwrap();
+        repository_store.save(&repository).await.unwrap();
+        let uploaded = Artifact::new(repository.id(), checksum(), 4);
+        artifact_store.save(&uploaded).await.unwrap();
+
+        let result = use_case(repository_store, artifact_store, package_index_store)
+            .execute(repository.id())
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].artifact(), &uploaded);
+        assert_eq!(result[0].package_name(), None);
     }
 
     #[tokio::test]
