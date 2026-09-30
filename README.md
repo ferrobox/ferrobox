@@ -11,14 +11,17 @@ Requires Docker with the Compose plugin.
 ```bash
 git clone https://github.com/ferrobox/ferrobox.git
 cd ferrobox/infra
-cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD, GARAGE_RPC_SECRET, GARAGE_ADMIN_TOKEN,
-# GARAGE_METRICS_TOKEN, S3_SECRET_ACCESS_KEY, and ADMIN_PASSWORD.
-docker compose up --build
+./dev-up.sh
 ```
 
-Open http://localhost:3000 and sign in with the `ADMIN_USERNAME` /
-`ADMIN_PASSWORD` you set in `.env`.
+The first run creates `infra/.env` from `infra/.env.example` and fills in
+PostgreSQL, Garage, and S3 secrets with freshly generated random values; an
+existing `.env` is left untouched. Open http://localhost:3000 and sign in
+with `admin` / `admin` (the default `ADMIN_USERNAME` / `ADMIN_PASSWORD`;
+change them in `.env` before first boot if you want different ones).
+
+To stop the stack: `docker compose -f infra/docker-compose.yml down` (add
+`-v` to also delete the PostgreSQL and Garage volumes).
 
 ## Quickstart: Helm
 
@@ -26,7 +29,7 @@ Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
 registry).
 
 ```bash
-helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.1.0 \
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.1.1 \
   --namespace ferrobox --create-namespace
 ```
 
@@ -41,7 +44,7 @@ admin credentials and access URL.
 ## Container image
 
 ```bash
-docker pull ghcr.io/ferrobox/ferrobox:0.1.0
+docker pull ghcr.io/ferrobox/ferrobox:0.1.1
 ```
 
 The same image is used by both quickstarts above. It expects a `DATABASE_URL`

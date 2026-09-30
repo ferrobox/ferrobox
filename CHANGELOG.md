@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-30
+
+### Changed
+
+**Web console**
+
+- Replaced the placeholder app icon and favicon with the official FerroBox
+  logo, and colored the "FerroBox" wordmark with the official brand colors,
+  in the sidebar and on the login screen.
+
+### Fixed
+
+**Documentation**
+
+- Synced the README's Docker Compose quickstart with `infra/dev-up.sh`,
+  which generates `.env` and every secret automatically on first run; the
+  previous instructions asked readers to edit secrets by hand.
+
 ## [0.1.0] - 2026-09-27
 
 ### Added
@@ -86,5 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ferrobox/ferrobox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ferrobox/ferrobox/releases/tag/v0.1.0
