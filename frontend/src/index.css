@@ -6,6 +6,12 @@
 :root {
   --radius: 0.5rem;
 
+  /* Official brand mark colors (ferrobox.io wordmark: "Ferro" + "Box").
+     Fixed values, not theme-dependent -- same in light and dark mode,
+     scoped to the logo/wordmark only, not the rest of the UI palette. */
+  --brand-ferro: #f5f6f7;
+  --brand-box: #f2540f;
+
   --background: oklch(0.99 0.002 250);
   --foreground: oklch(0.2 0.02 250);
 
@@ -96,6 +102,9 @@
 }
 
 @theme inline {
+  --color-brand-ferro: var(--brand-ferro);
+  --color-brand-box: var(--brand-box);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

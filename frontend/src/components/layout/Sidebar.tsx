@@ -1,4 +1,4 @@
-import { Boxes, FlaskConical, Package, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Boxes, FlaskConical, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
@@ -33,11 +33,12 @@ export function Sidebar() {
   return (
     <aside className="bg-sidebar text-sidebar-foreground flex h-full w-64 flex-col border-r border-sidebar-border">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
-        <span className="flex size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-          <Package className="size-4.5" strokeWidth={2.25} />
-        </span>
+        <img src="/svg_fb_logo_transparency.svg" alt="" width={32} height={37} className="h-8 w-auto shrink-0" />
         <div className="leading-tight">
-          <p className="text-sm font-semibold tracking-wide">{t("app.name")}</p>
+          <p className="text-sm font-bold tracking-tight">
+            <span className="text-brand-ferro">Ferro</span>
+            <span className="text-brand-box">Box</span>
+          </p>
           <p className="text-[11px] text-sidebar-foreground/60">{t("app.tagline")}</p>
         </div>
       </div>
