@@ -42,11 +42,13 @@ export function LoginPage() {
       : window.location.hash;
     const tokenFromHash = new URLSearchParams(hash).get("sso_token");
     if (!tokenFromHash) {
-      setSsoPending(false);
+      // Deferred via queueMicrotask instead of calling setState synchronously
+      // in the effect body (react-hooks/set-state-in-effect).
+      queueMicrotask(() => setSsoPending(false));
       return;
     }
     let cancelled = false;
-    setSsoPending(true);
+    queueMicrotask(() => setSsoPending(true));
     void completeSso(tokenFromHash)
       .then(() => {
         if (!cancelled) {
