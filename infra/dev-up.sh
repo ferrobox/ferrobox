@@ -54,6 +54,8 @@ docker compose up --no-deps --exit-code-from garage-init garage-init
 echo "Starting FerroBox application..."
 docker compose up -d ferrobox
 
+wait_for_healthy ferrobox
+
 echo ""
 echo "FerroBox stack is up and running!"
 echo "Web UI: http://localhost:3000"
