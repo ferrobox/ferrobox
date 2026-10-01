@@ -112,7 +112,7 @@ export function LoginPage() {
             height={74}
             className="mx-auto mb-4 h-14 w-auto"
           />
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          <h1 className="text-3xl font-bold tracking-tight text-brand-ink">
             Ferro<span className="text-brand-box">Box</span>
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">{t("login.subtitle")}</p>
