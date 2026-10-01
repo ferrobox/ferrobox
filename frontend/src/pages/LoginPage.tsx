@@ -1,6 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -106,11 +105,21 @@ export function LoginPage() {
 
       <div className="relative w-full max-w-md animate-in fade-in slide-in-from-bottom-2 duration-500">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <Package className="size-6" strokeWidth={2.25} />
+          {/* The logo's inner bevel shading assumes a dark backdrop (as on
+              ferrobox.io's header and in the app's Sidebar), so it gets its
+              own dark badge here instead of sitting directly on this page's
+              light background. */}
+          <div className="mx-auto mb-4 flex size-20 items-center justify-center rounded-2xl bg-brand-ink p-3 shadow-sm">
+            <img
+              src="/svg_fb_logo_transparency.svg"
+              alt=""
+              width={64}
+              height={74}
+              className="h-full w-auto"
+            />
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            {t("app.name")}
+          <h1 className="text-3xl font-bold tracking-tight text-brand-ink">
+            Ferro<span className="text-brand-box">Box</span>
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">{t("login.subtitle")}</p>
         </div>

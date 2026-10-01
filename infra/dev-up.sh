@@ -52,7 +52,12 @@ docker compose up --no-deps --exit-code-from garage-init garage-init
 
 # 4. Launch application
 echo "Starting FerroBox application..."
-docker compose up -d ferrobox
+# --build: the ferrobox:local image is only built once; without --build,
+# `up` reuses whatever image already exists and silently ignores any
+# source changes since the last build.
+docker compose up -d --build ferrobox
+
+wait_for_healthy ferrobox
 
 echo ""
 echo "FerroBox stack is up and running!"
