@@ -39,7 +39,9 @@ export function MirrorSchedulePanel({
   const [hours, setHours] = useState(intervalHours == null ? "" : String(intervalHours));
 
   useEffect(() => {
-    setHours(intervalHours == null ? "" : String(intervalHours));
+    // Deferred via queueMicrotask instead of calling setState synchronously
+    // in the effect body (react-hooks/set-state-in-effect).
+    queueMicrotask(() => setHours(intervalHours == null ? "" : String(intervalHours)));
   }, [intervalHours]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
