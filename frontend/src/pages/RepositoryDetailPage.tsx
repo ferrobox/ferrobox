@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
@@ -6,6 +7,7 @@ import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
 import {
+  queryKeys,
   useDeleteRepository,
   useRepositories,
   useRepository,
@@ -15,6 +17,7 @@ import {
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, canWriteRepository } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
+import { OsvFeedCard } from "@/components/repository/OsvFeedCard";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
@@ -250,6 +253,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
               canWrite={canWrite}
             />
           ) : null}
+          {isAdmin ? <OsvFeedCard /> : null}
           <ArtifactsTable
             repositoryId={repositoryId}
             kind={repository.kind.type}
@@ -306,6 +310,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
 
 function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const repository = useRepository(repositoryId);
   const artifacts = useRepositoryArtifacts(repositoryId);
   const assays = useRepositoryAssays(repositoryId);
@@ -321,6 +326,7 @@ function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
         void repository.refetch();
         void artifacts.refetch();
         void assays.refetch();
+        void queryClient.invalidateQueries({ queryKey: queryKeys.osvFeed });
       }}
     >
       <RefreshCw className={fetching ? "animate-spin" : ""} />

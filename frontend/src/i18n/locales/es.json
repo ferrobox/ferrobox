@@ -387,6 +387,9 @@
   },
   "artifacts": {
     "unnamed": "Artefacto sin índice",
+    "posture": "[{{critical}} Crít | {{high}} Alto]",
+    "postureLabel": "Hallazgos: {{critical}} críticos, {{high}} altos. Abrir el ensaye.",
+    "postureNone": "Esta versión no se ha ensayado",
     "deleted": "Artefacto eliminado",
     "deleteFailed": "No se pudo eliminar el artefacto",
     "downloadFailed": "No se pudo descargar el artefacto",
@@ -605,6 +608,15 @@
     "resetPassword": "Restablecer la contraseña de otra cuenta",
     "allowed": "Permitido",
     "denied": "No"
+  },
+  "feed": {
+    "title": "Índice de vulnerabilidades",
+    "dataset": "Dataset",
+    "imported": "Importado",
+    "mode": "Modo",
+    "empty": "No se ha importado ningún índice de vulnerabilidades.",
+    "loading": "Cargando el índice de vulnerabilidades…",
+    "loadFailed": "No se pudo cargar el índice de vulnerabilidades"
   },
   "severity": {
     "critical": "Crítica",
