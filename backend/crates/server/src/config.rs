@@ -67,6 +67,9 @@ pub struct Config {
     pub oidc_auto_create_groups: bool,
     /// Session token expiry (login and SSO).
     pub session_ttl: Duration,
+    /// Optional path to a local `ferrobox-osv-index` file (plain or gzipped).
+    /// When set, assays consult this index instead of `api.osv.dev`.
+    pub osv_feed_path: Option<PathBuf>,
 }
 
 impl Config {
@@ -102,6 +105,7 @@ impl Config {
             oidc_group_claim: optional_env("OIDC_GROUP_CLAIM"),
             oidc_auto_create_groups: env_flag("OIDC_AUTO_CREATE_GROUPS", true),
             session_ttl: session_ttl_from_env(),
+            osv_feed_path: optional_env("OSV_FEED_PATH").map(PathBuf::from),
         })
     }
 }

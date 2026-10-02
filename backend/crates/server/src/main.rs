@@ -60,7 +60,7 @@ use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_postgres::worm_store::PostgresWormStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::admission::AdmissionService;
-use ferrobox_application::assay::AssayService;
+use ferrobox_application::assay::{AssayService, OsvFeed};
 use ferrobox_application::audit::AuditService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
@@ -527,7 +527,7 @@ fn build_app_state(
 ) -> AppState {
     let webhooks =
         WebhookService::new(webhook_store, http_client.clone(), repository_store.clone());
-    let assays = AssayService::new(
+    let mut assays = AssayService::new(
         assay_store.clone(),
         package_index_store.clone(),
         repository_store.clone(),
@@ -535,6 +535,22 @@ fn build_app_state(
         http_client.clone(),
     )
     .with_webhooks(webhooks.clone());
+    if let Some(path) = &config.osv_feed_path {
+        let feed = OsvFeed::load_path(path).unwrap_or_else(|err| {
+            panic!(
+                "OSV_FEED_PATH={} is not a usable vulnerability index: {err}",
+                path.display()
+            );
+        });
+        eprintln!(
+            "ferrobox: osv feed dataset={} advisories={} ecosystems={} path={}",
+            feed.dataset(),
+            feed.advisory_count(),
+            feed.ecosystems().join(","),
+            path.display()
+        );
+        assays = assays.with_feed(Arc::new(feed));
+    }
     let quota = QuotaService::new(
         repository_store.clone(),
         artifact_store.clone(),

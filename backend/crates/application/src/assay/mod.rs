@@ -2,17 +2,20 @@
 
 mod cyclonedx;
 mod extract;
+mod feed;
 mod layers;
 mod licenses;
 mod lockfiles;
 mod osv;
+
+pub use feed::OsvFeed;
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
-use ferrobox_domain::assay::{Assay, AssayStatus};
+use ferrobox_domain::assay::{Assay, AssayComponent, AssayStatus};
 use ferrobox_domain::ids::{AssayId, RepositoryId};
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
@@ -79,6 +82,9 @@ pub struct AssayService {
     storage: Arc<dyn StoragePort>,
     http_client: Arc<dyn HttpClient>,
     webhooks: Option<WebhookService>,
+    /// When set, vulnerability lookup uses this index and does not call
+    /// `api.osv.dev`.
+    feed: Option<Arc<OsvFeed>>,
 }
 
 impl AssayService {
@@ -98,6 +104,7 @@ impl AssayService {
             storage,
             http_client,
             webhooks: None,
+            feed: None,
         }
     }
 
@@ -106,6 +113,13 @@ impl AssayService {
     #[must_use]
     pub fn with_webhooks(mut self, webhooks: WebhookService) -> Self {
         self.webhooks = Some(webhooks);
+        self
+    }
+
+    /// Uses a local vulnerability index instead of `api.osv.dev`.
+    #[must_use]
+    pub fn with_feed(mut self, feed: Arc<OsvFeed>) -> Self {
+        self.feed = Some(feed);
         self
     }
 
@@ -298,14 +312,9 @@ impl AssayService {
             .any(|component| osv_query_target(component, coordinate.ecosystem()).is_some());
 
         let assay = if can_query {
-            match query_findings(
-                self.http_client.as_ref(),
-                coordinate.ecosystem(),
-                &components,
-            )
-            .await
-            {
-                Ok(findings) => Assay::from_parts(
+            if let Some(feed) = &self.feed {
+                let findings = feed.query(coordinate.ecosystem(), &components);
+                Assay::from_parts(
                     existing_id,
                     repository_id,
                     coordinate.clone(),
@@ -314,29 +323,16 @@ impl AssayService {
                     None,
                     components,
                     findings,
-                ),
-                Err(HttpClientError::Status { status, url }) => Assay::from_parts(
+                )
+            } else {
+                self.assay_from_osv_http(
                     existing_id,
                     repository_id,
-                    coordinate.clone(),
-                    AssayStatus::Failed,
-                    Some(scanned_at),
-                    Some(format!(
-                        "OSV (Open Source Vulnerabilities) respondió HTTP {status} para {url}"
-                    )),
+                    coordinate,
                     components,
-                    Vec::new(),
-                ),
-                Err(HttpClientError::Transport { url, message }) => Assay::from_parts(
-                    existing_id,
-                    repository_id,
-                    coordinate.clone(),
-                    AssayStatus::Failed,
-                    Some(scanned_at),
-                    Some(format!("no se pudo consultar OSV en {url}: {message}")),
-                    components,
-                    Vec::new(),
-                ),
+                    &scanned_at,
+                )
+                .await
             }
         } else if components.len() > 1 {
             Assay::from_parts(
@@ -367,6 +363,56 @@ impl AssayService {
             webhooks.notify_assay_completed(assay.clone());
         }
         Ok(assay)
+    }
+
+    async fn assay_from_osv_http(
+        &self,
+        existing_id: AssayId,
+        repository_id: RepositoryId,
+        coordinate: &PackageCoordinate,
+        components: Vec<AssayComponent>,
+        scanned_at: &str,
+    ) -> Assay {
+        match query_findings(
+            self.http_client.as_ref(),
+            coordinate.ecosystem(),
+            &components,
+        )
+        .await
+        {
+            Ok(findings) => Assay::from_parts(
+                existing_id,
+                repository_id,
+                coordinate.clone(),
+                AssayStatus::Ready,
+                Some(scanned_at.to_string()),
+                None,
+                components,
+                findings,
+            ),
+            Err(HttpClientError::Status { status, url }) => Assay::from_parts(
+                existing_id,
+                repository_id,
+                coordinate.clone(),
+                AssayStatus::Failed,
+                Some(scanned_at.to_string()),
+                Some(format!(
+                    "OSV (Open Source Vulnerabilities) respondió HTTP {status} para {url}"
+                )),
+                components,
+                Vec::new(),
+            ),
+            Err(HttpClientError::Transport { url, message }) => Assay::from_parts(
+                existing_id,
+                repository_id,
+                coordinate.clone(),
+                AssayStatus::Failed,
+                Some(scanned_at.to_string()),
+                Some(format!("no se pudo consultar OSV en {url}: {message}")),
+                components,
+                Vec::new(),
+            ),
+        }
     }
 
     async fn require_repository(
@@ -579,11 +625,7 @@ mod tests {
         let repository = npm_forge();
         repos.save(&repository).await.unwrap();
         seed_lodash(&index, &repository).await;
-        http.stub(
-            "https://api.osv.dev/v1/querybatch",
-            200,
-            osv_high_lodash(),
-        );
+        http.stub("https://api.osv.dev/v1/querybatch", 200, osv_high_lodash());
 
         let service = AssayService::new(
             Arc::new(InMemoryAssayStore::default()),
@@ -623,11 +665,7 @@ mod tests {
         let repository = npm_forge();
         repos.save(&repository).await.unwrap();
         seed_lodash(&index, &repository).await;
-        http.stub(
-            "https://api.osv.dev/v1/querybatch",
-            200,
-            osv_high_lodash(),
-        );
+        http.stub("https://api.osv.dev/v1/querybatch", 200, osv_high_lodash());
 
         let service = AssayService::new(
             Arc::new(InMemoryAssayStore::default()),
@@ -684,6 +722,48 @@ mod tests {
             .unwrap();
         assert_eq!(assay.counts().high, 1);
         assert_eq!(assay.findings()[0].title(), "Command Injection in lodash");
+        assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
+    }
+
+    #[tokio::test]
+    async fn local_feed_answers_without_calling_osv() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_lodash(&index, &repository).await;
+        let feed = super::OsvFeed::from_bytes(
+            br#"{
+                "format": "ferrobox-osv-index",
+                "format_version": 1,
+                "dataset": "2026-10-02",
+                "advisories": [{
+                    "ecosystem": "npm",
+                    "name": "lodash",
+                    "id": "GHSA-35jh-r3h4-6jhm",
+                    "aliases": ["CVE-2021-23337"],
+                    "summary": "Command Injection in lodash",
+                    "severity": "HIGH",
+                    "fixed": "4.17.21"
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_feed(Arc::new(feed));
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Ready);
+        assert_eq!(assay.counts().high, 1);
         assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
     }
 
@@ -767,12 +847,7 @@ mod tests {
             Arc::new(InMemoryHttpClient::default()),
         );
         let assay = service
-            .run(
-                repository.id(),
-                PackageEcosystem::Conan,
-                "hello",
-                "0.1@_:_",
-            )
+            .run(repository.id(), PackageEcosystem::Conan, "hello", "0.1@_:_")
             .await
             .unwrap();
         assert_eq!(assay.status(), AssayStatus::Unsupported);
@@ -838,8 +913,7 @@ mod tests {
             builder.append(&header, data).unwrap();
             builder.finish().unwrap();
         }
-        let mut encoder =
-            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(&tar_buf).unwrap();
         Bytes::from(encoder.finish().unwrap())
     }
@@ -862,10 +936,7 @@ mod tests {
         .unwrap();
         repos.save(&repository).await.unwrap();
 
-        let layer = gzip_tar_file(
-            "lib/apk/db/installed",
-            "P:busybox\nV:1.36.1-r19\n\n",
-        );
+        let layer = gzip_tar_file("lib/apk/db/installed", "P:busybox\nV:1.36.1-r19\n\n");
         let layer_digest = content_digest(&layer);
         let layer_id = ArtifactId::new();
         storage
@@ -1001,12 +1072,7 @@ mod tests {
             Arc::new(InMemoryHttpClient::default()),
         );
         let assay = service
-            .run(
-                repository.id(),
-                PackageEcosystem::Conan,
-                "hello",
-                "0.1@_:_",
-            )
+            .run(repository.id(), PackageEcosystem::Conan, "hello", "0.1@_:_")
             .await
             .unwrap();
         assert_eq!(assay.status(), AssayStatus::Ready);
@@ -1101,11 +1167,7 @@ mod tests {
         let repository = npm_forge();
         repos.save(&repository).await.unwrap();
         seed_lodash(&index, &repository).await;
-        http.stub(
-            "https://api.osv.dev/v1/querybatch",
-            200,
-            osv_high_lodash(),
-        );
+        http.stub("https://api.osv.dev/v1/querybatch", 200, osv_high_lodash());
 
         let service = AssayService::new(
             Arc::new(InMemoryAssayStore::default()),
@@ -1135,11 +1197,7 @@ mod tests {
         let repository = npm_forge();
         repos.save(&repository).await.unwrap();
         seed_lodash(&index, &repository).await;
-        http.stub(
-            "https://api.osv.dev/v1/querybatch",
-            200,
-            osv_high_lodash(),
-        );
+        http.stub("https://api.osv.dev/v1/querybatch", 200, osv_high_lodash());
 
         let service = AssayService::new(
             Arc::new(InMemoryAssayStore::default()),

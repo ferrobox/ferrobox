@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Security**
+
+- Assays can consult a local OSV index (`OSV_FEED_PATH`, format
+  `ferrobox-osv-index` v1, plain JSON or gzip) instead of calling
+  `api.osv.dev`. When the variable is unset, the live query is unchanged.
+
 ## [0.1.1] - 2026-09-30
 
 ### Changed
