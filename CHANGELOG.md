@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assays can consult a local OSV index (`OSV_FEED_PATH`, format
   `ferrobox-osv-index` v1, plain JSON or gzip) instead of calling
   `api.osv.dev`. When the variable is unset, the live query is unchanged.
+- An administrator can import that index with `POST /api/security/osv-feed`
+  and an `X-FerroBox-Sha256` header. The instance stores the dataset
+  version and checksum; a bad checksum or a bad document does not replace
+  the previous index, and the imported index is loaded again after a
+  restart. `GET` on the same path reports the imported feed. An imported
+  index takes precedence over `OSV_FEED_PATH`.
 
 ## [0.1.1] - 2026-09-30
 

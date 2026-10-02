@@ -32,6 +32,9 @@ pub mod api_token_store;
 /// Persistence port for the `Assay` entity.
 pub mod assay_store;
 
+/// Persistence port for the active vulnerability index.
+pub mod osv_feed_store;
+
 /// Persistence port for the retention policy.
 pub mod retention_store;
 
