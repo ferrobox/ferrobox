@@ -442,7 +442,7 @@
   },
   "admission": {
     "title": "Políticas",
-    "description": "Al instalar, bajar o promover a este Forge: deniega o solo avisa si el artefacto no está firmado, tiene un hallazgo de una severidad o más, o declara una licencia denegada. La firma aplica en OCI/Helm. CVE y licencia usan el último ensaye listo del origen; si no hay, no se bloquea. En un Mirror rige esta regla; un Alloy usa la de cada miembro. Simular ignora si está activada.",
+    "description": "Al instalar, bajar o promover a este Forge: deniega o solo avisa si el artefacto no está firmado, tiene un hallazgo de una severidad o más, o declara una licencia denegada. La firma aplica en OCI/Helm. La licencia usa el último ensaye listo. Una regla de vulnerabilidad conocida deniega el pull si falta el índice de vulnerabilidades o ese ensaye no está listo. En un Mirror rige esta regla; un Alloy usa la de cada miembro. Simular ignora si está activada.",
     "enable": "Activar",
     "enableHint": "Sin marcar, la regla se guarda pero no bloquea ni avisa en el pull ni en el promote.",
     "when": "Cuándo",
@@ -460,7 +460,7 @@
     "findingMedium": "≥ Medium",
     "findingHigh": "≥ High",
     "findingCritical": "≥ Critical",
-    "findingHint": "Usa el último ensaye listo. Sin ensaye, pull y promote no se bloquean.",
+    "findingHint": "Usa el último ensaye listo. Si no está en Off, un índice de vulnerabilidades ausente o un ensaye que no está listo deniegan el pull.",
     "licenses": "Licencias denegadas",
     "licensesHint": "Ids SPDX, uno por línea. Coincidencia exacta, sin mayúsculas. Vacío = apagado.",
     "licensesPlaceholder": "GPL-3.0-only",

@@ -18,6 +18,7 @@ use ferrobox_ports::assay_store::AssayStore;
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use thiserror::Error;
 
+use crate::assay::VulnerabilityFeedSource;
 use crate::list_repository_artifacts::{
     ListRepositoryArtifactsError, ListRepositoryArtifactsUseCase, ListedArtifact,
 };
@@ -84,6 +85,8 @@ pub struct AdmissionService {
     repositories: Arc<dyn RepositoryStore>,
     list_artifacts: ListRepositoryArtifactsUseCase,
     assays: Option<Arc<dyn AssayStore>>,
+    /// Local vulnerability index. Absent in tests that do not arm a CVE clause.
+    vulnerability_feed: Option<Arc<dyn VulnerabilityFeedSource>>,
 }
 
 impl AdmissionService {
@@ -99,14 +102,28 @@ impl AdmissionService {
             repositories,
             list_artifacts,
             assays: None,
+            vulnerability_feed: None,
         }
     }
 
-    /// Assays for evaluating CVE and license. Without them, those
-    /// clauses do not fire (fail-open).
+    /// Assays for evaluating CVE and license. A license clause without
+    /// a ready assay does not fire. A CVE clause fails closed: see
+    /// [`Self::with_vulnerability_feed`].
     #[must_use]
     pub fn with_assays(mut self, assays: Arc<dyn AssayStore>) -> Self {
         self.assays = Some(assays);
+        self
+    }
+
+    /// Local index used to decide whether a CVE clause can be evaluated.
+    ///
+    /// When the clause is armed and this reports nothing loaded, pull
+    /// and promote are denied. An assay that is not `Ready` is denied
+    /// the same way. With the clause off, a missing assay still allows
+    /// the operation.
+    #[must_use]
+    pub fn with_vulnerability_feed(mut self, feed: Arc<dyn VulnerabilityFeedSource>) -> Self {
+        self.vulnerability_feed = Some(feed);
         self
     }
 
@@ -184,6 +201,7 @@ impl AdmissionService {
             &policy,
             &assays,
             consider_signature,
+            self.vulnerability_feed_loaded(),
         ))
     }
 
@@ -222,6 +240,21 @@ impl AdmissionService {
             return Ok(());
         };
         let policy = record.policy;
+        if let Some(reason) = self
+            .cve_unavailable(repository_id, &policy, name, reference, "pull")
+            .await
+        {
+            return self
+                .finish_decision(
+                    repository_id,
+                    name,
+                    reference,
+                    AdmissionEffect::Deny,
+                    reason,
+                    "pull",
+                )
+                .await;
+        }
         let facts = self
             .facts_for(repository_id, name, reference, signed, verified)
             .await;
@@ -229,31 +262,8 @@ impl AdmissionService {
             return Ok(());
         };
         let reason = hit_reason(&hit, effect, true);
-        let now = Utc::now();
-        let recent = self
-            .store
-            .list_events(repository_id, 10)
+        self.finish_decision(repository_id, name, reference, effect, reason, "pull")
             .await
-            .unwrap_or_default();
-        if !is_duplicate_pull_event(&recent, name, reference, effect, now) {
-            let event = AdmissionEvent::from_parts(
-                AdmissionEventId::new(),
-                repository_id,
-                name,
-                reference,
-                effect,
-                reason,
-                now.to_rfc3339_opts(SecondsFormat::Secs, true),
-            );
-            let _ = self.store.record_event(&event).await;
-        }
-        if matches!(effect, AdmissionEffect::Deny) {
-            return Err(PackagingError::PolicyDenied(format!(
-                "admission policy denies pull of {name}:{reference}: {}",
-                hit_reason(&hit, effect, true)
-            )));
-        }
-        Ok(())
     }
 
     /// Like [`Self::enforce_pull`], for a package without a Cosign signature.
@@ -272,8 +282,9 @@ impl AdmissionService {
     }
 
     /// Evaluates the **target** policy against facts from the **source**
-    /// package before a promote. Same clauses as pull; fail-open without
-    /// a ready assay. OCI/Helm signatures use the target's Cosign keys.
+    /// package before a promote. Same clauses as pull. OCI/Helm
+    /// signatures use the target's Cosign keys. A CVE clause denies
+    /// when the feed is missing or the source assay is not ready.
     ///
     /// # Errors
     ///
@@ -296,34 +307,94 @@ impl AdmissionService {
         } else {
             (true, true)
         };
+        if let Some(reason) = self
+            .cve_unavailable(source_id, &policy, name, reference, "promote")
+            .await
+        {
+            return self
+                .finish_decision(
+                    target_id,
+                    name,
+                    reference,
+                    AdmissionEffect::Deny,
+                    reason,
+                    "promote",
+                )
+                .await;
+        }
         let assay = self.find_assay(source_id, name, reference).await;
         let facts = facts_from_assay(assay.as_ref(), signed, verified, consider_signature);
         let Some((effect, hit)) = policy.apply_facts(&facts) else {
             return Ok(());
         };
         let reason = hit_reason_op(&hit, effect, true, "promote");
+        self.finish_decision(target_id, name, reference, effect, reason, "promote")
+            .await
+    }
+
+    fn vulnerability_feed_loaded(&self) -> bool {
+        self.vulnerability_feed
+            .as_ref()
+            .is_some_and(|feed| feed.vulnerability_feed_loaded())
+    }
+
+    /// CVE clause armed, but the index or the assay cannot support it.
+    ///
+    /// `None` means the caller should evaluate the clauses as usual.
+    async fn cve_unavailable(
+        &self,
+        assay_repository_id: RepositoryId,
+        policy: &AdmissionPolicy,
+        name: &str,
+        reference: &str,
+        operation: &str,
+    ) -> Option<String> {
+        if !policy.enabled() || policy.clauses().min_finding().is_none() {
+            return None;
+        }
+        if !self.vulnerability_feed_loaded() {
+            return Some(format!("feed missing: se denegó el {operation}"));
+        }
+        let assay = self.find_assay(assay_repository_id, name, reference).await;
+        if assay
+            .as_ref()
+            .is_some_and(|assay| assay.status() == AssayStatus::Ready)
+        {
+            return None;
+        }
+        Some(format!("el assay no está listo: se denegó el {operation}"))
+    }
+
+    async fn finish_decision(
+        &self,
+        repository_id: RepositoryId,
+        name: &str,
+        reference: &str,
+        effect: AdmissionEffect,
+        reason: String,
+        operation: &str,
+    ) -> Result<(), PackagingError> {
         let now = Utc::now();
         let recent = self
             .store
-            .list_events(target_id, 10)
+            .list_events(repository_id, 10)
             .await
             .unwrap_or_default();
         if !is_duplicate_pull_event(&recent, name, reference, effect, now) {
             let event = AdmissionEvent::from_parts(
                 AdmissionEventId::new(),
-                target_id,
+                repository_id,
                 name,
                 reference,
                 effect,
-                reason,
+                reason.clone(),
                 now.to_rfc3339_opts(SecondsFormat::Secs, true),
             );
             let _ = self.store.record_event(&event).await;
         }
         if matches!(effect, AdmissionEffect::Deny) {
             return Err(PackagingError::PolicyDenied(format!(
-                "admission policy denies promote of {name}:{reference}: {}",
-                hit_reason_op(&hit, effect, true, "promote")
+                "admission policy denies {operation} of {name}:{reference}: {reason}"
             )));
         }
         Ok(())
@@ -458,6 +529,7 @@ fn preview_against(
     policy: &AdmissionPolicy,
     assays: &[Assay],
     consider_signature: bool,
+    feed_loaded: bool,
 ) -> AdmissionPreview {
     let mut matches = Vec::new();
     let mut allowed = 0_usize;
@@ -476,6 +548,26 @@ fn preview_against(
             assay.coordinate().name().as_str() == name
                 && assay.coordinate().version().as_str() == version
         });
+        if policy.clauses().min_finding().is_some() && !feed_loaded {
+            matches.push(AdmissionPreviewItem {
+                name: name.to_string(),
+                version: version.to_string(),
+                effect: AdmissionEffect::Deny,
+                reason: "feed missing: se denegaría el pull".to_string(),
+            });
+            continue;
+        }
+        if policy.clauses().min_finding().is_some()
+            && assay.is_none_or(|found| found.status() != AssayStatus::Ready)
+        {
+            matches.push(AdmissionPreviewItem {
+                name: name.to_string(),
+                version: version.to_string(),
+                effect: AdmissionEffect::Deny,
+                reason: "el assay no está listo: se denegaría el pull".to_string(),
+            });
+            continue;
+        }
         let facts = facts_from_assay(assay, item.signed(), item.verified(), consider_signature);
         match policy.preview_facts(&facts) {
             None => allowed += 1,
@@ -567,6 +659,8 @@ mod tests {
     use ferrobox_ports::package_index_store::PackageIndexStore;
     use ferrobox_ports::repository_store::RepositoryStore;
 
+    use ferrobox_domain::admission::AdmissionClauses;
+
     use super::*;
     use crate::test_support::{
         InMemoryAdmissionStore, InMemoryArtifactStore, InMemoryAssayStore,
@@ -609,6 +703,24 @@ mod tests {
         assays: Arc<InMemoryAssayStore>,
     ) -> AdmissionService {
         service(store, repositories, artifacts, index).with_assays(assays)
+    }
+
+    struct StaticFeed(bool);
+
+    impl VulnerabilityFeedSource for StaticFeed {
+        fn vulnerability_feed_loaded(&self) -> bool {
+            self.0
+        }
+    }
+
+    fn cve_policy(enabled: bool) -> AdmissionPolicy {
+        AdmissionPolicy::compose(
+            enabled,
+            "pull",
+            "deny",
+            AdmissionClauses::new(false, false, Some(AssaySeverity::High), Vec::new(), None),
+        )
+        .unwrap()
     }
 
     async fn forge_cargo(repositories: &InMemoryRepositoryStore) -> Repository {
@@ -1014,6 +1126,7 @@ mod tests {
             index,
             assays,
         )
+        .with_vulnerability_feed(Arc::new(StaticFeed(true)))
         .dry_run(
             repository.id(),
             AdmissionPolicy::profile_openchain_security(),
@@ -1029,7 +1142,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dry_run_fails_open_without_a_ready_assay() {
+    async fn dry_run_denies_a_cve_policy_when_the_feed_is_missing() {
         let repositories = Arc::new(InMemoryRepositoryStore::default());
         let artifacts = Arc::new(InMemoryArtifactStore::default());
         let index = Arc::new(InMemoryPackageIndexStore::default());
@@ -1062,8 +1175,146 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(preview.matches.is_empty());
-        assert_eq!(preview.allowed, 1);
+        assert_eq!(preview.matches.len(), 1);
+        assert_eq!(preview.matches[0].effect, AdmissionEffect::Deny);
+        assert!(preview.matches[0].reason.contains("feed missing"));
+        assert!(!preview.matches[0].reason.contains("hallazgo"));
+        assert_eq!(preview.allowed, 0);
+    }
+
+    #[tokio::test]
+    async fn cve_policy_off_allows_pull_without_a_feed() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        store
+            .save(repository.id(), cve_policy(false), "")
+            .await
+            .unwrap();
+        service_with_assays(store, repositories, artifacts, index, assays)
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cve_policy_denies_pull_when_the_feed_is_missing() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        store
+            .save(repository.id(), cve_policy(true), "")
+            .await
+            .unwrap();
+        let error = service_with_assays(store, repositories, artifacts, index, assays)
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("feed missing"), "{message}");
+        assert!(!message.contains("hallazgo"), "{message}");
+        assert!(!message.to_ascii_lowercase().contains("cve"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn cve_policy_denies_a_ready_finding_when_the_feed_is_loaded() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Ready,
+                Some(AssaySeverity::High),
+                &["MIT"],
+            ))
+            .await
+            .unwrap();
+        store
+            .save(repository.id(), cve_policy(true), "")
+            .await
+            .unwrap();
+        let error = service_with_assays(store, repositories, artifacts, index, assays)
+            .with_vulnerability_feed(Arc::new(StaticFeed(true)))
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("hallazgo high"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn cve_policy_allows_a_clean_assay_when_the_feed_is_loaded() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Ready,
+                None,
+                &["MIT"],
+            ))
+            .await
+            .unwrap();
+        store
+            .save(repository.id(), cve_policy(true), "")
+            .await
+            .unwrap();
+        service_with_assays(store, repositories, artifacts, index, assays)
+            .with_vulnerability_feed(Arc::new(StaticFeed(true)))
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cve_policy_denies_when_the_assay_is_not_ready() {
+        let repositories = Arc::new(InMemoryRepositoryStore::default());
+        let artifacts = Arc::new(InMemoryArtifactStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let store = Arc::new(InMemoryAdmissionStore::default());
+        let assays = Arc::new(InMemoryAssayStore::default());
+        let repository = forge_cargo(&repositories).await;
+        assays
+            .upsert(&ready_assay(
+                repository.id(),
+                "libc",
+                "0.2.177",
+                AssayStatus::Failed,
+                None,
+                &["MIT"],
+            ))
+            .await
+            .unwrap();
+        store
+            .save(repository.id(), cve_policy(true), "")
+            .await
+            .unwrap();
+        let error = service_with_assays(store, repositories, artifacts, index, assays)
+            .with_vulnerability_feed(Arc::new(StaticFeed(true)))
+            .enforce_package_pull(repository.id(), "libc", "0.2.177")
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("el assay no está listo"), "{message}");
+        assert!(!message.contains("feed missing"), "{message}");
     }
 
     #[tokio::test]

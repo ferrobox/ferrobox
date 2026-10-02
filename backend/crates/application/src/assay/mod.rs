@@ -625,6 +625,18 @@ impl AssayService {
 
 /// Skips OCI blobs and manifests indexed by digest: they are not a
 /// version the UI assays.
+/// Tells admission whether a local vulnerability index is loaded.
+pub trait VulnerabilityFeedSource: Send + Sync {
+    /// `true` when assays can answer from a local index.
+    fn vulnerability_feed_loaded(&self) -> bool;
+}
+
+impl VulnerabilityFeedSource for AssayService {
+    fn vulnerability_feed_loaded(&self) -> bool {
+        self.current_feed().is_some()
+    }
+}
+
 pub(crate) fn should_auto_assay(coordinate: &PackageCoordinate) -> bool {
     let name = coordinate.name().as_str();
     let version = coordinate.version().as_str();

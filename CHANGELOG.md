@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous index, and the imported index is loaded again after a
   restart. `GET` on the same path reports the imported feed. An imported
   index takes precedence over `OSV_FEED_PATH`.
+- A repository policy that checks known vulnerabilities now fails closed.
+  If that clause is on and the vulnerability feed is missing, or the
+  assay for that version is not ready, the pull and the promote are
+  denied. A missing feed is reported as `feed missing`. With the clause
+  off, a missing assay still does not block.
 
 ## [0.1.1] - 2026-09-30
 
