@@ -183,7 +183,8 @@ impl AssayService {
 
     /// Checks the SHA-256, parses the index, stores the bytes, and makes
     /// this process use them. A mismatch or a bad document leaves the
-    /// previous index in place.
+    /// previous index in place. A new checksum marks every stored assay
+    /// `Running` and re-runs it in the background against this index.
     ///
     /// # Errors
     ///
@@ -223,6 +224,9 @@ impl AssayService {
         if let Err(err) = store.save(&record).await {
             return Err(err.into());
         }
+        let feed_changed = previous
+            .as_ref()
+            .is_none_or(|previous| previous.sha256 != record.sha256);
         if let Some(previous) = previous
             && previous.storage_key != storage_key
         {
@@ -232,6 +236,9 @@ impl AssayService {
                 .await;
         }
         self.install_feed(Arc::new(parsed));
+        if feed_changed {
+            let _ = self.rerun_all().await;
+        }
         Ok(record)
     }
 
@@ -736,6 +743,31 @@ mod tests {
             .unwrap();
     }
 
+    async fn seed_npm(
+        index: &InMemoryPackageIndexStore,
+        repository: &Repository,
+        name: &str,
+        version: &str,
+    ) {
+        let coordinate = PackageCoordinate::new(
+            PackageEcosystem::Npm,
+            PackageName::parse(name).unwrap(),
+            PackageVersion::parse(version).unwrap(),
+        );
+        let entry = Bytes::from(
+            serde_json::json!({
+                "name": name,
+                "version": version,
+                "manifest": { "license": "MIT" }
+            })
+            .to_string(),
+        );
+        index
+            .upsert_entry(repository.id(), &coordinate, None, entry)
+            .await
+            .unwrap();
+    }
+
     fn osv_high_lodash_vuln() -> serde_json::Value {
         serde_json::json!({
             "id": "GHSA-35jh-r3h4-6jhm",
@@ -1085,6 +1117,111 @@ mod tests {
         assert_eq!(after.status(), AssayStatus::Ready);
         assert_eq!(after.counts().high, 1);
         assert_eq!(after.findings()[0].fixed_version(), Some("4.17.21"));
+    }
+
+    fn npm_index(dataset: &str, fixed: &str) -> Bytes {
+        Bytes::from(
+            serde_json::json!({
+                "format": "ferrobox-osv-index",
+                "format_version": 1,
+                "dataset": dataset,
+                "advisories": [{
+                    "ecosystem": "npm",
+                    "name": "lodash",
+                    "id": "GHSA-35jh-r3h4-6jhm",
+                    "aliases": ["CVE-2021-23337"],
+                    "summary": "Command Injection in lodash",
+                    "severity": "HIGH",
+                    "fixed": fixed
+                }]
+            })
+            .to_string(),
+        )
+    }
+
+    fn stored_assay<'a>(assays: &'a [Assay], name: &str) -> &'a Assay {
+        assays
+            .iter()
+            .find(|assay| assay.coordinate().name().as_str() == name)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn importing_a_new_feed_reruns_stored_assays() {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_npm(&index, &repository, "lodash", "4.17.21").await;
+        seed_npm(&index, &repository, "ms", "2.1.3").await;
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            Arc::new(InMemoryStorage::default()),
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_feed_store(Arc::new(MemoryOsvFeedStore::new()));
+
+        let clean = npm_index("2026-10-02", "4.17.21");
+        service
+            .import_feed(clean.clone(), &sha256_hex(&clean))
+            .await
+            .unwrap();
+        service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.21")
+            .await
+            .unwrap();
+        service
+            .run(repository.id(), PackageEcosystem::Npm, "ms", "2.1.3")
+            .await
+            .unwrap();
+        let before = service.list_all().await.unwrap();
+        let lodash_scanned = stored_assay(&before, "lodash")
+            .scanned_at()
+            .unwrap()
+            .to_string();
+        let ms_scanned = stored_assay(&before, "ms").scanned_at().unwrap().to_string();
+        assert_eq!(stored_assay(&before, "lodash").counts().high, 0);
+        assert_eq!(stored_assay(&before, "ms").counts().high, 0);
+
+        let rejected = service
+            .import_feed(Bytes::from_static(b"nope"), &sha256_hex(&clean))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            rejected,
+            FeedImportError::ChecksumMismatch { .. }
+        ));
+        service
+            .import_feed(clean.clone(), &sha256_hex(&clean))
+            .await
+            .unwrap();
+        let unchanged = service.list_all().await.unwrap();
+        assert_eq!(
+            stored_assay(&unchanged, "lodash").scanned_at(),
+            Some(lodash_scanned.as_str())
+        );
+        assert_eq!(
+            stored_assay(&unchanged, "ms").scanned_at(),
+            Some(ms_scanned.as_str())
+        );
+        assert_eq!(stored_assay(&unchanged, "lodash").status(), AssayStatus::Ready);
+
+        let next = npm_index("2026-10-03", "4.17.22");
+        service
+            .import_feed(next.clone(), &sha256_hex(&next))
+            .await
+            .unwrap();
+        let finished = wait_until_not_running(&service).await;
+        let lodash = stored_assay(&finished, "lodash");
+        let ms = stored_assay(&finished, "ms");
+        assert_eq!(lodash.status(), AssayStatus::Ready);
+        assert_eq!(lodash.counts().high, 1);
+        assert_eq!(lodash.findings()[0].fixed_version(), Some("4.17.22"));
+        assert_eq!(ms.status(), AssayStatus::Ready);
+        assert_eq!(ms.counts().high, 0);
+        assert!(ms.findings().is_empty());
     }
 
     #[tokio::test]

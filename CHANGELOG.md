@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous index, and the imported index is loaded again after a
   restart. `GET` on the same path reports the imported feed. An imported
   index takes precedence over `OSV_FEED_PATH`.
+- Importing a vulnerability index with a new checksum re-runs the
+  stored assays in the background. Each one is marked running, then
+  replaced with the result of the new index. Repeating the same
+  checksum does not re-run them.
 - A repository policy that checks known vulnerabilities now fails closed.
   If that clause is on and the vulnerability feed is missing, or the
   assay for that version is not ready, the pull and the promote are
