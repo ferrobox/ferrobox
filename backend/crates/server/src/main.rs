@@ -20,6 +20,7 @@ mod npm_registry;
 mod nuget_registry;
 mod oci_registry;
 mod oidc;
+mod osv_feed;
 mod pypi_registry;
 mod quota;
 mod replica;
@@ -50,6 +51,7 @@ use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::audit_store::PostgresAuditStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
+use ferrobox_adapter_postgres::osv_feed_store::PostgresOsvFeedStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
 use ferrobox_adapter_postgres::replica_store::PostgresReplicaStore;
@@ -188,6 +190,7 @@ async fn main() {
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
     let webhook_store = Arc::new(PostgresWebhookStore::new(pool.clone()));
+    let osv_feed_store = Arc::new(PostgresOsvFeedStore::new(pool.clone()));
     let replica_store = Arc::new(PostgresReplicaStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
     storage.ensure_reachable().await.unwrap_or_else(|err| {
@@ -218,9 +221,18 @@ async fn main() {
         api_token_store,
         webhook_store,
         replica_store,
+        osv_feed_store,
         storage,
         http_client,
     ));
+    if let Err(err) = state.assays.restore_persisted_feed().await {
+        eprintln!("ferrobox: persisted osv feed not loaded: {err}");
+    } else if let Ok(Some(record)) = state.assays.imported_feed().await {
+        eprintln!(
+            "ferrobox: restored osv feed dataset={} advisories={} sha256={}",
+            record.dataset, record.advisory_count, record.sha256
+        );
+    }
 
     let app = build_router_with_frontend(state, config.frontend_dir.as_deref());
 
@@ -267,6 +279,12 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         .route("/auth/me/groups", get(groups::my_groups))
         .route("/auth/password", post(auth::change_password))
         .route("/settings", get(settings::get_settings))
+        .route(
+            "/security/osv-feed",
+            get(osv_feed::get_feed)
+                .post(osv_feed::import_feed)
+                .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
         .route("/storage", get(quota::get_storage))
         .route(
             "/auth/tokens",
@@ -522,6 +540,7 @@ fn build_app_state(
     api_token_store: Arc<PostgresApiTokenStore>,
     webhook_store: Arc<PostgresWebhookStore>,
     replica_store: Arc<PostgresReplicaStore>,
+    osv_feed_store: Arc<PostgresOsvFeedStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
@@ -534,7 +553,8 @@ fn build_app_state(
         storage.clone(),
         http_client.clone(),
     )
-    .with_webhooks(webhooks.clone());
+    .with_webhooks(webhooks.clone())
+    .with_feed_store(osv_feed_store);
     if let Some(path) = &config.osv_feed_path {
         let feed = OsvFeed::load_path(path).unwrap_or_else(|err| {
             panic!(

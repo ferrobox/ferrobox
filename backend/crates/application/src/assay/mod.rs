@@ -8,10 +8,10 @@ mod licenses;
 mod lockfiles;
 mod osv;
 
-pub use feed::OsvFeed;
+pub use feed::{FeedError, OsvFeed};
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
@@ -23,9 +23,11 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
+use ferrobox_ports::osv_feed_store::{OsvFeedRecord, OsvFeedStore, OsvFeedStoreError};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
-use ferrobox_ports::storage::{StorageError, StoragePort};
+use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::webhooks::WebhookService;
@@ -73,6 +75,35 @@ pub enum AssayError {
     Storage(#[from] StorageError),
 }
 
+/// Why importing or restoring a vulnerability index failed.
+#[derive(Debug, Error)]
+pub enum FeedImportError {
+    /// This process was not given a place to record the import.
+    #[error("vulnerability feed import is not configured")]
+    NotConfigured,
+
+    /// The declared SHA-256 does not match the body.
+    #[error("sha256 mismatch: declared {expected}, body is {actual}")]
+    ChecksumMismatch {
+        /// Hex digest sent by the caller.
+        expected: String,
+        /// Hex digest of the body.
+        actual: String,
+    },
+
+    /// The body is not a `ferrobox-osv-index` v1 document.
+    #[error(transparent)]
+    Invalid(#[from] feed::FeedError),
+
+    /// The object store rejected the bytes.
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+
+    /// The metadata row could not be saved or read.
+    #[error(transparent)]
+    Persistence(#[from] OsvFeedStoreError),
+}
+
 /// Use case: list, get, and run assays.
 #[derive(Clone)]
 pub struct AssayService {
@@ -83,8 +114,11 @@ pub struct AssayService {
     http_client: Arc<dyn HttpClient>,
     webhooks: Option<WebhookService>,
     /// When set, vulnerability lookup uses this index and does not call
-    /// `api.osv.dev`.
-    feed: Option<Arc<OsvFeed>>,
+    /// `api.osv.dev`. Shared across clones so an import is visible at once.
+    feed: Arc<RwLock<Option<Arc<OsvFeed>>>>,
+    /// Metadata of an imported index. Absent in unit tests that only
+    /// inject a feed with [`Self::with_feed`].
+    feed_store: Option<Arc<dyn OsvFeedStore>>,
 }
 
 impl AssayService {
@@ -104,7 +138,8 @@ impl AssayService {
             storage,
             http_client,
             webhooks: None,
-            feed: None,
+            feed: Arc::new(RwLock::new(None)),
+            feed_store: None,
         }
     }
 
@@ -118,9 +153,123 @@ impl AssayService {
 
     /// Uses a local vulnerability index instead of `api.osv.dev`.
     #[must_use]
-    pub fn with_feed(mut self, feed: Arc<OsvFeed>) -> Self {
-        self.feed = Some(feed);
+    pub fn with_feed(self, feed: Arc<OsvFeed>) -> Self {
+        self.install_feed(feed);
         self
+    }
+
+    /// Remembers imported indexes in `store`.
+    #[must_use]
+    pub fn with_feed_store(mut self, store: Arc<dyn OsvFeedStore>) -> Self {
+        self.feed_store = Some(store);
+        self
+    }
+
+    /// The index an administrator imported, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FeedImportError`] if the metadata cannot be read.
+    pub async fn imported_feed(&self) -> Result<Option<OsvFeedRecord>, FeedImportError> {
+        let Some(store) = &self.feed_store else {
+            return Ok(None);
+        };
+        match store.current().await {
+            Ok(record) => Ok(record),
+            Err(OsvFeedStoreError::MissingSchema) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Checks the SHA-256, parses the index, stores the bytes, and makes
+    /// this process use them. A mismatch or a bad document leaves the
+    /// previous index in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FeedImportError`] if the checksum does not match, the
+    /// document is not a v1 index, or the bytes cannot be saved.
+    pub async fn import_feed(
+        &self,
+        bytes: Bytes,
+        expected_sha256: &str,
+    ) -> Result<OsvFeedRecord, FeedImportError> {
+        let Some(store) = &self.feed_store else {
+            return Err(FeedImportError::NotConfigured);
+        };
+        let actual = format!("{:x}", Sha256::digest(&bytes));
+        let expected = expected_sha256.trim().to_ascii_lowercase();
+        if expected != actual {
+            return Err(FeedImportError::ChecksumMismatch { expected, actual });
+        }
+        let parsed = OsvFeed::from_bytes(&bytes)?;
+        let storage_key = format!("system/osv-feed/{actual}");
+        let previous = match store.current().await {
+            Ok(record) => record,
+            Err(OsvFeedStoreError::MissingSchema) => None,
+            Err(err) => return Err(err.into()),
+        };
+        self.storage
+            .put(&StorageKey::new(&storage_key), bytes)
+            .await?;
+        let record = OsvFeedRecord {
+            dataset: parsed.dataset().to_string(),
+            sha256: actual,
+            advisory_count: u64::try_from(parsed.advisory_count()).unwrap_or(u64::MAX),
+            ecosystems: parsed.ecosystems(),
+            storage_key: storage_key.clone(),
+            imported_at: Utc::now(),
+        };
+        if let Err(err) = store.save(&record).await {
+            return Err(err.into());
+        }
+        if let Some(previous) = previous
+            && previous.storage_key != storage_key
+        {
+            let _ = self
+                .storage
+                .delete(&StorageKey::new(previous.storage_key))
+                .await;
+        }
+        self.install_feed(Arc::new(parsed));
+        Ok(record)
+    }
+
+    /// Loads the imported index from storage into this process.
+    ///
+    /// A file previously passed to [`Self::with_feed`] stays in place
+    /// when nothing has been imported. A stored index replaces it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FeedImportError`] if the stored bytes are missing or
+    /// are no longer a valid index.
+    pub async fn restore_persisted_feed(&self) -> Result<(), FeedImportError> {
+        let Some(record) = self.imported_feed().await? else {
+            return Ok(());
+        };
+        let bytes = self
+            .storage
+            .get(&StorageKey::new(&record.storage_key))
+            .await?;
+        let parsed = OsvFeed::from_bytes(&bytes)?;
+        self.install_feed(Arc::new(parsed));
+        Ok(())
+    }
+
+    fn install_feed(&self, feed: Arc<OsvFeed>) {
+        let mut slot = self
+            .feed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(feed);
+    }
+
+    fn current_feed(&self) -> Option<Arc<OsvFeed>> {
+        self.feed
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Lists every assay of the instance.
@@ -312,7 +461,7 @@ impl AssayService {
             .any(|component| osv_query_target(component, coordinate.ecosystem()).is_some());
 
         let assay = if can_query {
-            if let Some(feed) = &self.feed {
+            if let Some(feed) = self.current_feed() {
                 let findings = feed.query(coordinate.ecosystem(), &components);
                 Assay::from_parts(
                     existing_id,
@@ -765,6 +914,165 @@ mod tests {
         assert_eq!(assay.status(), AssayStatus::Ready);
         assert_eq!(assay.counts().high, 1);
         assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
+    }
+
+    struct MemoryOsvFeedStore {
+        record: std::sync::Mutex<Option<OsvFeedRecord>>,
+    }
+
+    impl MemoryOsvFeedStore {
+        fn new() -> Self {
+            Self {
+                record: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl OsvFeedStore for MemoryOsvFeedStore {
+        async fn current(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError> {
+            Ok(self.record.lock().unwrap().clone())
+        }
+
+        async fn save(&self, record: &OsvFeedRecord) -> Result<(), OsvFeedStoreError> {
+            *self.record.lock().unwrap() = Some(record.clone());
+            Ok(())
+        }
+    }
+
+    fn lodash_feed_bytes() -> Bytes {
+        Bytes::from_static(
+            br#"{
+                "format": "ferrobox-osv-index",
+                "format_version": 1,
+                "dataset": "2026-10-02",
+                "advisories": [{
+                    "ecosystem": "npm",
+                    "name": "lodash",
+                    "id": "GHSA-35jh-r3h4-6jhm",
+                    "aliases": ["CVE-2021-23337"],
+                    "summary": "Command Injection in lodash",
+                    "severity": "HIGH",
+                    "fixed": "4.17.21"
+                }]
+            }"#,
+        )
+    }
+
+    fn sha256_hex(bytes: &Bytes) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
+    async fn assay_with_feed_store(
+        storage: Arc<InMemoryStorage>,
+        store: Arc<dyn OsvFeedStore>,
+    ) -> (AssayService, Repository) {
+        let repos = Arc::new(InMemoryRepositoryStore::default());
+        let index = Arc::new(InMemoryPackageIndexStore::default());
+        let repository = npm_forge();
+        repos.save(&repository).await.unwrap();
+        seed_lodash(&index, &repository).await;
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            index,
+            repos,
+            storage,
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_feed_store(store);
+        (service, repository)
+    }
+
+    #[tokio::test]
+    async fn import_with_matching_sha256_answers_without_calling_osv() {
+        let storage = Arc::new(InMemoryStorage::default());
+        let store = Arc::new(MemoryOsvFeedStore::new());
+        let (service, repository) = assay_with_feed_store(storage, store).await;
+        let bytes = lodash_feed_bytes();
+        let digest = sha256_hex(&bytes);
+        let record = service
+            .import_feed(bytes, &digest.to_ascii_uppercase())
+            .await
+            .unwrap();
+        assert_eq!(record.dataset, "2026-10-02");
+        assert_eq!(record.sha256, digest);
+        assert_eq!(record.advisory_count, 1);
+        assert_eq!(record.ecosystems, vec!["npm".to_string()]);
+
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Ready);
+        assert_eq!(assay.counts().high, 1);
+        assert_eq!(assay.findings()[0].fixed_version(), Some("4.17.21"));
+    }
+
+    #[tokio::test]
+    async fn rejected_import_keeps_the_previous_index() {
+        let storage = Arc::new(InMemoryStorage::default());
+        let store = Arc::new(MemoryOsvFeedStore::new());
+        let (service, repository) = assay_with_feed_store(storage.clone(), store).await;
+        let bytes = lodash_feed_bytes();
+        let digest = sha256_hex(&bytes);
+        service.import_feed(bytes, &digest).await.unwrap();
+
+        let other = Bytes::from_static(b"different-bytes");
+        let mismatch = service.import_feed(other, &digest).await.unwrap_err();
+        assert!(matches!(
+            mismatch,
+            FeedImportError::ChecksumMismatch { .. }
+        ));
+
+        let broken = Bytes::from_static(b"not-an-index");
+        let broken_digest = sha256_hex(&broken);
+        let invalid = service
+            .import_feed(broken, &broken_digest)
+            .await
+            .unwrap_err();
+        assert!(matches!(invalid, FeedImportError::Invalid(_)));
+        assert!(
+            !storage
+                .exists(&StorageKey::new(format!("system/osv-feed/{broken_digest}")))
+                .await
+                .unwrap()
+        );
+
+        let current = service.imported_feed().await.unwrap().unwrap();
+        assert_eq!(current.dataset, "2026-10-02");
+        assert_eq!(current.sha256, digest);
+        let assay = service
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(assay.status(), AssayStatus::Ready);
+        assert_eq!(assay.counts().high, 1);
+    }
+
+    #[tokio::test]
+    async fn restored_feed_survives_a_new_process() {
+        let storage = Arc::new(InMemoryStorage::default());
+        let store = Arc::new(MemoryOsvFeedStore::new());
+        let (service, _) = assay_with_feed_store(Arc::clone(&storage), store.clone()).await;
+        let bytes = lodash_feed_bytes();
+        let digest = sha256_hex(&bytes);
+        service.import_feed(bytes, &digest).await.unwrap();
+
+        let (restarted, repository) = assay_with_feed_store(storage, store).await;
+        let before = restarted
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(before.status(), AssayStatus::Failed);
+
+        restarted.restore_persisted_feed().await.unwrap();
+        let after = restarted
+            .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
+            .await
+            .unwrap();
+        assert_eq!(after.status(), AssayStatus::Ready);
+        assert_eq!(after.counts().high, 1);
+        assert_eq!(after.findings()[0].fixed_version(), Some("4.17.21"));
     }
 
     #[tokio::test]

@@ -39,6 +39,9 @@ pub mod quota_store;
 /// Adapter for `WormStore`.
 pub mod worm_store;
 
+/// Adapter for `OsvFeedStore`.
+pub mod osv_feed_store;
+
 /// Adapter for `WebhookStore`.
 pub mod webhook_store;
 
