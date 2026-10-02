@@ -442,7 +442,7 @@
   },
   "admission": {
     "title": "Policies",
-    "description": "On install, pull, or promote into this Forge: deny or only warn if the artifact is unsigned, has a finding at or above a severity, or declares a denied license. Signature applies to OCI/Helm. CVE and license use the last ready assay on the source; if there is none, the operation is not blocked. A Mirror uses this rule; an Alloy uses each member. Dry run ignores whether the rule is enabled.",
+    "description": "On install, pull, or promote into this Forge: deny or only warn if the artifact is unsigned, has a finding at or above a severity, or declares a denied license. Signature applies to OCI/Helm. License uses the last ready assay. A known-vulnerability rule denies the pull when the vulnerability feed is missing or that assay is not ready. A Mirror uses this rule; an Alloy uses each member. Dry run ignores whether the rule is enabled.",
     "enable": "Enable",
     "enableHint": "If unchecked, the rule is saved but does not block or warn on pull or promote.",
     "when": "When",
@@ -460,7 +460,7 @@
     "findingMedium": "≥ Medium",
     "findingHigh": "≥ High",
     "findingCritical": "≥ Critical",
-    "findingHint": "Uses the last ready assay. No assay = pull and promote are not blocked.",
+    "findingHint": "Uses the last ready assay. If this is not Off, a missing vulnerability feed or an assay that is not ready denies the pull.",
     "licenses": "Denied licenses",
     "licensesHint": "SPDX ids, one per line. Exact match, case-insensitive. Empty = off.",
     "licensesPlaceholder": "GPL-3.0-only",

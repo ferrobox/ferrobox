@@ -588,7 +588,8 @@ fn build_app_state(
         repository_store.clone(),
         list_repository_artifacts.clone(),
     )
-    .with_assays(assay_store.clone());
+    .with_assays(assay_store.clone())
+    .with_vulnerability_feed(Arc::new(assays.clone()));
     let packaging = packaging_registry(
         &config.public_base_url,
         &repository_store,
