@@ -882,6 +882,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn checksum_sidecar_does_not_change_the_index_layer() {
+        let index = index_bytes("2026-10-03");
+        let digest = sha256_digest(&index);
+        let hex = digest.strip_prefix("sha256:").unwrap();
+        let checksum = format!("{hex}  ferrobox-osv-index.json.gz\n");
+        let manifest = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "artifactType": INDEX_MEDIA_TYPE,
+            "layers": [
+                {
+                    "mediaType": INDEX_MEDIA_TYPE,
+                    "digest": digest,
+                    "size": index.len()
+                },
+                {
+                    "mediaType": "text/plain",
+                    "digest": sha256_digest(checksum.as_bytes()),
+                    "size": checksum.len(),
+                    "annotations": {
+                        "org.opencontainers.image.title": "ferrobox-osv-index.json.gz.sha256"
+                    }
+                }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            index_layer_digest(&manifest).as_deref(),
+            Some(digest.as_str())
+        );
+    }
+
     struct Published {
         http: Arc<InMemoryHttpClient>,
         reference: String,

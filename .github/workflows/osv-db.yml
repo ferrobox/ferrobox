@@ -2,8 +2,12 @@ name: OSV database
 
 # Builds one gzipped ferrobox-osv-index from the public OSV exports and
 # publishes it as a Cosign-signed OCI artifact. Installs pull
-# ghcr.io/<owner>/osv-db:YYYY-MM-DD. An air-gapped install curls the same
-# file from the GitHub release osv-db-YYYY-MM-DD.
+# ghcr.io/<owner>/osv-db:YYYY-MM-DD. That package is the only published
+# copy. GitHub Releases of this repository stay FerroBox versions.
+#
+# An air-gapped install runs `oras pull` on that reference and checks
+# ferrobox-osv-index.json.gz.sha256. The public key is osv-sync.pub.pem
+# in this repository. Paste that file into the vulnerability-feed card.
 #
 # The signature is a Cosign key signature, not the keyless signature used
 # for the FerroBox image. The consumer checks that key. Once, on a trusted
@@ -13,8 +17,8 @@ name: OSV database
 #
 # Store the contents of cosign.key as the repository secret OSV_COSIGN_KEY
 # and the password as OSV_COSIGN_PASSWORD. Do not commit the private key.
-# The workflow writes the matching public key onto the release so an
-# install can paste it into the vulnerability-feed card.
+# Commit the matching public key as osv-sync.pub.pem. The workflow refuses
+# to publish when the secret does not match that file.
 on:
   schedule:
     - cron: "15 5 * * *"
@@ -99,16 +103,32 @@ jobs:
           date="${{ steps.index.outputs.date }}"
           umask 077
           printf '%s\n' "$OSV_COSIGN_KEY" > cosign.key
-          cosign public-key --key cosign.key > osv-sync.pub.pem
+          cosign public-key --key cosign.key > /tmp/osv-derived.pub.pem
+          if ! cmp -s /tmp/osv-derived.pub.pem osv-sync.pub.pem; then
+            echo "OSV_COSIGN_KEY does not match osv-sync.pub.pem in the repository."
+            exit 1
+          fi
+          digest="$(awk '{print $1}' ferrobox-osv-index.json.gz.sha256)"
           oras push "${image}:${date}" \
             --artifact-type application/vnd.ferrobox.osv-index.v1 \
-            ferrobox-osv-index.json.gz:application/vnd.ferrobox.osv-index.v1
+            --annotation "dev.ferrobox.osv.sha256=${digest}" \
+            ferrobox-osv-index.json.gz:application/vnd.ferrobox.osv-index.v1 \
+            ferrobox-osv-index.json.gz.sha256:text/plain
           cosign sign --yes --key cosign.key --tlog-upload=false "${image}:${date}"
           rm -f cosign.key
           {
             echo "owner=$owner"
             echo "image=$image"
           } >> "$GITHUB_ENV"
+          {
+            echo "## OSV database ${date}"
+            echo
+            echo "Artifact: \`${image}:${date}\`"
+            echo
+            echo "Air-gap: \`oras pull ${image}:${date}\` then \`sha256sum -c ferrobox-osv-index.json.gz.sha256\`."
+            echo
+            echo "Public key: \`osv-sync.pub.pem\` in this repository."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Make the package public
         env:
@@ -150,29 +170,18 @@ jobs:
           echo "Anonymous pull returned HTTP ${code}. The package is not public."
           exit 1
 
-      - name: Publish the air-gap release
+      - name: Remove database releases from the product page
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          date="${{ steps.index.outputs.date }}"
-          tag="osv-db-${date}"
-          cat > notes.md << EOF
-          Gzipped \`ferrobox-osv-index\` for ${date}.
-
-          Connected install: \`${image}:${date}\`, signed with the Cosign public key in \`osv-sync.pub.pem\`. Paste that key into the vulnerability-feed card.
-
-          Air-gapped install: download \`ferrobox-osv-index.json.gz\` and check \`ferrobox-osv-index.json.gz.sha256\`, then import the file. The bytes are the same layer the signed artifact carries.
-          EOF
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" --clobber \
-              ferrobox-osv-index.json.gz \
-              ferrobox-osv-index.json.gz.sha256 \
-              osv-sync.pub.pem
-          else
-            gh release create "$tag" \
-              --title "OSV database ${date}" \
-              --notes-file notes.md \
-              ferrobox-osv-index.json.gz \
-              ferrobox-osv-index.json.gz.sha256 \
-              osv-sync.pub.pem
-          fi
+          # These tags used to be GitHub Releases, so the daily index became
+          # Latest and sat beside the FerroBox versions. The index is only
+          # the OCI artifact now.
+          tags="$(gh release list --limit 200 --json tagName --jq '.[].tagName')"
+          for tag in $tags; do
+            case "$tag" in
+              osv-db-*)
+                gh release delete "$tag" --yes --cleanup-tag
+                ;;
+            esac
+          done
