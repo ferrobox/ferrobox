@@ -387,6 +387,9 @@
   },
   "artifacts": {
     "unnamed": "Unnamed artifact",
+    "posture": "[{{critical}} Crit | {{high}} High]",
+    "postureLabel": "Findings: {{critical}} critical, {{high}} high. Open the assay.",
+    "postureNone": "This version has not been assayed",
     "deleted": "Artifact deleted",
     "deleteFailed": "Could not delete the artifact",
     "downloadFailed": "Could not download the artifact",
@@ -605,6 +608,15 @@
     "resetPassword": "Reset another account’s password",
     "allowed": "Allowed",
     "denied": "No"
+  },
+  "feed": {
+    "title": "Vulnerability feed",
+    "dataset": "Dataset",
+    "imported": "Imported",
+    "mode": "Mode",
+    "empty": "No vulnerability feed has been imported.",
+    "loading": "Loading the vulnerability feed…",
+    "loadFailed": "Could not load the vulnerability feed"
   },
   "severity": {
     "critical": "Critical",

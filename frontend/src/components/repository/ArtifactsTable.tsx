@@ -23,7 +23,6 @@ import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
 import { useDeleteArtifact, useRepositoryArtifacts, useRepositoryAssays, useSetYanked } from "@/api/queries";
 import { AssayDialog } from "@/components/assay/AssayDialog";
-import { AssayCountPills } from "@/components/assay/SeverityBadges";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { PromotePackageDialog } from "@/components/repository/PromotePackageDialog";
 import type { RepositoryStorageKind } from "@/components/repository/RepositoryKindBadge";
@@ -582,7 +581,6 @@ function VersionRows({
                 {memberName}
               </NavLink>
             ) : null}
-            {assay ? <AssayCountPills counts={assay.counts} /> : null}
           </span>
           {nested ? null : (
             <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
@@ -590,6 +588,22 @@ function VersionRows({
             </span>
           )}
         </span>
+        {assay?.status === "ready" ? (
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground hover:bg-muted"
+            onClick={() => onAssay(representative)}
+            aria-label={t("artifacts.postureLabel", {
+              critical: assay.counts.critical,
+              high: assay.counts.high,
+            })}
+          >
+            {t("artifacts.posture", {
+              critical: assay.counts.critical,
+              high: assay.counts.high,
+            })}
+          </button>
+        ) : null}
         <div className="flex shrink-0 gap-1">
           {nested ? null : (
             <Button variant="ghost" size="sm" onClick={() => onDownload(representative)}>

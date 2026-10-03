@@ -39,6 +39,7 @@ export const queryKeys = {
   storage: ["storage"] as const,
   oidc: ["auth", "oidc"] as const,
   assays: ["assays"] as const,
+  osvFeed: ["security", "osv-feed"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryAdmission: (id: string) => ["repositories", id, "admission"] as const,
   repositoryAdmissionEvents: (id: string) =>
@@ -586,6 +587,23 @@ function refetchWhileAssaysRun<T extends { status: string }>(
   query: { state: { data?: T[] } },
 ): number | false {
   return query.state.data?.some((assay) => assay.status === "running") ? 2000 : false;
+}
+
+export function useOsvFeed(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.osvFeed,
+    queryFn: async () => {
+      try {
+        return await api.getOsvFeed();
+      } catch (err) {
+        if (err instanceof api.ApiError && err.status === 404) {
+          return null;
+        }
+        throw err;
+      }
+    },
+    enabled,
+  });
 }
 
 export function useAssays() {

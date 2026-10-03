@@ -582,6 +582,19 @@ export function getCargoRegistryConfig(repositoryId: string): Promise<CargoRegis
   return request<CargoRegistryConfig>(`/cargo/${repositoryId}/config.json`);
 }
 
+export interface OsvFeedStatus {
+  dataset: string;
+  sha256: string;
+  advisory_count: number;
+  ecosystems: string[];
+  imported_at: string;
+  mode: string;
+}
+
+export function getOsvFeed(): Promise<OsvFeedStatus> {
+  return request<OsvFeedStatus>("/security/osv-feed");
+}
+
 export function listAssays(): Promise<AssayResponse[]> {
   return request<AssayResponse[]>("/assays");
 }

@@ -24,6 +24,8 @@ pub(crate) struct OsvFeedResponse {
     advisory_count: u64,
     ecosystems: Vec<String>,
     imported_at: String,
+    /// How this index arrived. An upload is always `file`.
+    mode: &'static str,
 }
 
 impl From<OsvFeedRecord> for OsvFeedResponse {
@@ -36,6 +38,7 @@ impl From<OsvFeedRecord> for OsvFeedResponse {
             imported_at: record
                 .imported_at
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
+            mode: "file",
         }
     }
 }

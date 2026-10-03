@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous index, and the imported index is loaded again after a
   restart. `GET` on the same path reports the imported feed. An imported
   index takes precedence over `OSV_FEED_PATH`.
+- The package list shows a vulnerability-feed card (dataset, import
+  date, and mode) and a `[0 Crit | 2 High]` column on assayed versions.
+  A version that has not been assayed does not show a zero. The column
+  opens that assay.
 - Importing a vulnerability index with a new checksum re-runs the
   stored assays in the background. Each one is marked running, then
   replaced with the result of the new index. Repeating the same
