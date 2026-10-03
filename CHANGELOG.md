@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A missing or invalid signature does not replace the active
   index. After a signed pull the feed card mode is `sync`; an upload
   stays `file`.
+- The Packages card can save the OCI reference and the Cosign public key
+  and sync now. A rejected signature does not replace the active index.
+  Settings saved from the card win over `OSV_SYNC_REF` after the first
+  save. Those variables still seed the row on first boot when the table
+  is empty.
 - A repository policy that checks known vulnerabilities now fails closed.
   If that clause is on and the vulnerability feed is missing, or the
   assay for that version is not ready, the pull and the promote are

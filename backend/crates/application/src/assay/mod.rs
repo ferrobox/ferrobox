@@ -10,10 +10,11 @@ mod osv;
 mod sync;
 
 pub use feed::{FeedError, OsvFeed};
-pub use sync::{SyncError, SyncOutcome};
+pub use sync::{SyncError, SyncOutcome, SyncSettingsError};
 
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
@@ -27,6 +28,10 @@ use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
 use ferrobox_ports::osv_feed_store::{
     OSV_FEED_SOURCE_FILE, OSV_FEED_SOURCE_SYNC, OsvFeedRecord, OsvFeedStore, OsvFeedStoreError,
+};
+use ferrobox_ports::osv_sync_store::{
+    OSV_SYNC_IMPORTED, OSV_SYNC_REJECTED, OSV_SYNC_UNCHANGED, OsvSyncSettings, OsvSyncStore,
+    OsvSyncStoreError,
 };
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
@@ -108,6 +113,25 @@ pub enum FeedImportError {
     Persistence(#[from] OsvFeedStoreError),
 }
 
+fn sync_error_retries_soon(err: &SyncError) -> bool {
+    match err {
+        SyncError::Transport { .. } => true,
+        SyncError::Registry { status, .. } => *status >= 500,
+        SyncError::InvalidReference { .. }
+        | SyncError::Token(_)
+        | SyncError::Unsigned { .. }
+        | SyncError::SignatureRejected { .. }
+        | SyncError::UnexpectedLayout { .. }
+        | SyncError::ManifestDigest { .. }
+        | SyncError::BlobDigest { .. }
+        | SyncError::Import(_) => false,
+    }
+}
+
+fn chrono_duration(wait: Duration) -> chrono::Duration {
+    chrono::Duration::from_std(wait).unwrap_or_else(|_| chrono::Duration::hours(24))
+}
+
 /// Use case: list, get, and run assays.
 #[derive(Clone)]
 pub struct AssayService {
@@ -123,6 +147,14 @@ pub struct AssayService {
     /// Metadata of an imported index. Absent in unit tests that only
     /// inject a feed with [`Self::with_feed`].
     feed_store: Option<Arc<dyn OsvFeedStore>>,
+    /// Saved reference and `Cosign` public key for the scheduled pull.
+    sync_store: Option<Arc<dyn OsvSyncStore>>,
+    /// Wait after a successful or rejected pull before the next one.
+    sync_interval: Duration,
+    /// Optional bearer token for a private registry. Not shown in the UI.
+    sync_token: Option<String>,
+    /// One pull at a time, shared by the scheduler and `Sync now`.
+    sync_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AssayService {
@@ -144,6 +176,10 @@ impl AssayService {
             webhooks: None,
             feed: Arc::new(RwLock::new(None)),
             feed_store: None,
+            sync_store: None,
+            sync_interval: Duration::from_hours(24),
+            sync_token: None,
+            sync_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -166,6 +202,21 @@ impl AssayService {
     #[must_use]
     pub fn with_feed_store(mut self, store: Arc<dyn OsvFeedStore>) -> Self {
         self.feed_store = Some(store);
+        self
+    }
+
+    /// Remembers the signed-pull reference and public key in `store`.
+    #[must_use]
+    pub fn with_sync_store(mut self, store: Arc<dyn OsvSyncStore>) -> Self {
+        self.sync_store = Some(store);
+        self
+    }
+
+    /// Sets how long a pull waits before the next one, and the registry token.
+    #[must_use]
+    pub fn with_sync_schedule(mut self, interval: Duration, token: Option<String>) -> Self {
+        self.sync_interval = interval;
+        self.sync_token = token;
         self
     }
 
@@ -230,6 +281,111 @@ impl AssayService {
             .import_feed_with_source(bytes, &digest, OSV_FEED_SOURCE_SYNC)
             .await?;
         Ok(SyncOutcome::Imported(record))
+    }
+
+    /// The saved signed pull, if one has been configured.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncSettingsError`] if the settings cannot be read.
+    pub async fn sync_settings(&self) -> Result<Option<OsvSyncSettings>, SyncSettingsError> {
+        let Some(store) = &self.sync_store else {
+            return Ok(None);
+        };
+        match store.current().await {
+            Ok(settings) => Ok(settings),
+            Err(OsvSyncStoreError::MissingSchema) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// `true` when a pull is configured and its wait has elapsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncSettingsError`] if the settings cannot be read.
+    pub async fn configured_sync_is_due(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<bool, SyncSettingsError> {
+        let Some(settings) = self.sync_settings().await? else {
+            return Ok(false);
+        };
+        Ok(settings.retry_after.is_none_or(|at| now >= at))
+    }
+
+    /// Saves the reference and public key. An invalid value leaves the
+    /// previous settings in place and clears no attempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncSettingsError`] when the reference or the key is
+    /// unusable, or the row cannot be saved.
+    pub async fn save_sync_settings(
+        &self,
+        reference: &str,
+        public_key_pem: &str,
+    ) -> Result<OsvSyncSettings, SyncSettingsError> {
+        let Some(store) = &self.sync_store else {
+            return Err(SyncSettingsError::NotConfigured);
+        };
+        let reference = reference.trim();
+        if sync::validate_reference(reference).is_err() {
+            return Err(SyncSettingsError::InvalidReference {
+                reference: reference.to_string(),
+            });
+        }
+        let public_key_pem = public_key_pem.trim();
+        if public_key_pem.contains("PRIVATE KEY") || !public_key_pem.contains("PUBLIC KEY") {
+            return Err(SyncSettingsError::InvalidPublicKey);
+        }
+        Ok(store.save(reference, public_key_pem).await?)
+    }
+
+    /// Pulls the saved reference. A rejection is recorded and the active
+    /// index stays as it was.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncSettingsError::NotConfigured`] when nothing is saved.
+    /// A registry or signature failure is recorded and returned as
+    /// [`Ok`] with outcome `rejected`.
+    pub async fn run_configured_sync(&self) -> Result<OsvSyncSettings, SyncSettingsError> {
+        let _guard = self.sync_gate.lock().await;
+        let Some(settings) = self.sync_settings().await? else {
+            return Err(SyncSettingsError::NotConfigured);
+        };
+        let attempted_at = Utc::now();
+        let (outcome, detail, wait) = match self
+            .sync_signed_feed(
+                &settings.reference,
+                &settings.public_key_pem,
+                self.sync_token.as_deref(),
+            )
+            .await
+        {
+            Ok(SyncOutcome::Imported(record)) => {
+                (OSV_SYNC_IMPORTED, record.dataset, self.sync_interval)
+            }
+            Ok(SyncOutcome::Unchanged { sha256 }) => {
+                (OSV_SYNC_UNCHANGED, sha256, self.sync_interval)
+            }
+            Err(err) => {
+                let wait = if sync_error_retries_soon(&err) {
+                    Duration::from_secs(30)
+                } else {
+                    self.sync_interval
+                };
+                (OSV_SYNC_REJECTED, err.to_string(), wait)
+            }
+        };
+        let retry_after = attempted_at + chrono_duration(wait);
+        let Some(store) = &self.sync_store else {
+            return Err(SyncSettingsError::NotConfigured);
+        };
+        Ok(store
+            .record_attempt(outcome, &detail, attempted_at, retry_after)
+            .await?)
     }
 
     async fn import_feed_with_source(

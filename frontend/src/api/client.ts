@@ -595,6 +595,34 @@ export function getOsvFeed(): Promise<OsvFeedStatus> {
   return request<OsvFeedStatus>("/security/osv-feed");
 }
 
+export interface OsvSyncSettings {
+  reference: string;
+  public_key_pem: string;
+  last_outcome: string | null;
+  last_detail: string | null;
+  last_attempt_at: string | null;
+}
+
+export interface SaveOsvSyncRequest {
+  reference: string;
+  public_key_pem: string;
+}
+
+export function getOsvSync(): Promise<OsvSyncSettings> {
+  return request<OsvSyncSettings>("/security/osv-sync");
+}
+
+export function saveOsvSync(payload: SaveOsvSyncRequest): Promise<OsvSyncSettings> {
+  return request<OsvSyncSettings>("/security/osv-sync", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function runOsvSync(): Promise<OsvSyncSettings> {
+  return request<OsvSyncSettings>("/security/osv-sync/run", { method: "POST" });
+}
+
 export function listAssays(): Promise<AssayResponse[]> {
   return request<AssayResponse[]>("/assays");
 }

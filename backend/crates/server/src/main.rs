@@ -21,6 +21,7 @@ mod nuget_registry;
 mod oci_registry;
 mod oidc;
 mod osv_feed;
+mod osv_sync;
 mod pypi_registry;
 mod quota;
 mod replica;
@@ -52,6 +53,7 @@ use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::audit_store::PostgresAuditStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
 use ferrobox_adapter_postgres::osv_feed_store::PostgresOsvFeedStore;
+use ferrobox_adapter_postgres::osv_sync_store::PostgresOsvSyncStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
 use ferrobox_adapter_postgres::quota_store::PostgresQuotaStore;
 use ferrobox_adapter_postgres::replica_store::PostgresReplicaStore;
@@ -62,7 +64,7 @@ use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_postgres::worm_store::PostgresWormStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::admission::AdmissionService;
-use ferrobox_application::assay::{AssayService, OsvFeed, SyncError, SyncOutcome};
+use ferrobox_application::assay::{AssayService, OsvFeed};
 use ferrobox_application::audit::AuditService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
@@ -103,6 +105,9 @@ use ferrobox_application::webhooks::WebhookService;
 use ferrobox_application::worm::WormService;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
+use ferrobox_ports::osv_sync_store::{
+    OSV_SYNC_IMPORTED, OSV_SYNC_REJECTED, OSV_SYNC_UNCHANGED, OsvSyncSettings,
+};
 use sqlx::postgres::PgPoolOptions;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -191,6 +196,7 @@ async fn main() {
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
     let webhook_store = Arc::new(PostgresWebhookStore::new(pool.clone()));
     let osv_feed_store = Arc::new(PostgresOsvFeedStore::new(pool.clone()));
+    let osv_sync_store = Arc::new(PostgresOsvSyncStore::new(pool.clone()));
     let replica_store = Arc::new(PostgresReplicaStore::new(pool));
     let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
     storage.ensure_reachable().await.unwrap_or_else(|err| {
@@ -222,6 +228,7 @@ async fn main() {
         webhook_store,
         replica_store,
         osv_feed_store,
+        osv_sync_store,
         storage,
         http_client,
     ));
@@ -233,15 +240,8 @@ async fn main() {
             record.dataset, record.advisory_count, record.sha256, record.source
         );
     }
-    if let Some((reference, pem)) = osv_sync_settings(&config) {
-        spawn_osv_sync_loop(
-            state.assays.clone(),
-            reference,
-            pem,
-            config.osv_sync_token.clone(),
-            config.osv_sync_interval,
-        );
-    }
+    seed_osv_sync_from_env(&state.assays, &config).await;
+    spawn_osv_sync_loop(state.assays.clone());
 
     let app = build_router_with_frontend(state, config.frontend_dir.as_deref());
 
@@ -294,6 +294,11 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
                 .post(osv_feed::import_feed)
                 .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
+        .route(
+            "/security/osv-sync",
+            get(osv_sync::get_settings).put(osv_sync::put_settings),
+        )
+        .route("/security/osv-sync/run", post(osv_sync::run_sync))
         .route("/storage", get(quota::get_storage))
         .route(
             "/auth/tokens",
@@ -550,6 +555,7 @@ fn build_app_state(
     webhook_store: Arc<PostgresWebhookStore>,
     replica_store: Arc<PostgresReplicaStore>,
     osv_feed_store: Arc<PostgresOsvFeedStore>,
+    osv_sync_store: Arc<PostgresOsvSyncStore>,
     storage: Arc<S3StorageAdapter>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
@@ -563,7 +569,9 @@ fn build_app_state(
         http_client.clone(),
     )
     .with_webhooks(webhooks.clone())
-    .with_feed_store(osv_feed_store);
+    .with_feed_store(osv_feed_store)
+    .with_sync_store(osv_sync_store)
+    .with_sync_schedule(config.osv_sync_interval, config.osv_sync_token.clone());
     if let Some(path) = &config.osv_feed_path {
         let feed = OsvFeed::load_path(path).unwrap_or_else(|err| {
             panic!(
@@ -712,6 +720,21 @@ fn build_app_state(
     }
 }
 
+/// Copies `OSV_SYNC_REF` into the settings row when that row is empty.
+async fn seed_osv_sync_from_env(assays: &AssayService, config: &Config) {
+    match assays.sync_settings().await {
+        Ok(None) => {
+            if let Some((reference, pem)) = osv_sync_settings(config)
+                && let Err(err) = assays.save_sync_settings(&reference, &pem).await
+            {
+                eprintln!("ferrobox: osv sync env settings not saved: {err}");
+            }
+        }
+        Ok(Some(_)) => {}
+        Err(err) => eprintln!("ferrobox: osv sync settings unreadable: {err}"),
+    }
+}
+
 /// Reference and `Cosign` public key when `OSV_SYNC_REF` is set.
 ///
 /// # Panics
@@ -749,60 +772,39 @@ fn require_public_key_pem(pem: &str, origin: &str) {
     );
 }
 
-fn spawn_osv_sync_loop(
-    assays: AssayService,
-    reference: String,
-    public_key_pem: String,
-    token: Option<String>,
-    interval: std::time::Duration,
-) {
-    eprintln!("ferrobox: osv sync reference={reference} interval={interval:?}");
+fn spawn_osv_sync_loop(assays: AssayService) {
+    eprintln!("ferrobox: osv sync loop started");
     tokio::spawn(async move {
         // The listener may still be binding, including when the reference
         // points at this same instance.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         loop {
-            let wait = match assays
-                .sync_signed_feed(&reference, &public_key_pem, token.as_deref())
-                .await
-            {
-                Ok(SyncOutcome::Imported(record)) => {
-                    eprintln!(
-                        "ferrobox: osv sync imported dataset={} advisories={} sha256={}",
-                        record.dataset, record.advisory_count, record.sha256
-                    );
-                    interval
-                }
-                Ok(SyncOutcome::Unchanged { sha256 }) => {
-                    eprintln!("ferrobox: osv sync unchanged sha256={sha256}");
-                    interval
-                }
-                Err(err) => {
-                    eprintln!("ferrobox: osv sync kept the active index: {err}");
-                    if sync_error_retries_soon(&err) {
-                        std::time::Duration::from_secs(30)
-                    } else {
-                        interval
-                    }
-                }
-            };
-            tokio::time::sleep(wait).await;
+            match assays.configured_sync_is_due(chrono::Utc::now()).await {
+                Ok(true) => match assays.run_configured_sync().await {
+                    Ok(settings) => log_osv_sync_result(&settings),
+                    Err(err) => eprintln!("ferrobox: osv sync failed: {err}"),
+                },
+                Ok(false) => {}
+                Err(err) => eprintln!("ferrobox: osv sync settings unreadable: {err}"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         }
     });
 }
 
-fn sync_error_retries_soon(err: &SyncError) -> bool {
-    match err {
-        SyncError::Transport { .. } => true,
-        SyncError::Registry { status, .. } => *status >= 500,
-        SyncError::InvalidReference { .. }
-        | SyncError::Token(_)
-        | SyncError::Unsigned { .. }
-        | SyncError::SignatureRejected { .. }
-        | SyncError::UnexpectedLayout { .. }
-        | SyncError::ManifestDigest { .. }
-        | SyncError::BlobDigest { .. }
-        | SyncError::Import(_) => false,
+fn log_osv_sync_result(settings: &OsvSyncSettings) {
+    let detail = settings.last_detail.as_deref().unwrap_or("");
+    match settings.last_outcome.as_deref() {
+        Some(OSV_SYNC_IMPORTED) => {
+            eprintln!("ferrobox: osv sync imported dataset={detail}");
+        }
+        Some(OSV_SYNC_UNCHANGED) => {
+            eprintln!("ferrobox: osv sync unchanged sha256={detail}");
+        }
+        Some(OSV_SYNC_REJECTED) => {
+            eprintln!("ferrobox: osv sync kept the active index: {detail}");
+        }
+        _ => {}
     }
 }
 

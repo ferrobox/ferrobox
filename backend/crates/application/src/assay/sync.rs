@@ -16,6 +16,38 @@ use crate::packaging::cosign::{self, verify_simple};
 
 use super::FeedImportError;
 
+/// Why sync settings were not saved or a configured pull did not start.
+#[derive(Debug, Error)]
+pub enum SyncSettingsError {
+    /// The reference is not `host/name:tag` or `host/name@sha256:…`.
+    #[error("invalid vulnerability index reference '{reference}'")]
+    InvalidReference {
+        /// Text that could not be parsed.
+        reference: String,
+    },
+
+    /// The text is empty or is not a PEM public key.
+    #[error("Cosign public key must be a PEM public key")]
+    InvalidPublicKey,
+
+    /// No reference has been saved.
+    #[error("vulnerability index sync is not configured")]
+    NotConfigured,
+
+    /// The settings row could not be saved or read.
+    #[error(transparent)]
+    Persistence(#[from] ferrobox_ports::osv_sync_store::OsvSyncStoreError),
+}
+
+/// Checks that `reference` is an OCI tag or digest reference.
+///
+/// # Errors
+///
+/// Returns [`SyncError::InvalidReference`] when it cannot be parsed.
+pub fn validate_reference(reference: &str) -> Result<(), SyncError> {
+    parse_reference(reference).map(|_| ())
+}
+
 /// OCI layer media type of a `ferrobox-osv-index` v1 document (JSON or gzip).
 pub const INDEX_MEDIA_TYPE: &str = "application/vnd.ferrobox.osv-index.v1";
 
@@ -496,7 +528,11 @@ mod tests {
 
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
+    use chrono::{Duration, Utc};
     use ferrobox_ports::osv_feed_store::{OsvFeedRecord, OsvFeedStore, OsvFeedStoreError};
+    use ferrobox_ports::osv_sync_store::{
+        OSV_SYNC_IMPORTED, OSV_SYNC_REJECTED, OsvSyncSettings, OsvSyncStore, OsvSyncStoreError,
+    };
     use p256::ecdsa::SigningKey;
     use p256::ecdsa::signature::Signer;
     use p256::pkcs8::EncodePublicKey;
@@ -656,12 +692,9 @@ mod tests {
             .sync_signed_feed(&published.reference, &published.pem, None)
             .await
             .unwrap();
-        assert_eq!(
-            again,
-            SyncOutcome::Unchanged {
-                sha256: record.sha256.clone(),
-            }
-        );
+        assert_eq!(again, SyncOutcome::Unchanged {
+            sha256: record.sha256.clone(),
+        });
         let stored = store.current().await.unwrap().unwrap();
         assert_eq!(stored.imported_at, imported_at);
         assert_eq!(stored.source, "sync");
@@ -721,6 +754,132 @@ mod tests {
             Some(subject)
         ));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn invalid_settings_do_not_replace_a_saved_row() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let sync_store = Arc::new(MemorySyncStore::new());
+        let service =
+            service(http, Arc::new(MemoryStore::new())).with_sync_store(sync_store.clone());
+        let pem = public_pem();
+        let saved = service
+            .save_sync_settings("ghcr.io/ferrobox/osv-db:2026-10-03", &pem)
+            .await
+            .unwrap();
+
+        let reference = service
+            .save_sync_settings("not a reference", &pem)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            reference,
+            SyncSettingsError::InvalidReference { .. }
+        ));
+        let key = service
+            .save_sync_settings(
+                "ghcr.io/ferrobox/osv-db:2026-10-04",
+                "-----BEGIN PRIVATE KEY-----\nMII\n-----END PRIVATE KEY-----",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(key, SyncSettingsError::InvalidPublicKey));
+
+        let current = sync_store.current().await.unwrap().unwrap();
+        assert_eq!(current, saved);
+    }
+
+    #[tokio::test]
+    async fn configured_sync_imports_with_the_saved_key() {
+        let index = index_bytes("2026-10-03");
+        let published = publish(&index, true);
+        let feed = Arc::new(MemoryStore::new());
+        let sync_store = Arc::new(MemorySyncStore::new());
+        let service = service(published.http.clone(), feed.clone()).with_sync_store(sync_store);
+        service
+            .save_sync_settings(&published.reference, &published.pem)
+            .await
+            .unwrap();
+
+        let settings = service.run_configured_sync().await.unwrap();
+        assert_eq!(settings.last_outcome.as_deref(), Some(OSV_SYNC_IMPORTED));
+        assert_eq!(settings.last_detail.as_deref(), Some("2026-10-03"));
+        let record = feed.current().await.unwrap().unwrap();
+        assert_eq!(record.dataset, "2026-10-03");
+        assert_eq!(record.source, "sync");
+    }
+
+    #[tokio::test]
+    async fn wrong_key_records_rejected_and_keeps_the_file_index() {
+        let installed = index_bytes("2026-10-02");
+        let next = index_bytes("2026-10-03");
+        let published = publish(&next, true);
+        let other = SigningKey::random(&mut rand::rngs::OsRng);
+        let other_pem = other
+            .verifying_key()
+            .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+            .unwrap();
+        let feed = Arc::new(MemoryStore::new());
+        let sync_store = Arc::new(MemorySyncStore::new());
+        let service = service(published.http.clone(), feed.clone()).with_sync_store(sync_store);
+        let digest = format!("{:x}", Sha256::digest(&installed));
+        service.import_feed(installed, &digest).await.unwrap();
+        service
+            .save_sync_settings(&published.reference, &other_pem)
+            .await
+            .unwrap();
+
+        let settings = service.run_configured_sync().await.unwrap();
+        assert_eq!(settings.last_outcome.as_deref(), Some(OSV_SYNC_REJECTED));
+        let after = feed.current().await.unwrap().unwrap();
+        assert_eq!(after.dataset, "2026-10-02");
+        assert_eq!(after.source, "file");
+        let attempted = settings.last_attempt_at.unwrap();
+        assert!(
+            !service
+                .configured_sync_is_due(attempted + Duration::seconds(31))
+                .await
+                .unwrap()
+        );
+        assert!(
+            service
+                .configured_sync_is_due(attempted + Duration::hours(24))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_500_is_due_again_in_about_thirty_seconds() {
+        let index = index_bytes("2026-10-03");
+        let published = publish(&index, true);
+        let manifest = manifest_url(&published.parsed, &published.parsed.reference);
+        published.http.stub(&manifest, 500, "unavailable");
+        let sync_store = Arc::new(MemorySyncStore::new());
+        let service = service(published.http.clone(), Arc::new(MemoryStore::new()))
+            .with_sync_store(sync_store);
+        service
+            .save_sync_settings(&published.reference, &published.pem)
+            .await
+            .unwrap();
+
+        let settings = service.run_configured_sync().await.unwrap();
+        assert_eq!(settings.last_outcome.as_deref(), Some(OSV_SYNC_REJECTED));
+        assert!(
+            settings
+                .last_detail
+                .as_deref()
+                .unwrap()
+                .contains("HTTP 500")
+        );
+        let attempted = settings.last_attempt_at.unwrap();
+        assert!(!service.configured_sync_is_due(attempted).await.unwrap());
+        assert!(
+            service
+                .configured_sync_is_due(attempted + Duration::seconds(31))
+                .await
+                .unwrap()
+        );
     }
 
     struct Published {
@@ -859,6 +1018,80 @@ mod tests {
         async fn save(&self, record: &OsvFeedRecord) -> Result<(), OsvFeedStoreError> {
             *self.record.lock().unwrap() = Some(record.clone());
             Ok(())
+        }
+    }
+
+    fn public_pem() -> String {
+        SigningKey::random(&mut rand::rngs::OsRng)
+            .verifying_key()
+            .to_public_key_pem(p256::pkcs8::LineEnding::LF)
+            .unwrap()
+    }
+
+    struct MemorySyncStore {
+        settings: std::sync::Mutex<Option<OsvSyncSettings>>,
+    }
+
+    impl MemorySyncStore {
+        fn new() -> Self {
+            Self {
+                settings: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct PlainError(&'static str);
+
+    impl std::fmt::Display for PlainError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for PlainError {}
+
+    #[async_trait::async_trait]
+    impl OsvSyncStore for MemorySyncStore {
+        async fn current(&self) -> Result<Option<OsvSyncSettings>, OsvSyncStoreError> {
+            Ok(self.settings.lock().unwrap().clone())
+        }
+
+        async fn save(
+            &self,
+            reference: &str,
+            public_key_pem: &str,
+        ) -> Result<OsvSyncSettings, OsvSyncStoreError> {
+            let settings = OsvSyncSettings {
+                reference: reference.to_string(),
+                public_key_pem: public_key_pem.to_string(),
+                last_outcome: None,
+                last_detail: None,
+                last_attempt_at: None,
+                retry_after: None,
+            };
+            *self.settings.lock().unwrap() = Some(settings.clone());
+            Ok(settings)
+        }
+
+        async fn record_attempt(
+            &self,
+            outcome: &str,
+            detail: &str,
+            attempted_at: chrono::DateTime<Utc>,
+            retry_after: chrono::DateTime<Utc>,
+        ) -> Result<OsvSyncSettings, OsvSyncStoreError> {
+            let mut guard = self.settings.lock().unwrap();
+            let Some(settings) = guard.as_mut() else {
+                return Err(OsvSyncStoreError::Backend(Box::new(PlainError(
+                    "osv sync settings are not configured",
+                ))));
+            };
+            settings.last_outcome = Some(outcome.to_string());
+            settings.last_detail = Some(detail.to_string());
+            settings.last_attempt_at = Some(attempted_at);
+            settings.retry_after = Some(retry_after);
+            Ok(settings.clone())
         }
     }
 

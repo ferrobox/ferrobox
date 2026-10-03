@@ -616,7 +616,22 @@
     "mode": "Mode",
     "empty": "No vulnerability feed has been imported.",
     "loading": "Loading the vulnerability feed…",
-    "loadFailed": "Could not load the vulnerability feed"
+    "loadFailed": "Could not load the vulnerability feed",
+    "reference": "Reference",
+    "placeholder": "ghcr.io/ferrobox/osv-db:2026-10-03",
+    "hint": "A rejected signature does not replace the active index.",
+    "publicKey": "Cosign public key",
+    "save": "Save",
+    "saving": "Saving…",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "saved": "Sync settings saved",
+    "saveFailed": "Could not save the sync settings",
+    "syncImported": "Imported dataset {{dataset}}",
+    "syncUnchanged": "The index is already current",
+    "syncRejected": "The pull was rejected and the active index was kept",
+    "syncFailed": "Could not sync the vulnerability index",
+    "lastResult": "Last result"
   },
   "severity": {
     "critical": "Critical",

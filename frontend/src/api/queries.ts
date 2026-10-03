@@ -40,6 +40,7 @@ export const queryKeys = {
   oidc: ["auth", "oidc"] as const,
   assays: ["assays"] as const,
   osvFeed: ["security", "osv-feed"] as const,
+  osvSync: ["security", "osv-sync"] as const,
   repositoryAssays: (id: string) => ["repositories", id, "assays"] as const,
   repositoryAdmission: (id: string) => ["repositories", id, "admission"] as const,
   repositoryAdmissionEvents: (id: string) =>
@@ -603,6 +604,44 @@ export function useOsvFeed(enabled: boolean) {
       }
     },
     enabled,
+  });
+}
+
+export function useOsvSync(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.osvSync,
+    queryFn: async () => {
+      try {
+        return await api.getOsvSync();
+      } catch (err) {
+        if (err instanceof api.ApiError && err.status === 404) {
+          return null;
+        }
+        throw err;
+      }
+    },
+    enabled,
+  });
+}
+
+export function useSaveOsvSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.saveOsvSync,
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.osvSync, settings);
+    },
+  });
+}
+
+export function useRunOsvSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.runOsvSync,
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.osvSync, settings);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.osvFeed });
+    },
   });
 }
 
