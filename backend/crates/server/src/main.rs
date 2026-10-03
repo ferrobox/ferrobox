@@ -62,7 +62,7 @@ use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_postgres::worm_store::PostgresWormStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
 use ferrobox_application::admission::AdmissionService;
-use ferrobox_application::assay::{AssayService, OsvFeed};
+use ferrobox_application::assay::{AssayService, OsvFeed, SyncError, SyncOutcome};
 use ferrobox_application::audit::AuditService;
 use ferrobox_application::authenticate_token::AuthenticateTokenUseCase;
 use ferrobox_application::bootstrap_admin::{BootstrapAdminOutcome, BootstrapAdminUseCase};
@@ -229,8 +229,17 @@ async fn main() {
         eprintln!("ferrobox: persisted osv feed not loaded: {err}");
     } else if let Ok(Some(record)) = state.assays.imported_feed().await {
         eprintln!(
-            "ferrobox: restored osv feed dataset={} advisories={} sha256={}",
-            record.dataset, record.advisory_count, record.sha256
+            "ferrobox: restored osv feed dataset={} advisories={} sha256={} source={}",
+            record.dataset, record.advisory_count, record.sha256, record.source
+        );
+    }
+    if let Some((reference, pem)) = osv_sync_settings(&config) {
+        spawn_osv_sync_loop(
+            state.assays.clone(),
+            reference,
+            pem,
+            config.osv_sync_token.clone(),
+            config.osv_sync_interval,
         );
     }
 
@@ -700,6 +709,100 @@ fn build_app_state(
             group_store,
             api_token_store,
         ),
+    }
+}
+
+/// Reference and `Cosign` public key when `OSV_SYNC_REF` is set.
+///
+/// # Panics
+///
+/// Panics when a reference is configured without a usable PEM key.
+/// An unsigned pull is not a supported mode.
+fn osv_sync_settings(config: &Config) -> Option<(String, String)> {
+    let reference = config.osv_sync_ref.clone()?;
+    if let Some(encoded) = &config.osv_sync_pubkey_b64 {
+        let compact: String = encoded.chars().filter(|ch| !ch.is_whitespace()).collect();
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &compact)
+            .unwrap_or_else(|err| panic!("OSV_SYNC_PUBKEY_B64 is not valid base64: {err}"));
+        let pem = String::from_utf8(bytes)
+            .unwrap_or_else(|_| panic!("OSV_SYNC_PUBKEY_B64 is not UTF-8 PEM"));
+        require_public_key_pem(&pem, "OSV_SYNC_PUBKEY_B64");
+        return Some((reference, pem));
+    }
+    if let Some(path) = &config.osv_sync_key {
+        let pem = std::fs::read_to_string(path).unwrap_or_else(|err| {
+            panic!(
+                "OSV_SYNC_REF={reference} cannot read OSV_SYNC_KEY={}: {err}",
+                path.display()
+            );
+        });
+        require_public_key_pem(&pem, &path.display().to_string());
+        return Some((reference, pem));
+    }
+    panic!("OSV_SYNC_REF={reference} requires OSV_SYNC_PUBKEY_B64 or OSV_SYNC_KEY");
+}
+
+fn require_public_key_pem(pem: &str, origin: &str) {
+    assert!(
+        pem.contains("PUBLIC KEY"),
+        "{origin} is not a PEM public key"
+    );
+}
+
+fn spawn_osv_sync_loop(
+    assays: AssayService,
+    reference: String,
+    public_key_pem: String,
+    token: Option<String>,
+    interval: std::time::Duration,
+) {
+    eprintln!("ferrobox: osv sync reference={reference} interval={interval:?}");
+    tokio::spawn(async move {
+        // The listener may still be binding, including when the reference
+        // points at this same instance.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        loop {
+            let wait = match assays
+                .sync_signed_feed(&reference, &public_key_pem, token.as_deref())
+                .await
+            {
+                Ok(SyncOutcome::Imported(record)) => {
+                    eprintln!(
+                        "ferrobox: osv sync imported dataset={} advisories={} sha256={}",
+                        record.dataset, record.advisory_count, record.sha256
+                    );
+                    interval
+                }
+                Ok(SyncOutcome::Unchanged { sha256 }) => {
+                    eprintln!("ferrobox: osv sync unchanged sha256={sha256}");
+                    interval
+                }
+                Err(err) => {
+                    eprintln!("ferrobox: osv sync kept the active index: {err}");
+                    if sync_error_retries_soon(&err) {
+                        std::time::Duration::from_secs(30)
+                    } else {
+                        interval
+                    }
+                }
+            };
+            tokio::time::sleep(wait).await;
+        }
+    });
+}
+
+fn sync_error_retries_soon(err: &SyncError) -> bool {
+    match err {
+        SyncError::Transport { .. } => true,
+        SyncError::Registry { status, .. } => *status >= 500,
+        SyncError::InvalidReference { .. }
+        | SyncError::Token(_)
+        | SyncError::Unsigned { .. }
+        | SyncError::SignatureRejected { .. }
+        | SyncError::UnexpectedLayout { .. }
+        | SyncError::ManifestDigest { .. }
+        | SyncError::BlobDigest { .. }
+        | SyncError::Import(_) => false,
     }
 }
 

@@ -70,6 +70,17 @@ pub struct Config {
     /// Optional path to a local `ferrobox-osv-index` file (plain or gzipped).
     /// When set, assays consult this index instead of `api.osv.dev`.
     pub osv_feed_path: Option<PathBuf>,
+    /// OCI reference of a Cosign-signed index, for example
+    /// `ghcr.io/ferrobox/osv-db:2026-10-03`. Unset disables the pull.
+    pub osv_sync_ref: Option<String>,
+    /// Path of the PEM public key used to verify [`Self::osv_sync_ref`].
+    pub osv_sync_key: Option<PathBuf>,
+    /// Base64 PEM public key. Used when [`Self::osv_sync_key`] is unset.
+    pub osv_sync_pubkey_b64: Option<String>,
+    /// Optional bearer token for a private registry.
+    pub osv_sync_token: Option<String>,
+    /// Delay between signed pulls. The first pull runs at startup.
+    pub osv_sync_interval: Duration,
 }
 
 impl Config {
@@ -106,6 +117,11 @@ impl Config {
             oidc_auto_create_groups: env_flag("OIDC_AUTO_CREATE_GROUPS", true),
             session_ttl: session_ttl_from_env(),
             osv_feed_path: optional_env("OSV_FEED_PATH").map(PathBuf::from),
+            osv_sync_ref: optional_env("OSV_SYNC_REF"),
+            osv_sync_key: optional_env("OSV_SYNC_KEY").map(PathBuf::from),
+            osv_sync_pubkey_b64: optional_env("OSV_SYNC_PUBKEY_B64"),
+            osv_sync_token: optional_env("OSV_SYNC_TOKEN"),
+            osv_sync_interval: osv_sync_interval_from_env(),
         })
     }
 }
@@ -217,6 +233,14 @@ fn env_flag(key: &str, default: bool) -> bool {
         ),
         None => default,
     }
+}
+
+fn osv_sync_interval_from_env() -> Duration {
+    let hours = optional_env("OSV_SYNC_INTERVAL_HOURS")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|hours| *hours > 0)
+        .unwrap_or(24);
+    Duration::from_secs(hours.saturating_mul(3600))
 }
 
 fn session_ttl_from_env() -> Duration {

@@ -55,7 +55,7 @@ impl OsvFeedStore for PostgresOsvFeedStore {
     async fn current(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError> {
         let row = sqlx::query(
             r"
-            SELECT dataset, sha256, advisory_count, ecosystems, storage_key, imported_at
+            SELECT dataset, sha256, advisory_count, ecosystems, storage_key, imported_at, source
             FROM osv_feed
             WHERE singleton = TRUE
             ",
@@ -78,6 +78,8 @@ impl OsvFeedStore for PostgresOsvFeedStore {
             .map_err(|err| backend_error(err.to_string()))?;
         let imported_at: DateTime<Utc> = sqlx::Row::try_get(&row, "imported_at")
             .map_err(|err| backend_error(err.to_string()))?;
+        let source: String =
+            sqlx::Row::try_get(&row, "source").map_err(|err| backend_error(err.to_string()))?;
         Ok(Some(OsvFeedRecord {
             dataset,
             sha256,
@@ -85,6 +87,7 @@ impl OsvFeedStore for PostgresOsvFeedStore {
             ecosystems: ecosystems_from_column(&ecosystems),
             storage_key,
             imported_at,
+            source,
         }))
     }
 
@@ -93,16 +96,18 @@ impl OsvFeedStore for PostgresOsvFeedStore {
         sqlx::query(
             r"
             INSERT INTO osv_feed (
-                singleton, dataset, sha256, advisory_count, ecosystems, storage_key, imported_at
+                singleton, dataset, sha256, advisory_count, ecosystems, storage_key,
+                imported_at, source
             )
-            VALUES (TRUE, $1, $2, $3, $4, $5, $6)
+            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (singleton) DO UPDATE SET
                 dataset = EXCLUDED.dataset,
                 sha256 = EXCLUDED.sha256,
                 advisory_count = EXCLUDED.advisory_count,
                 ecosystems = EXCLUDED.ecosystems,
                 storage_key = EXCLUDED.storage_key,
-                imported_at = EXCLUDED.imported_at
+                imported_at = EXCLUDED.imported_at,
+                source = EXCLUDED.source
             ",
         )
         .bind(&record.dataset)
@@ -111,6 +116,7 @@ impl OsvFeedStore for PostgresOsvFeedStore {
         .bind(ecosystems_to_column(&record.ecosystems))
         .bind(&record.storage_key)
         .bind(record.imported_at)
+        .bind(&record.source)
         .execute(&self.pool)
         .await
         .map_err(|err| map_sqlx(&err))?;

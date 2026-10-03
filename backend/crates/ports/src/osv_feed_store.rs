@@ -4,6 +4,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
+/// An administrator uploaded the index with `POST /api/security/osv-feed`.
+pub const OSV_FEED_SOURCE_FILE: &str = "file";
+
+/// A scheduled pull of a signed OCI index installed this copy.
+pub const OSV_FEED_SOURCE_SYNC: &str = "sync";
+
 /// Metadata of the vulnerability index currently installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsvFeedRecord {
@@ -19,6 +25,8 @@ pub struct OsvFeedRecord {
     pub storage_key: String,
     /// When this index was accepted.
     pub imported_at: DateTime<Utc>,
+    /// [`OSV_FEED_SOURCE_FILE`] or [`OSV_FEED_SOURCE_SYNC`].
+    pub source: String,
 }
 
 /// Why the feed record could not be read or written.
