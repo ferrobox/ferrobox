@@ -17,7 +17,7 @@ import {
 import { useAuth } from "@/auth/AuthProvider";
 import { canManageUsers, canWriteRepository } from "@/auth/roles";
 import { ArtifactsTable } from "@/components/repository/ArtifactsTable";
-import { OsvFeedCard } from "@/components/repository/OsvFeedCard";
+import { OsvFeedSummary } from "@/components/repository/OsvFeedCard";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
@@ -253,7 +253,7 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
               canWrite={canWrite}
             />
           ) : null}
-          {isAdmin ? <OsvFeedCard /> : null}
+          <OsvFeedSummary canManage={isAdmin} />
           <ArtifactsTable
             repositoryId={repositoryId}
             kind={repository.kind.type}

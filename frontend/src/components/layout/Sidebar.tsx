@@ -1,4 +1,4 @@
-import { Boxes, FlaskConical, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
+import { Boxes, Database, FlaskConical, ScrollText, Search, Settings2, ShieldCheck, Users, UsersRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 
@@ -19,6 +19,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { labelKey: "nav.search", to: "/search", icon: Search },
   { labelKey: "nav.assays", to: "/assays", icon: FlaskConical },
   { labelKey: "nav.security", to: "/security", icon: ShieldCheck },
+  { labelKey: "nav.feed", to: "/feed", icon: Database, adminOnly: true },
   { labelKey: "nav.users", to: "/users", icon: Users, adminOnly: true },
   { labelKey: "nav.groups", to: "/groups", icon: UsersRound, adminOnly: true },
   { labelKey: "nav.audit", to: "/audit", icon: ScrollText, adminOnly: true },

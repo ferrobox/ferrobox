@@ -68,7 +68,7 @@ bucket -- see `infra/.env.example` for the full list.
   `api.osv.dev` otherwise.
 - **Vulnerability feed**: one index for the instance, covering npm, PyPI,
   crates.io, Maven, NuGet, and Go. Import the file, or sync the signed
-  artifact `ghcr.io/ferrobox/osv-db:YYYY-MM-DD` from the Packages card.
+  artifact `ghcr.io/ferrobox/osv-db:YYYY-MM-DD` from the Vulnerability feed page.
 - **Admission policies**: block downloads or promotions that fail CVE,
   license, or Cosign signature checks. A CVE check fails closed when the
   feed is missing or that version's assay is not ready.
@@ -90,10 +90,11 @@ Until an administrator loads an index, assays keep calling `api.osv.dev`.
 The index is one `ferrobox-osv-index` file for the whole instance. It is not
 a repository, and it is not a GitHub Release of this project.
 
-On a repository's **Packages** tab, the vulnerability-feed card syncs
+On the **Vulnerability feed** page, an administrator syncs
 `ghcr.io/ferrobox/osv-db:YYYY-MM-DD`. Paste [`osv-sync.pub.pem`](osv-sync.pub.pem)
 as the Cosign public key. A rejected signature does not replace the index
-already in use. An air-gapped install downloads the same bytes with
+already in use. A repository's **Packages** tab shows the dataset, import
+date, and mode. An air-gapped install downloads the same bytes with
 `oras pull` on that reference, checks `ferrobox-osv-index.json.gz.sha256`,
 and imports the file with `POST /api/security/osv-feed` and an
 `X-FerroBox-Sha256` header.

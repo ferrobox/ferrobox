@@ -46,14 +46,9 @@ impl From<OsvFeedRecord> for OsvFeedResponse {
 
 pub(crate) async fn get_feed(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, token }: AuthenticatedUser,
+    AuthenticatedUser { token, .. }: AuthenticatedUser,
 ) -> Result<Json<OsvFeedResponse>, ApiError> {
     require_token_read(&token)?;
-    if !user.role().can_manage_users() {
-        return Err(ApiError::Forbidden(
-            "admin role required to read the vulnerability feed".to_string(),
-        ));
-    }
     match state.assays.imported_feed().await? {
         Some(record) => Ok(Json(record.into())),
         None => Err(ApiError::NotFound(
