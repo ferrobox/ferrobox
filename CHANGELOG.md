@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
 ### Added
 
 **Security**
@@ -31,9 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A connected instance can pull a Cosign-signed OCI index
   (`OSV_SYNC_REF`, for example `ghcr.io/ferrobox/osv-db:2026-10-03`)
   on a schedule. The signed layer is the same `ferrobox-osv-index` file
-  an air-gapped instance imports with curl; there is no `docker save`
-  path. A missing or invalid signature does not replace the active
-  index. After a signed pull the feed card mode is `sync`; an upload
+  an air-gapped instance imports; there is no `docker save` path. A
+  missing or invalid signature does not replace the active index.
+  After a signed pull the feed card mode is `sync`; an upload
   stays `file`.
 - The OSV database workflow keeps going when GitHub's package
   visibility API returns 404 for a package that a public repository
@@ -53,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Settings saved from the card win over `OSV_SYNC_REF` after the first
   save. Those variables still seed the row on first boot when the table
   is empty.
+
+### Changed
+
+**Security**
+
 - A repository policy that checks known vulnerabilities now fails closed.
   If that clause is on and the vulnerability feed is missing, or the
   assay for that version is not ready, the pull and the promote are
@@ -156,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ferrobox/ferrobox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ferrobox/ferrobox/releases/tag/v0.1.0

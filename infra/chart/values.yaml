@@ -5,7 +5,7 @@
 image:
   repository: ghcr.io/ferrobox/ferrobox
   # Keep in sync with Chart.yaml's appVersion.
-  tag: "0.1.1"
+  tag: "0.2.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

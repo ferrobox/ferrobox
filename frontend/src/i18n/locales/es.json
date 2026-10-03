@@ -1,7 +1,7 @@
 {
   "app": {
     "tagline": "Registro de artefactos",
-    "version": "FerroBox v0.1.1"
+    "version": "FerroBox v0.2.0"
   },
   "nav": {
     "repositories": "Repositorios",
