@@ -12,6 +12,8 @@
 .env_*
 .env.local
 *.pem
+# La clave pública del índice OSV se publica. La privada sigue ignorada.
+!/osv-sync.pub.pem
 
 # Sistema operativo / editor
 .DS_Store
