@@ -114,14 +114,40 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for _ in 1 2 3 4 5 6; do
-            if gh api --method PATCH "/orgs/${owner}/packages/container/osv-db" -f visibility=public \
-              || gh api --method PATCH "/user/packages/container/osv-db" -f visibility=public; then
-              exit 0
+          # A public repository publishes a public container. GITHUB_TOKEN
+          # often gets HTTP 404 from the visibility API even then.
+          package_public() {
+            local visibility
+            visibility="$(gh api "/orgs/${owner}/packages/container/osv-db" --jq .visibility 2>/dev/null || true)"
+            if [ "$visibility" = "public" ]; then
+              return 0
             fi
-            sleep 5
-          done
-          echo "Could not mark ${image} public. Anonymous sync gets HTTP 403 until it is."
+            visibility="$(gh api "/user/packages/container/osv-db" --jq .visibility 2>/dev/null || true)"
+            [ "$visibility" = "public" ]
+          }
+          if package_public; then
+            echo "osv-db is public"
+            exit 0
+          fi
+          gh api --method PATCH "/orgs/${owner}/packages/container/osv-db" -f visibility=public \
+            || gh api --method PATCH "/user/packages/container/osv-db" -f visibility=public \
+            || true
+          if package_public; then
+            echo "osv-db is public"
+            exit 0
+          fi
+          token="$(curl -fsS "https://ghcr.io/token?service=ghcr.io&scope=repository:${owner}/osv-db:pull" | jq -r .token)"
+          code="$(
+            curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              "https://ghcr.io/v2/${owner}/osv-db/manifests/${{ steps.index.outputs.date }}"
+          )"
+          if [ "$code" = "200" ]; then
+            echo "Anonymous pull of ${image}:${{ steps.index.outputs.date }} returned HTTP 200"
+            exit 0
+          fi
+          echo "Anonymous pull returned HTTP ${code}. The package is not public."
           exit 1
 
       - name: Publish the air-gap release
