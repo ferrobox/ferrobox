@@ -20,4 +20,5 @@
 
 # Infraestructura local (Fase 0)
 infra/.env
+infra/.osv-sync/
 infra/garage/garage.toml

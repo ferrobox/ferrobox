@@ -1,0 +1,2 @@
+ALTER TABLE osv_feed
+    ADD COLUMN source TEXT NOT NULL DEFAULT 'file';

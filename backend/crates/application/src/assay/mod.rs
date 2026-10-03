@@ -7,8 +7,10 @@ mod layers;
 mod licenses;
 mod lockfiles;
 mod osv;
+mod sync;
 
 pub use feed::{FeedError, OsvFeed};
+pub use sync::{SyncError, SyncOutcome};
 
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
@@ -23,7 +25,9 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
-use ferrobox_ports::osv_feed_store::{OsvFeedRecord, OsvFeedStore, OsvFeedStoreError};
+use ferrobox_ports::osv_feed_store::{
+    OSV_FEED_SOURCE_FILE, OSV_FEED_SOURCE_SYNC, OsvFeedRecord, OsvFeedStore, OsvFeedStoreError,
+};
 use ferrobox_ports::package_index_store::{PackageIndexStore, PackageIndexStoreError};
 use ferrobox_ports::repository_store::{RepositoryStore, RepositoryStoreError};
 use ferrobox_ports::storage::{StorageError, StorageKey, StoragePort};
@@ -195,6 +199,45 @@ impl AssayService {
         bytes: Bytes,
         expected_sha256: &str,
     ) -> Result<OsvFeedRecord, FeedImportError> {
+        self.import_feed_with_source(bytes, expected_sha256, OSV_FEED_SOURCE_FILE)
+            .await
+    }
+
+    /// Pulls `reference`, verifies its Cosign signature, and installs the
+    /// index layer when the checksum is new. A rejected pull leaves the
+    /// active index untouched. The same checksum does not re-run assays.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SyncError`] when the registry or the signature cannot
+    /// be trusted, or the layer is not a v1 index.
+    pub async fn sync_signed_feed(
+        &self,
+        reference: &str,
+        public_key_pem: &str,
+        token: Option<&str>,
+    ) -> Result<SyncOutcome, SyncError> {
+        let bytes =
+            sync::pull_signed_index(self.http_client.as_ref(), reference, public_key_pem, token)
+                .await?;
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if let Some(current) = self.imported_feed().await?
+            && current.sha256 == digest
+        {
+            return Ok(SyncOutcome::Unchanged { sha256: digest });
+        }
+        let record = self
+            .import_feed_with_source(bytes, &digest, OSV_FEED_SOURCE_SYNC)
+            .await?;
+        Ok(SyncOutcome::Imported(record))
+    }
+
+    async fn import_feed_with_source(
+        &self,
+        bytes: Bytes,
+        expected_sha256: &str,
+        source: &str,
+    ) -> Result<OsvFeedRecord, FeedImportError> {
         let Some(store) = &self.feed_store else {
             return Err(FeedImportError::NotConfigured);
         };
@@ -220,6 +263,7 @@ impl AssayService {
             ecosystems: parsed.ecosystems(),
             storage_key: storage_key.clone(),
             imported_at: Utc::now(),
+            source: source.to_string(),
         };
         if let Err(err) = store.save(&record).await {
             return Err(err.into());
@@ -1042,6 +1086,7 @@ mod tests {
         assert_eq!(record.sha256, digest);
         assert_eq!(record.advisory_count, 1);
         assert_eq!(record.ecosystems, vec!["npm".to_string()]);
+        assert_eq!(record.source, "file");
 
         let assay = service
             .run(repository.id(), PackageEcosystem::Npm, "lodash", "4.17.20")
