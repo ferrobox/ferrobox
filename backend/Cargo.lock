@@ -959,7 +959,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrobox-adapter-http"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-adapter-postgres"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-adapter-s3-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "aws-sdk-s3",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-application"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -1029,7 +1029,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-domain"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "thiserror",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-osv-index"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "flate2",
  "serde",
@@ -1050,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-ports"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "ferrobox-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aws-sdk-s3",
  "axum",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-03
+
 ### Changed
 
 **Web console**
@@ -14,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The vulnerability feed is configured on its own admin page. A
   repository's Packages tab shows the dataset, import date, and mode.
   Deleting a repository still does not remove the index.
+- Removing the vulnerability feed deletes that instance-wide index and
+  the saved sync settings, then re-runs stored assays.
 
 ## [0.2.0] - 2026-10-03
 
@@ -60,9 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `last_affected` stays an inclusive upper bound.
 - The Packages card can save the OCI reference and the Cosign public key
   and sync now. A rejected signature does not replace the active index.
-- Removing the vulnerability feed deletes that instance-wide index and
-  the saved sync settings, then re-runs stored assays. Deleting a
-  repository does not remove the feed.
   Settings saved from the card win over `OSV_SYNC_REF` after the first
   save. Those variables still seed the row on first boot when the table
   is empty.
@@ -174,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ferrobox/ferrobox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ferrobox/ferrobox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ferrobox/ferrobox/releases/tag/v0.1.0

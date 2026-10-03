@@ -29,7 +29,7 @@ Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
 registry).
 
 ```bash
-helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.0 \
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.1 \
   --namespace ferrobox --create-namespace
 ```
 
@@ -44,7 +44,7 @@ admin credentials and access URL.
 ## Container image
 
 ```bash
-docker pull ghcr.io/ferrobox/ferrobox:0.2.0
+docker pull ghcr.io/ferrobox/ferrobox:0.2.1
 ```
 
 The same image is used by both quickstarts above. It expects a `DATABASE_URL`
@@ -102,6 +102,12 @@ and imports the file with `POST /api/security/osv-feed` and an
 OCI images, Helm charts, Conan, and generic files are not part of that index.
 The **Download** button in the console does not apply admission policies; a
 client pull and a promote do.
+
+## Upgrading to 0.2.1
+
+Client protocols are unchanged. The feed form is on the **Vulnerability
+feed** page. A repository's **Packages** tab shows the dataset, import
+date, and mode.
 
 ## Upgrading to 0.2.0
 
