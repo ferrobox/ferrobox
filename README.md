@@ -29,7 +29,7 @@ Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
 registry).
 
 ```bash
-helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.1.1 \
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.0 \
   --namespace ferrobox --create-namespace
 ```
 
@@ -44,7 +44,7 @@ admin credentials and access URL.
 ## Container image
 
 ```bash
-docker pull ghcr.io/ferrobox/ferrobox:0.1.1
+docker pull ghcr.io/ferrobox/ferrobox:0.2.0
 ```
 
 The same image is used by both quickstarts above. It expects a `DATABASE_URL`
@@ -62,10 +62,16 @@ bucket -- see `infra/.env.example` for the full list.
   tokens, including robot accounts with optional expiry.
 - **SSO**: OpenID Connect (Keycloak-compatible) with just-in-time provisioning
   and group mapping.
-- **Assays**: automatic SBOM extraction (CycloneDX) plus OSV vulnerability and
-  license scanning for every published package version.
+- **Assays**: automatic SBOM extraction (CycloneDX) plus vulnerability and
+  license scanning for every published package version. Vulnerability
+  results come from the instance feed when one is loaded, and from
+  `api.osv.dev` otherwise.
+- **Vulnerability feed**: one index for the instance, covering npm, PyPI,
+  crates.io, Maven, NuGet, and Go. Import the file, or sync the signed
+  artifact `ghcr.io/ferrobox/osv-db:YYYY-MM-DD` from the Packages card.
 - **Admission policies**: block downloads or promotions that fail CVE,
-  license, or Cosign signature checks.
+  license, or Cosign signature checks. A CVE check fails closed when the
+  feed is missing or that version's assay is not ready.
 - **Retention and garbage collection**: per-repository or instance-wide
   policies, with a dry run before anything is deleted.
 - **Quotas**: per-repository storage limits.
@@ -77,6 +83,31 @@ bucket -- see `infra/.env.example` for the full list.
   delivery history and a manual ping.
 - **Audit log** of administrative actions, and full-text package **search**
   across repositories.
+
+## Vulnerability feed
+
+Until an administrator loads an index, assays keep calling `api.osv.dev`.
+The index is one `ferrobox-osv-index` file for the whole instance. It is not
+a repository, and it is not a GitHub Release of this project.
+
+On a repository's **Packages** tab, the vulnerability-feed card syncs
+`ghcr.io/ferrobox/osv-db:YYYY-MM-DD`. Paste [`osv-sync.pub.pem`](osv-sync.pub.pem)
+as the Cosign public key. A rejected signature does not replace the index
+already in use. An air-gapped install downloads the same bytes with
+`oras pull` on that reference, checks `ferrobox-osv-index.json.gz.sha256`,
+and imports the file with `POST /api/security/osv-feed` and an
+`X-FerroBox-Sha256` header.
+
+OCI images, Helm charts, Conan, and generic files are not part of that index.
+The **Download** button in the console does not apply admission policies; a
+client pull and a promote do.
+
+## Upgrading to 0.2.0
+
+Client protocols are unchanged. If a repository policy's known-vulnerability
+rule is already on, pulls and promotes of packages in that index are denied
+until a feed is loaded and that version's assay is ready. Leave the rule off
+to keep the previous behavior.
 
 ## License
 
