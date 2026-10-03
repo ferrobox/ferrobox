@@ -1038,6 +1038,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrobox-osv-index"
+version = "0.1.1"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zip",
+]
+
+[[package]]
 name = "ferrobox-ports"
 version = "0.1.1"
 dependencies = [

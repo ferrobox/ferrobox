@@ -8,7 +8,8 @@
 //! An advisory matches a version when that version is listed in
 //! `versions`, or when it falls in `[introduced, fixed)`. `fixed` is
 //! exclusive, matching the OSV "fixed" event. `introduced` defaults to
-//! `0` when only `fixed` is set.
+//! `0` when only `fixed` or `last_affected` is set. `last_affected` is
+//! inclusive and is used when the OSV range has no `fixed` event.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
@@ -69,6 +70,7 @@ struct Advisory {
     severity: AssaySeverity,
     fixed: Option<String>,
     introduced: String,
+    last_affected: Option<String>,
     use_range: bool,
     versions: Vec<String>,
     details_url: Option<String>,
@@ -96,6 +98,8 @@ struct FeedAdvisory {
     fixed: Option<String>,
     #[serde(default)]
     introduced: Option<String>,
+    #[serde(default)]
+    last_affected: Option<String>,
     #[serde(default)]
     versions: Vec<String>,
     #[serde(default)]
@@ -213,7 +217,13 @@ impl Advisory {
             .versions
             .iter()
             .any(|candidate| cmp_version(version, candidate) == Ordering::Equal);
-        let ranged = self.use_range && in_range(version, &self.introduced, self.fixed.as_deref());
+        let ranged = self.use_range
+            && in_range(
+                version,
+                &self.introduced,
+                self.fixed.as_deref(),
+                self.last_affected.as_deref(),
+            );
         listed || ranged
     }
 
@@ -244,7 +254,8 @@ impl TryFrom<FeedAdvisory> for Advisory {
         {
             return Err("ecosystem, name, and id are required".to_string());
         }
-        let use_range = raw.introduced.is_some() || raw.fixed.is_some();
+        let use_range =
+            raw.introduced.is_some() || raw.fixed.is_some() || raw.last_affected.is_some();
         if !use_range && raw.versions.is_empty() {
             return Err(format!(
                 "{} has neither a version range nor an explicit version list",
@@ -260,6 +271,7 @@ impl TryFrom<FeedAdvisory> for Advisory {
             severity: AssaySeverity::parse(&raw.severity),
             fixed: raw.fixed,
             introduced: raw.introduced.unwrap_or_else(|| "0".to_string()),
+            last_affected: raw.last_affected,
             use_range,
             versions: raw.versions,
             details_url: raw.details_url,
@@ -284,11 +296,19 @@ fn normalize_name(ecosystem: &str, name: &str) -> String {
     }
 }
 
-fn in_range(version: &str, introduced: &str, fixed: Option<&str>) -> bool {
+fn in_range(
+    version: &str,
+    introduced: &str,
+    fixed: Option<&str>,
+    last_affected: Option<&str>,
+) -> bool {
     if cmp_version(version, introduced) == Ordering::Less {
         return false;
     }
-    fixed.is_none_or(|fixed| cmp_version(version, fixed) == Ordering::Less)
+    if let Some(fixed) = fixed {
+        return cmp_version(version, fixed) == Ordering::Less;
+    }
+    last_affected.is_none_or(|last| cmp_version(version, last) != Ordering::Greater)
 }
 
 fn details_url(id: &str, explicit: Option<String>) -> Option<String> {
@@ -458,6 +478,29 @@ mod tests {
         }"#;
         let error = OsvFeed::from_bytes(document.as_bytes()).unwrap_err();
         assert!(error.to_string().contains("neither a version range"));
+    }
+
+    #[test]
+    fn last_affected_includes_that_version_and_stops_after_it() {
+        let document = r#"{
+            "format": "ferrobox-osv-index",
+            "format_version": 1,
+            "dataset": "2026-10-03",
+            "advisories": [{
+                "ecosystem": "crates.io",
+                "name": "demo",
+                "id": "GHSA-2226-4v3c-cff8",
+                "summary": "inclusive upper bound",
+                "severity": "high",
+                "introduced": "0",
+                "last_affected": "0.3.24"
+            }]
+        }"#;
+        let feed = OsvFeed::from_bytes(document.as_bytes()).unwrap();
+        let affected = AssayComponent::new("demo", "0.3.24", None, AssayComponentKind::Root);
+        let later = AssayComponent::new("demo", "0.3.25", None, AssayComponentKind::Root);
+        assert_eq!(feed.query(PackageEcosystem::Cargo, &[affected]).len(), 1);
+        assert!(feed.query(PackageEcosystem::Cargo, &[later]).is_empty());
     }
 
     #[test]

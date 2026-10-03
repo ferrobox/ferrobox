@@ -8,6 +8,7 @@ members = [
     "crates/adapters/postgres",
     "crates/adapters/http",
     "crates/server",
+    "crates/osv-index",
 ]
 
 [workspace.package]

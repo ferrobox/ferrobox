@@ -1,0 +1,152 @@
+name: OSV database
+
+# Builds one gzipped ferrobox-osv-index from the public OSV exports and
+# publishes it as a Cosign-signed OCI artifact. Installs pull
+# ghcr.io/<owner>/osv-db:YYYY-MM-DD. An air-gapped install curls the same
+# file from the GitHub release osv-db-YYYY-MM-DD.
+#
+# The signature is a Cosign key signature, not the keyless signature used
+# for the FerroBox image. The consumer checks that key. Once, on a trusted
+# machine:
+#
+#   cosign generate-key-pair
+#
+# Store the contents of cosign.key as the repository secret OSV_COSIGN_KEY
+# and the password as OSV_COSIGN_PASSWORD. Do not commit the private key.
+# The workflow writes the matching public key onto the release so an
+# install can paste it into the vulnerability-feed card.
+on:
+  schedule:
+    - cron: "15 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osv-db
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, sign, and publish the index
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the signing key
+        env:
+          OSV_COSIGN_KEY: ${{ secrets.OSV_COSIGN_KEY }}
+        run: |
+          if [ -z "$OSV_COSIGN_KEY" ]; then
+            echo "Repository secret OSV_COSIGN_KEY is empty."
+            echo "Generate a key with: cosign generate-key-pair"
+            echo "Store cosign.key as OSV_COSIGN_KEY and the password as OSV_COSIGN_PASSWORD."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the index converter
+        run: cargo build --release -p ferrobox-osv-index
+        working-directory: backend
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install oras
+        run: |
+          curl -fsSL -o /tmp/oras.tar.gz \
+            https://github.com/oras-project/oras/releases/download/v1.2.2/oras_1.2.2_linux_amd64.tar.gz
+          tar -xzf /tmp/oras.tar.gz -C /tmp oras
+          sudo mv /tmp/oras /usr/local/bin/oras
+
+      - name: Download the OSV exports
+        run: |
+          mkdir -p osv-zips
+          for eco in npm PyPI crates.io Maven NuGet Go; do
+            curl -fsSL --retry 3 --retry-delay 2 \
+              -o "osv-zips/${eco}.zip" \
+              "https://osv-vulnerabilities.storage.googleapis.com/${eco}/all.zip"
+          done
+
+      - name: Build the gzipped index
+        id: index
+        run: |
+          date="$(date -u +%F)"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          backend/target/release/ferrobox-osv-index \
+            --dataset "$date" \
+            --output ferrobox-osv-index.json.gz \
+            osv-zips/*.zip
+          sha256sum ferrobox-osv-index.json.gz > ferrobox-osv-index.json.gz.sha256
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            oras login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push and sign the artifact
+        env:
+          OSV_COSIGN_KEY: ${{ secrets.OSV_COSIGN_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.OSV_COSIGN_PASSWORD }}
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/osv-db"
+          date="${{ steps.index.outputs.date }}"
+          umask 077
+          printf '%s\n' "$OSV_COSIGN_KEY" > cosign.key
+          cosign public-key --key cosign.key > osv-sync.pub.pem
+          oras push "${image}:${date}" \
+            --artifact-type application/vnd.ferrobox.osv-index.v1 \
+            ferrobox-osv-index.json.gz:application/vnd.ferrobox.osv-index.v1
+          cosign sign --yes --key cosign.key --tlog-upload=false "${image}:${date}"
+          rm -f cosign.key
+          {
+            echo "owner=$owner"
+            echo "image=$image"
+          } >> "$GITHUB_ENV"
+
+      - name: Make the package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for _ in 1 2 3 4 5 6; do
+            if gh api --method PATCH "/orgs/${owner}/packages/container/osv-db" -f visibility=public \
+              || gh api --method PATCH "/user/packages/container/osv-db" -f visibility=public; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Could not mark ${image} public. Anonymous sync gets HTTP 403 until it is."
+          exit 1
+
+      - name: Publish the air-gap release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          date="${{ steps.index.outputs.date }}"
+          tag="osv-db-${date}"
+          cat > notes.md << EOF
+          Gzipped \`ferrobox-osv-index\` for ${date}.
+
+          Connected install: \`${image}:${date}\`, signed with the Cosign public key in \`osv-sync.pub.pem\`. Paste that key into the vulnerability-feed card.
+
+          Air-gapped install: download \`ferrobox-osv-index.json.gz\` and check \`ferrobox-osv-index.json.gz.sha256\`, then import the file. The bytes are the same layer the signed artifact carries.
+          EOF
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" --clobber \
+              ferrobox-osv-index.json.gz \
+              ferrobox-osv-index.json.gz.sha256 \
+              osv-sync.pub.pem
+          else
+            gh release create "$tag" \
+              --title "OSV database ${date}" \
+              --notes-file notes.md \
+              ferrobox-osv-index.json.gz \
+              ferrobox-osv-index.json.gz.sha256 \
+              osv-sync.pub.pem
+          fi

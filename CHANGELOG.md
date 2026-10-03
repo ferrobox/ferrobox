@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A missing or invalid signature does not replace the active
   index. After a signed pull the feed card mode is `sync`; an upload
   stays `file`.
+- A workflow builds one gzipped `ferrobox-osv-index` from the OSV
+  exports for npm, PyPI, crates.io, Maven, NuGet, and Go, pushes it to
+  `ghcr.io/<owner>/osv-db:YYYY-MM-DD`, and signs that artifact with the
+  Cosign key stored as `OSV_COSIGN_KEY`. The same file, its SHA-256, and
+  the public key are attached to the GitHub release `osv-db-YYYY-MM-DD`
+  for an air-gapped import. An OSV range that records `last_affected`
+  stays an inclusive upper bound.
 - The Packages card can save the OCI reference and the Cosign public key
   and sync now. A rejected signature does not replace the active index.
   Settings saved from the card win over `OSV_SYNC_REF` after the first
