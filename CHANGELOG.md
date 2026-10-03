@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path. A missing or invalid signature does not replace the active
   index. After a signed pull the feed card mode is `sync`; an upload
   stays `file`.
+- The OSV database workflow keeps going when GitHub's package
+  visibility API returns 404 for a package that a public repository
+  already published as public.
 - A workflow builds one gzipped `ferrobox-osv-index` from the OSV
   exports for npm, PyPI, crates.io, Maven, NuGet, and Go, pushes it to
   `ghcr.io/<owner>/osv-db:YYYY-MM-DD`, and signs that artifact with the
