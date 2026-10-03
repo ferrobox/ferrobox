@@ -533,6 +533,7 @@ mod tests {
     use ferrobox_ports::osv_sync_store::{
         OSV_SYNC_IMPORTED, OSV_SYNC_REJECTED, OsvSyncSettings, OsvSyncStore, OsvSyncStoreError,
     };
+    use ferrobox_ports::storage::{StorageKey, StoragePort};
     use p256::ecdsa::SigningKey;
     use p256::ecdsa::signature::Signer;
     use p256::pkcs8::EncodePublicKey;
@@ -543,6 +544,42 @@ mod tests {
         InMemoryAssayStore, InMemoryHttpClient, InMemoryPackageIndexStore, InMemoryRepositoryStore,
         InMemoryStorage,
     };
+
+    #[tokio::test]
+    async fn remove_feed_drops_the_index_the_blob_and_the_sync_settings() {
+        let storage = Arc::new(InMemoryStorage::default());
+        let sync_store = Arc::new(MemorySyncStore::new());
+        let storage_port: Arc<dyn StoragePort> = storage.clone();
+        let feed_port: Arc<dyn OsvFeedStore> = Arc::new(MemoryStore::new());
+        let service = AssayService::new(
+            Arc::new(InMemoryAssayStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+            storage_port,
+            Arc::new(InMemoryHttpClient::default()),
+        )
+        .with_feed_store(feed_port)
+        .with_sync_store(sync_store);
+        let bytes = index_bytes("2026-10-03");
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        service.import_feed(bytes, &digest).await.unwrap();
+        service
+            .save_sync_settings("ghcr.io/ferrobox/osv-db:2026-10-03", &public_pem())
+            .await
+            .unwrap();
+
+        service.remove_feed().await.unwrap();
+
+        assert!(service.imported_feed().await.unwrap().is_none());
+        assert!(service.sync_settings().await.unwrap().is_none());
+        assert!(
+            !storage
+                .exists(&StorageKey::new(format!("system/osv-feed/{digest}")))
+                .await
+                .unwrap()
+        );
+        service.remove_feed().await.unwrap();
+    }
 
     #[test]
     fn parses_a_ghcr_tag_and_a_local_http_reference() {
@@ -692,9 +729,12 @@ mod tests {
             .sync_signed_feed(&published.reference, &published.pem, None)
             .await
             .unwrap();
-        assert_eq!(again, SyncOutcome::Unchanged {
-            sha256: record.sha256.clone(),
-        });
+        assert_eq!(
+            again,
+            SyncOutcome::Unchanged {
+                sha256: record.sha256.clone(),
+            }
+        );
         let stored = store.current().await.unwrap().unwrap();
         assert_eq!(stored.imported_at, imported_at);
         assert_eq!(stored.source, "sync");
@@ -1052,6 +1092,10 @@ mod tests {
             *self.record.lock().unwrap() = Some(record.clone());
             Ok(())
         }
+
+        async fn delete(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError> {
+            Ok(self.record.lock().unwrap().take())
+        }
     }
 
     fn public_pem() -> String {
@@ -1125,6 +1169,11 @@ mod tests {
             settings.last_attempt_at = Some(attempted_at);
             settings.retry_after = Some(retry_after);
             Ok(settings.clone())
+        }
+
+        async fn delete(&self) -> Result<(), OsvSyncStoreError> {
+            *self.settings.lock().unwrap() = None;
+            Ok(())
         }
     }
 

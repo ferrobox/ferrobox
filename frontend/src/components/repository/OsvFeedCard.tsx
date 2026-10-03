@@ -1,10 +1,17 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { Loader2, RefreshCw, Save } from "lucide-react";
+import { Loader2, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useOsvFeed, useOsvSync, useRunOsvSync, useSaveOsvSync } from "@/api/queries";
+import {
+  useOsvFeed,
+  useOsvSync,
+  useRemoveOsvFeed,
+  useRunOsvSync,
+  useSaveOsvSync,
+} from "@/api/queries";
+import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,6 +31,7 @@ export function OsvFeedCard() {
   const sync = useOsvSync(true);
   const save = useSaveOsvSync();
   const run = useRunOsvSync();
+  const remove = useRemoveOsvFeed();
   const [reference, setReference] = useState("");
   const [publicKey, setPublicKey] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -80,13 +88,25 @@ export function OsvFeedCard() {
     }
   }
 
-  const busy = save.isPending || run.isPending || syncing;
+  async function onRemove() {
+    try {
+      await remove.mutateAsync();
+      toast.success(t("feed.removed"));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t("feed.removeFailed"));
+      throw err;
+    }
+  }
+
+  const busy = save.isPending || run.isPending || syncing || remove.isPending;
   const rejected = sync.data?.last_outcome === "rejected";
+  const canRemove = Boolean(feed.data || sync.data);
 
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
         <CardTitle className="text-sm">{t("feed.title")}</CardTitle>
+        <p className="text-xs text-muted-foreground">{t("feed.instance")}</p>
       </CardHeader>
       <CardContent className="space-y-4 px-4 text-sm">
         {feed.isPending ? (
@@ -167,6 +187,21 @@ export function OsvFeedCard() {
                 {syncing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 {syncing ? t("feed.syncing") : t("feed.syncNow")}
               </Button>
+              {canRemove ? (
+                <ConfirmDeleteDialog
+                  title={t("feed.removeTitle")}
+                  description={t("feed.removeDescription")}
+                  confirmLabel={t("feed.remove")}
+                  pending={remove.isPending}
+                  onConfirm={onRemove}
+                  trigger={
+                    <Button type="button" size="sm" variant="ghost" disabled={busy}>
+                      {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                      {remove.isPending ? t("feed.removing") : t("feed.remove")}
+                    </Button>
+                  }
+                />
+              ) : null}
             </div>
           </form>
         )}

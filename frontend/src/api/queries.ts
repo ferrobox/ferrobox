@@ -645,6 +645,20 @@ export function useRunOsvSync() {
   });
 }
 
+export function useRemoveOsvFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteOsvFeed,
+    onSuccess: () => {
+      queryClient.setQueryData(queryKeys.osvFeed, null);
+      queryClient.setQueryData(queryKeys.osvSync, null);
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey.includes("assays"),
+      });
+    },
+  });
+}
+
 export function useAssays() {
   return useQuery({
     queryKey: queryKeys.assays,

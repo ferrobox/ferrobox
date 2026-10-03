@@ -619,7 +619,8 @@
     "loadFailed": "No se pudo cargar el índice de vulnerabilidades",
     "reference": "Referencia",
     "placeholder": "ghcr.io/ferrobox/osv-db:2026-10-03",
-    "hint": "Una firma rechazada no sustituye el índice activo.",
+    "instance": "Un índice para toda la instancia. Borrar un repositorio no lo quita.",
+    "hint": "Una firma rechazada no sustituye el índice activo. Sincronizar ahora comprueba la referencia guardada.",
     "publicKey": "Clave pública de Cosign",
     "save": "Guardar",
     "saving": "Guardando…",
@@ -631,7 +632,13 @@
     "syncUnchanged": "El índice ya está al día",
     "syncRejected": "La descarga se rechazó y se conservó el índice activo",
     "syncFailed": "No se pudo sincronizar el índice de vulnerabilidades",
-    "lastResult": "Último resultado"
+    "lastResult": "Último resultado",
+    "remove": "Quitar",
+    "removing": "Quitando…",
+    "removed": "Índice de vulnerabilidades quitado",
+    "removeFailed": "No se pudo quitar el índice de vulnerabilidades",
+    "removeTitle": "¿Quitar el índice de vulnerabilidades?",
+    "removeDescription": "Esto borra el índice y los ajustes de sincronización de toda la instancia. Los assays se vuelven a ejecutar sin este índice. Borrar un repositorio no hace esto."
   },
   "severity": {
     "critical": "Crítica",

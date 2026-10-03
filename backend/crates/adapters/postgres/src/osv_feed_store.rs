@@ -122,4 +122,43 @@ impl OsvFeedStore for PostgresOsvFeedStore {
         .map_err(|err| map_sqlx(&err))?;
         Ok(())
     }
+
+    async fn delete(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError> {
+        let row = sqlx::query(
+            r"
+            DELETE FROM osv_feed
+            WHERE singleton = TRUE
+            RETURNING dataset, sha256, advisory_count, ecosystems, storage_key, imported_at, source
+            ",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| map_sqlx(&err))?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let dataset: String =
+            sqlx::Row::try_get(&row, "dataset").map_err(|err| backend_error(err.to_string()))?;
+        let sha256: String =
+            sqlx::Row::try_get(&row, "sha256").map_err(|err| backend_error(err.to_string()))?;
+        let advisory_count: i64 = sqlx::Row::try_get(&row, "advisory_count")
+            .map_err(|err| backend_error(err.to_string()))?;
+        let ecosystems: String =
+            sqlx::Row::try_get(&row, "ecosystems").map_err(|err| backend_error(err.to_string()))?;
+        let storage_key: String = sqlx::Row::try_get(&row, "storage_key")
+            .map_err(|err| backend_error(err.to_string()))?;
+        let imported_at: DateTime<Utc> = sqlx::Row::try_get(&row, "imported_at")
+            .map_err(|err| backend_error(err.to_string()))?;
+        let source: String =
+            sqlx::Row::try_get(&row, "source").map_err(|err| backend_error(err.to_string()))?;
+        Ok(Some(OsvFeedRecord {
+            dataset,
+            sha256,
+            advisory_count: u64::try_from(advisory_count).unwrap_or(0),
+            ecosystems: ecosystems_from_column(&ecosystems),
+            storage_key,
+            imported_at,
+            source,
+        }))
+    }
 }

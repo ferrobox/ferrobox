@@ -58,4 +58,14 @@ pub trait OsvFeedStore: Send + Sync {
     ///
     /// Returns [`OsvFeedStoreError`] if the database cannot be written.
     async fn save(&self, record: &OsvFeedRecord) -> Result<(), OsvFeedStoreError>;
+
+    /// Deletes the installed index metadata.
+    ///
+    /// Returns the removed record so the caller can drop its bytes.
+    /// `Ok(None)` means nothing was installed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OsvFeedStoreError`] if the database cannot be written.
+    async fn delete(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError>;
 }

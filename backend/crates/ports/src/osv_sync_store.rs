@@ -75,4 +75,11 @@ pub trait OsvSyncStore: Send + Sync {
         attempted_at: DateTime<Utc>,
         retry_after: DateTime<Utc>,
     ) -> Result<OsvSyncSettings, OsvSyncStoreError>;
+
+    /// Deletes the saved pull. Does nothing when no row exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OsvSyncStoreError`] if the database cannot be written.
+    async fn delete(&self) -> Result<(), OsvSyncStoreError>;
 }
