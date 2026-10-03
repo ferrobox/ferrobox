@@ -616,7 +616,22 @@
     "mode": "Modo",
     "empty": "No se ha importado ningún índice de vulnerabilidades.",
     "loading": "Cargando el índice de vulnerabilidades…",
-    "loadFailed": "No se pudo cargar el índice de vulnerabilidades"
+    "loadFailed": "No se pudo cargar el índice de vulnerabilidades",
+    "reference": "Referencia",
+    "placeholder": "ghcr.io/ferrobox/osv-db:2026-10-03",
+    "hint": "Una firma rechazada no sustituye el índice activo.",
+    "publicKey": "Clave pública de Cosign",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "syncNow": "Sincronizar ahora",
+    "syncing": "Sincronizando…",
+    "saved": "Ajustes de sincronización guardados",
+    "saveFailed": "No se pudieron guardar los ajustes de sincronización",
+    "syncImported": "Dataset {{dataset}} importado",
+    "syncUnchanged": "El índice ya está al día",
+    "syncRejected": "La descarga se rechazó y se conservó el índice activo",
+    "syncFailed": "No se pudo sincronizar el índice de vulnerabilidades",
+    "lastResult": "Último resultado"
   },
   "severity": {
     "critical": "Crítica",

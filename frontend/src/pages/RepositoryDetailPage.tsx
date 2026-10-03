@@ -327,6 +327,7 @@ function RefreshPackagesButton({ repositoryId }: { repositoryId: string }) {
         void artifacts.refetch();
         void assays.refetch();
         void queryClient.invalidateQueries({ queryKey: queryKeys.osvFeed });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.osvSync });
       }}
     >
       <RefreshCw className={fetching ? "animate-spin" : ""} />

@@ -28,7 +28,7 @@ chrono.workspace = true
 flate2.workspace = true
 tar.workspace = true
 zip.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 jsonwebtoken.workspace = true
 
 [features]

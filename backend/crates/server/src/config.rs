@@ -71,7 +71,8 @@ pub struct Config {
     /// When set, assays consult this index instead of `api.osv.dev`.
     pub osv_feed_path: Option<PathBuf>,
     /// OCI reference of a Cosign-signed index, for example
-    /// `ghcr.io/ferrobox/osv-db:2026-10-03`. Unset disables the pull.
+    /// `ghcr.io/ferrobox/osv-db:2026-10-03`. Seeds the settings row on
+    /// first boot when that row is empty. A row saved from the card wins.
     pub osv_sync_ref: Option<String>,
     /// Path of the PEM public key used to verify [`Self::osv_sync_ref`].
     pub osv_sync_key: Option<PathBuf>,
@@ -79,7 +80,7 @@ pub struct Config {
     pub osv_sync_pubkey_b64: Option<String>,
     /// Optional bearer token for a private registry.
     pub osv_sync_token: Option<String>,
-    /// Delay between signed pulls. The first pull runs at startup.
+    /// Delay after a successful or rejected pull before the next one.
     pub osv_sync_interval: Duration,
 }
 

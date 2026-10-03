@@ -35,6 +35,9 @@ pub mod assay_store;
 /// Persistence port for the active vulnerability index.
 pub mod osv_feed_store;
 
+/// Persistence port for the signed vulnerability-index pull.
+pub mod osv_sync_store;
+
 /// Persistence port for the retention policy.
 pub mod retention_store;
 
