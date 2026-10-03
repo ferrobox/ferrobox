@@ -111,6 +111,10 @@ pub enum FeedImportError {
     /// The metadata row could not be saved or read.
     #[error(transparent)]
     Persistence(#[from] OsvFeedStoreError),
+
+    /// The sync settings could not be removed.
+    #[error(transparent)]
+    SyncPersistence(#[from] OsvSyncStoreError),
 }
 
 fn sync_error_retries_soon(err: &SyncError) -> bool {
@@ -388,6 +392,43 @@ impl AssayService {
             .await?)
     }
 
+    /// Removes the instance index and the saved sync settings.
+    ///
+    /// Deleting a repository does not call this. The scheduler cannot
+    /// pull the index back, and stored assays are marked running so they
+    /// are evaluated again without this index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FeedImportError`] if the rows cannot be deleted.
+    pub async fn remove_feed(&self) -> Result<(), FeedImportError> {
+        let _guard = self.sync_gate.lock().await;
+        if let Some(store) = &self.sync_store {
+            match store.delete().await {
+                Ok(()) | Err(OsvSyncStoreError::MissingSchema) => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        let removed = if let Some(store) = &self.feed_store {
+            match store.delete().await {
+                Ok(record) => record,
+                Err(OsvFeedStoreError::MissingSchema) => None,
+                Err(err) => return Err(err.into()),
+            }
+        } else {
+            None
+        };
+        if let Some(record) = removed {
+            let _ = self
+                .storage
+                .delete(&StorageKey::new(record.storage_key))
+                .await;
+        }
+        self.clear_installed_feed();
+        let _ = self.rerun_all().await;
+        Ok(())
+    }
+
     async fn import_feed_with_source(
         &self,
         bytes: Bytes,
@@ -470,6 +511,14 @@ impl AssayService {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *slot = Some(feed);
+    }
+
+    fn clear_installed_feed(&self) {
+        let mut slot = self
+            .feed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = None;
     }
 
     fn current_feed(&self) -> Option<Arc<OsvFeed>> {
@@ -1181,6 +1230,10 @@ mod tests {
         async fn save(&self, record: &OsvFeedRecord) -> Result<(), OsvFeedStoreError> {
             *self.record.lock().unwrap() = Some(record.clone());
             Ok(())
+        }
+
+        async fn delete(&self) -> Result<Option<OsvFeedRecord>, OsvFeedStoreError> {
+            Ok(self.record.lock().unwrap().take())
         }
     }
 

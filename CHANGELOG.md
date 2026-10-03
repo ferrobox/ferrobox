@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `last_affected` stays an inclusive upper bound.
 - The Packages card can save the OCI reference and the Cosign public key
   and sync now. A rejected signature does not replace the active index.
+- Removing the vulnerability feed deletes that instance-wide index and
+  the saved sync settings, then re-runs stored assays. Deleting a
+  repository does not remove the feed.
   Settings saved from the card win over `OSV_SYNC_REF` after the first
   save. Those variables still seed the row on first boot when the table
   is empty.

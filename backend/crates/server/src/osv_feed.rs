@@ -6,6 +6,7 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use chrono::SecondsFormat;
 use ferrobox_application::assay::FeedImportError;
 use ferrobox_ports::osv_feed_store::OsvFeedRecord;
@@ -77,6 +78,15 @@ pub(crate) async fn import_feed(
     Ok(Json(record.into()))
 }
 
+pub(crate) async fn delete_feed(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+) -> Result<StatusCode, ApiError> {
+    require_manage_users(&user, &token)?;
+    state.assays.remove_feed().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 fn sha256_header(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-ferrobox-sha256")
@@ -94,7 +104,8 @@ impl From<FeedImportError> for ApiError {
             }
             FeedImportError::NotConfigured
             | FeedImportError::Storage(_)
-            | FeedImportError::Persistence(_) => Self::Internal(err.to_string()),
+            | FeedImportError::Persistence(_)
+            | FeedImportError::SyncPersistence(_) => Self::Internal(err.to_string()),
         }
     }
 }

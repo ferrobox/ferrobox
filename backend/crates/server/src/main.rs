@@ -292,6 +292,7 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             "/security/osv-feed",
             get(osv_feed::get_feed)
                 .post(osv_feed::import_feed)
+                .delete(osv_feed::delete_feed)
                 .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
         .route(

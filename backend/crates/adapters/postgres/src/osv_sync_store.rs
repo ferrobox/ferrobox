@@ -136,4 +136,12 @@ impl OsvSyncStore for PostgresOsvSyncStore {
         };
         row_to_settings(&row)
     }
+
+    async fn delete(&self) -> Result<(), OsvSyncStoreError> {
+        sqlx::query("DELETE FROM osv_sync WHERE singleton = TRUE")
+            .execute(&self.pool)
+            .await
+            .map_err(|err| map_sqlx(&err))?;
+        Ok(())
+    }
 }

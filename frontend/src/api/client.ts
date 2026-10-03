@@ -595,6 +595,10 @@ export function getOsvFeed(): Promise<OsvFeedStatus> {
   return request<OsvFeedStatus>("/security/osv-feed");
 }
 
+export function deleteOsvFeed(): Promise<void> {
+  return request<void>("/security/osv-feed", { method: "DELETE" });
+}
+
 export interface OsvSyncSettings {
   reference: string;
   public_key_pem: string;
