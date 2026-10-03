@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Loader2, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
@@ -23,6 +24,56 @@ function importedLabel(value: string): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+function FeedFacts() {
+  const { t } = useTranslation();
+  const feed = useOsvFeed(true);
+  if (feed.isPending) {
+    return <p className="text-muted-foreground">{t("feed.loading")}</p>;
+  }
+  if (feed.isError) {
+    return <p className="text-destructive">{t("feed.loadFailed")}</p>;
+  }
+  if (!feed.data) {
+    return <p className="text-muted-foreground">{t("feed.empty")}</p>;
+  }
+  return (
+    <dl className="grid gap-2 sm:grid-cols-3">
+      <div>
+        <dt className="text-xs text-muted-foreground">{t("feed.dataset")}</dt>
+        <dd className="font-mono text-foreground">{feed.data.dataset}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-muted-foreground">{t("feed.imported")}</dt>
+        <dd className="text-foreground">{importedLabel(feed.data.imported_at)}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-muted-foreground">{t("feed.mode")}</dt>
+        <dd className="font-mono text-foreground">{feed.data.mode}</dd>
+      </div>
+    </dl>
+  );
+}
+
+export function OsvFeedSummary({ canManage }: { canManage: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <Card className="gap-3 py-4">
+      <CardHeader className="px-4">
+        <CardTitle className="text-sm">{t("feed.title")}</CardTitle>
+        <p className="text-xs text-muted-foreground">{t("feed.instance")}</p>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4 text-sm">
+        <FeedFacts />
+        {canManage ? (
+          <Button asChild variant="outline" size="sm">
+            <Link to="/feed">{t("feed.manage")}</Link>
+          </Button>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function OsvFeedCard() {
@@ -104,33 +155,8 @@ export function OsvFeedCard() {
 
   return (
     <Card className="gap-3 py-4">
-      <CardHeader className="px-4">
-        <CardTitle className="text-sm">{t("feed.title")}</CardTitle>
-        <p className="text-xs text-muted-foreground">{t("feed.instance")}</p>
-      </CardHeader>
       <CardContent className="space-y-4 px-4 text-sm">
-        {feed.isPending ? (
-          <p className="text-muted-foreground">{t("feed.loading")}</p>
-        ) : feed.isError ? (
-          <p className="text-destructive">{t("feed.loadFailed")}</p>
-        ) : feed.data ? (
-          <dl className="grid gap-2 sm:grid-cols-3">
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("feed.dataset")}</dt>
-              <dd className="font-mono text-foreground">{feed.data.dataset}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("feed.imported")}</dt>
-              <dd className="text-foreground">{importedLabel(feed.data.imported_at)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t("feed.mode")}</dt>
-              <dd className="font-mono text-foreground">{feed.data.mode}</dd>
-            </div>
-          </dl>
-        ) : (
-          <p className="text-muted-foreground">{t("feed.empty")}</p>
-        )}
+        <FeedFacts />
 
         {sync.isPending ? null : sync.isError ? (
           <p className="text-destructive">{t("feed.loadFailed")}</p>

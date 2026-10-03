@@ -22,6 +22,7 @@ import { UsersPage } from "@/pages/UsersPage";
 import { GroupsPage } from "@/pages/GroupsPage";
 import { GroupDetailPage } from "@/pages/GroupDetailPage";
 import { AuditPage } from "@/pages/AuditPage";
+import { VulnerabilityFeedPage } from "@/pages/VulnerabilityFeedPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,6 +53,7 @@ export default function App() {
                       <Route path="search" element={<SearchPage />} />
                       <Route path="assays" element={<AssaysPage />} />
                       <Route path="security" element={<SecurityPage />} />
+                      <Route path="feed" element={<VulnerabilityFeedPage />} />
                       <Route path="users" element={<UsersPage />} />
                       <Route path="groups" element={<GroupsPage />} />
                       <Route path="groups/:groupId" element={<GroupDetailPage />} />

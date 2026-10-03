@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+**Web console**
+
+- The vulnerability feed is configured on its own admin page. A
+  repository's Packages tab shows the dataset, import date, and mode.
+  Deleting a repository still does not remove the index.
+
 ## [0.2.0] - 2026-10-03
 
 ### Added
