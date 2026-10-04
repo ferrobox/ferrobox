@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-04
+
 ### Added
 
 **Security**
@@ -18,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the read or write scope. Existing tokens stay unrestricted. A
   repository-scoped token cannot administer the instance (users,
   groups, the vulnerability feed, or new tokens).
+
+**Web console**
+
+- The Security page lists the repositories a new token may use. Leave
+  them unchecked for every repository the account can already access.
 
 ## [0.2.1] - 2026-10-03
 
@@ -187,7 +194,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ferrobox/ferrobox/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ferrobox/ferrobox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ferrobox/ferrobox/compare/v0.1.0...v0.1.1
