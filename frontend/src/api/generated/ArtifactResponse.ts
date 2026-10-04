@@ -31,6 +31,10 @@ signed: boolean,
  */
 verified: boolean, 
 /**
+ * `false` when the version is indexed and the binary is not cached yet.
+ */
+cached: boolean, 
+/**
  * Repository that stores the binary. In an `Alloy` this is the
  * member the package came from.
  */

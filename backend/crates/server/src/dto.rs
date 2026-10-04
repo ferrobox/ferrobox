@@ -276,6 +276,8 @@ pub(crate) struct ArtifactResponse {
     /// `true` if some Cosign signature verifies against the repository
     /// keys.
     pub(crate) verified: bool,
+    /// `false` when the version is indexed and the binary is not cached yet.
+    pub(crate) cached: bool,
     /// Repository that stores the binary. In an `Alloy` this is the
     /// member the package came from.
     pub(crate) repository_id: String,
@@ -293,6 +295,7 @@ impl From<ferrobox_application::list_repository_artifacts::ListedArtifact> for A
             yanked: listed.yanked(),
             signed: listed.signed(),
             verified: listed.verified(),
+            cached: listed.cached(),
             repository_id: listed.artifact().repository_id().to_string(),
         }
     }
