@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ferrobox_domain::artifact::Artifact;
+use ferrobox_domain::checksum::Sha256Checksum;
 use ferrobox_domain::ids::{ArtifactId, RepositoryId};
-use ferrobox_domain::package_coordinate::PackageEcosystem;
+use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem};
 use ferrobox_domain::repository::RepositoryKind;
 use ferrobox_ports::admission_store::AdmissionStore;
 use ferrobox_ports::artifact_store::{ArtifactStore, ArtifactStoreError};
@@ -29,6 +30,8 @@ pub struct ListedArtifact {
     filename: Option<String>,
     signed: bool,
     verified: bool,
+    /// `false` when the version is in the index and the binary is not cached yet.
+    cached: bool,
 }
 
 impl ListedArtifact {
@@ -73,6 +76,12 @@ impl ListedArtifact {
     #[must_use]
     pub fn verified(&self) -> bool {
         self.verified
+    }
+
+    /// `false` when this row is an indexed version whose binary is not cached.
+    #[must_use]
+    pub fn cached(&self) -> bool {
+        self.cached
     }
 }
 
@@ -226,7 +235,7 @@ impl ListRepositoryArtifactsUseCase {
             )
             .await;
 
-        Ok(artifacts
+        let mut listed: Vec<ListedArtifact> = artifacts
             .into_iter()
             .filter_map(|artifact| {
                 let meta = names_by_artifact.remove(&artifact.id());
@@ -251,9 +260,42 @@ impl ListRepositoryArtifactsUseCase {
                     yanked: meta.as_ref().is_some_and(|item| item.yanked),
                     signed,
                     verified,
+                    cached: true,
                 })
             })
-            .collect())
+            .collect();
+
+        let mut seen = HashSet::new();
+        for item in &listed {
+            if let (Some(name), Some(version)) = (item.package_name(), item.package_version()) {
+                seen.insert((name.to_string(), version.to_string()));
+            }
+        }
+        for record in self.package_index_store.list_entries(repository_id).await? {
+            if record.artifact_id.is_some() {
+                continue;
+            }
+            let name = record.coordinate.name().as_str().to_string();
+            let version = record.coordinate.version().as_str().to_string();
+            if !seen.insert((name.clone(), version.clone())) {
+                continue;
+            }
+            let meta = serde_json::from_slice::<IndexEntryMeta>(&record.entry).unwrap_or_default();
+            if cosign::should_hide_from_listing(&name, &version, meta.accessory.as_deref()) {
+                continue;
+            }
+            listed.push(ListedArtifact {
+                artifact: uncached_placeholder(repository_id, &record.coordinate),
+                package_name: Some(name),
+                package_version: Some(version),
+                yanked: meta.yanked,
+                filename: None,
+                signed: false,
+                verified: false,
+                cached: false,
+            });
+        }
+        Ok(listed)
     }
 
     async fn verified_subjects(
@@ -472,6 +514,28 @@ fn hides_unindexed_artifacts(ecosystem: PackageEcosystem) -> bool {
     )
 }
 
+/// Stable stand-in for a version that is indexed and not downloaded yet.
+///
+/// The identifier is derived from the coordinate so a refresh does not
+/// invent a new row. It is not a stored artifact.
+fn uncached_placeholder(repository_id: RepositoryId, coordinate: &PackageCoordinate) -> Artifact {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(
+        format!(
+            "ferrobox-uncached:{repository_id}:{}@{}",
+            coordinate.name(),
+            coordinate.version()
+        )
+        .as_bytes(),
+    );
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    let id = ArtifactId::from(Uuid::from_bytes(bytes));
+    let checksum =
+        Sha256Checksum::parse("0".repeat(64)).expect("64 hex zeros are a valid checksum");
+    Artifact::from_parts(id, repository_id, checksum, 0)
+}
+
 fn sort_listed(listed: &mut [ListedArtifact]) {
     listed.sort_by(
         |left, right| match (left.package_name(), right.package_name()) {
@@ -569,6 +633,41 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].artifact(), &matching);
         assert_eq!(result[0].package_name(), None);
+        assert!(result[0].cached());
+    }
+
+    #[tokio::test]
+    async fn lists_an_indexed_version_that_has_no_cached_binary() {
+        let package_index_store = Arc::new(InMemoryPackageIndexStore::default());
+        let repository_id = RepositoryId::new();
+        package_index_store
+            .upsert_entry(
+                repository_id,
+                &PackageCoordinate::new(
+                    PackageEcosystem::Npm,
+                    PackageName::parse("lodash").unwrap(),
+                    PackageVersion::parse("4.17.21").unwrap(),
+                ),
+                None,
+                Bytes::from(r#"{"name":"lodash","version":"4.17.21","yanked":false}"#),
+            )
+            .await
+            .unwrap();
+
+        let result = use_case(
+            Arc::new(InMemoryRepositoryStore::default()),
+            Arc::new(InMemoryArtifactStore::default()),
+            package_index_store,
+        )
+        .execute(repository_id)
+        .await
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].cached());
+        assert_eq!(result[0].package_name(), Some("lodash"));
+        assert_eq!(result[0].package_version(), Some("4.17.21"));
+        assert_eq!(result[0].artifact().size_bytes(), 0);
     }
 
     #[tokio::test]

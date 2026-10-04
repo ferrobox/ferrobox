@@ -415,6 +415,7 @@
     "deleted": "Artefacto eliminado",
     "deleteFailed": "No se pudo eliminar el artefacto",
     "downloadFailed": "No se pudo descargar el artefacto",
+    "notDownloaded": "Sin descargar",
     "yankFailed": "No se pudo actualizar el yank",
     "loadFailed": "No se pudieron cargar los artefactos",
     "empty": "Este repositorio está vacío",

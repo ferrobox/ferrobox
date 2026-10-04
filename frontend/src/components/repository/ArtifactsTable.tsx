@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import {
   AlertCircle,
@@ -17,11 +18,18 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { ApiError, downloadArtifact } from "@/api/client";
+import { ApiError, downloadArtifact, listRepositoryArtifacts } from "@/api/client";
 import type { ArtifactResponse } from "@/api/generated/ArtifactResponse";
 import type { AssayResponse } from "@/api/generated/AssayResponse";
 import type { PackageEcosystemDto } from "@/api/generated/PackageEcosystemDto";
-import { useDeleteArtifact, useRepositoryArtifacts, useRepositoryAssays, useSetYanked } from "@/api/queries";
+import {
+  queryKeys,
+  useDeleteArtifact,
+  usePrefetchPackage,
+  useRepositoryArtifacts,
+  useRepositoryAssays,
+  useSetYanked,
+} from "@/api/queries";
 import { AssayDialog } from "@/components/assay/AssayDialog";
 import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog";
 import { PromotePackageDialog } from "@/components/repository/PromotePackageDialog";
@@ -179,6 +187,8 @@ export function ArtifactsTable({
   const { data: assays } = useRepositoryAssays(repositoryId);
   const deleteArtifact = useDeleteArtifact(repositoryId);
   const setYanked = useSetYanked(repositoryId);
+  const prefetch = usePrefetchPackage(repositoryId);
+  const queryClient = useQueryClient();
   const canYank =
     canWrite &&
     kind === "forge" &&
@@ -255,14 +265,38 @@ export function ArtifactsTable({
     });
   }
 
-  function onDownload(artifact: ArtifactResponse) {
-    void downloadArtifact(artifact.id, downloadName(artifact, ecosystem)).catch(
-      (err: unknown) => {
-        toast.error(
-          err instanceof ApiError ? err.message : t("artifacts.downloadFailed"),
+  async function onDownload(artifact: ArtifactResponse) {
+    try {
+      let target = artifact;
+      if (!artifact.cached) {
+        if (!artifact.name || !artifact.version) {
+          throw new ApiError(400, t("artifacts.downloadFailed"));
+        }
+        await prefetch.mutateAsync({
+          name: artifact.name,
+          version: artifact.version,
+        });
+        const fresh = await queryClient.fetchQuery({
+          queryKey: queryKeys.repositoryArtifacts(repositoryId),
+          queryFn: () => listRepositoryArtifacts(repositoryId),
+        });
+        const cached = fresh.find(
+          (item) =>
+            item.cached &&
+            item.name === artifact.name &&
+            item.version === artifact.version &&
+            item.repository_id === artifact.repository_id,
         );
-      },
-    );
+        if (!cached) {
+          toast.error(t("artifacts.downloadFailed"));
+          return;
+        }
+        target = cached;
+      }
+      await downloadArtifact(target.id, downloadName(target, ecosystem));
+    } catch (err: unknown) {
+      toast.error(err instanceof ApiError ? err.message : t("artifacts.downloadFailed"));
+    }
   }
 
   if (isPending) {
@@ -566,12 +600,14 @@ function VersionRows({
               </Badge>
             ) : null}
             <span className="text-xs text-muted-foreground">
-              {nested
-                ? t("artifacts.files", {
-                    count: bucket.artifacts.length,
-                    size: formatBytes(totalBytes),
-                  })
-                : formatBytes(representative.size_bytes)}
+              {representative.cached
+                ? nested
+                  ? t("artifacts.files", {
+                      count: bucket.artifacts.length,
+                      size: formatBytes(totalBytes),
+                    })
+                  : formatBytes(representative.size_bytes)
+                : t("artifacts.notDownloaded")}
             </span>
             {memberName ? (
               <NavLink
@@ -582,7 +618,7 @@ function VersionRows({
               </NavLink>
             ) : null}
           </span>
-          {nested ? null : (
+          {nested || !representative.cached ? null : (
             <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
               sha256:{truncateMiddle(representative.checksum, 6)}
             </span>
@@ -643,7 +679,7 @@ function VersionRows({
               {yanked ? t("artifacts.unyank") : t("artifacts.yank")}
             </Button>
           ) : null}
-          {nested || !canWrite || kind === "alloy" ? null : (
+          {nested || !canWrite || kind === "alloy" || !representative.cached ? null : (
             <ConfirmDeleteDialog
               title={t("artifacts.deleteTitle", {
                 name: downloadName(representative, ecosystem),
@@ -672,8 +708,9 @@ function VersionRows({
                   {fileLabel(artifact, ecosystem)}
                 </span>
                 <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                  {formatBytes(artifact.size_bytes)} · sha256:
-                  {truncateMiddle(artifact.checksum, 6)}
+                  {artifact.cached
+                    ? `${formatBytes(artifact.size_bytes)} · sha256:${truncateMiddle(artifact.checksum, 6)}`
+                    : t("artifacts.notDownloaded")}
                 </span>
               </span>
               <div className="flex shrink-0 gap-1">
@@ -681,7 +718,7 @@ function VersionRows({
                   <Download />
                   {t("artifacts.download")}
                 </Button>
-                {canWrite && kind !== "alloy" ? (
+                {canWrite && kind !== "alloy" && artifact.cached ? (
                   <ConfirmDeleteDialog
                     title={t("artifacts.deleteTitle", {
                       name: downloadName(artifact, ecosystem),

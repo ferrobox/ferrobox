@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OCI and Helm mirrors send that credential on the registry token
   exchange. Removing the repository deletes the secret with it.
 
+**Web console**
+
+- Prefetch without a version lists every indexed version on the Packages
+  tab before the file is downloaded. Download caches that version and
+  then saves the file.
+
 ## [0.2.2] - 2026-10-04
 
 ### Added
