@@ -29,7 +29,10 @@ pub(crate) async fn list_all(
     Ok(Json(
         assays
             .iter()
-            .filter(|assay| visibility.contains(assay.repository_id()))
+            .filter(|assay| {
+                visibility.contains(assay.repository_id())
+                    && token.repositories().allows(assay.repository_id())
+            })
             .map(AssayResponse::from)
             .collect(),
     ))

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { ApiError } from "@/api/client";
-import { useApiTokens, useCreateApiToken, useRevokeApiToken } from "@/api/queries";
+import { useApiTokens, useCreateApiToken, useRepositories, useRevokeApiToken } from "@/api/queries";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -31,12 +31,14 @@ import {
 export function SecurityPage() {
   const { t } = useTranslation();
   const { data, isPending, isError, error, refetch, isFetching } = useApiTokens();
+  const repositories = useRepositories();
   const createToken = useCreateApiToken();
   const revokeToken = useRevokeApiToken();
   const [name, setName] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [scopeRead, setScopeRead] = useState(false);
   const [scopeWrite, setScopeWrite] = useState(false);
+  const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
 
   function selectedScopes(): string[] | undefined {
@@ -57,12 +59,14 @@ export function SecurityPage() {
         name: name.trim(),
         expires_at: expiresAt.trim() ? new Date(expiresAt).toISOString() : undefined,
         scopes: selectedScopes(),
+        repository_ids: repositoryIds.length === 0 ? undefined : repositoryIds,
       });
       setCreatedSecret(result.token);
       setName("");
       setExpiresAt("");
       setScopeRead(false);
       setScopeWrite(false);
+      setRepositoryIds([]);
       toast.success(t("security.created"));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t("security.createFailed"));
@@ -82,28 +86,31 @@ export function SecurityPage() {
     <div>
       <PageHeader title={t("security.title")} description={t("security.description")} />
 
-      <form
-        onSubmit={(event) => void onCreate(event)}
-        className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end"
-      >
-        <div className="w-full space-y-2 sm:max-w-sm">
-          <Label htmlFor="token-name">{t("security.tokenName")}</Label>
-          <Input
-            id="token-name"
-            placeholder="cargo-publish"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-          />
-        </div>
-        <div className="w-full space-y-2 sm:max-w-xs">
-          <Label htmlFor="token-expires">{t("security.expiresAt")}</Label>
-          <Input
-            id="token-expires"
-            type="datetime-local"
-            value={expiresAt}
-            onChange={(event) => setExpiresAt(event.target.value)}
-          />
+      <form onSubmit={(event) => void onCreate(event)} className="mb-8 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="w-full space-y-2 sm:max-w-sm">
+            <Label htmlFor="token-name">{t("security.tokenName")}</Label>
+            <Input
+              id="token-name"
+              placeholder="cargo-publish"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
+          </div>
+          <div className="w-full space-y-2 sm:max-w-xs">
+            <Label htmlFor="token-expires">{t("security.expiresAt")}</Label>
+            <Input
+              id="token-expires"
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
+            />
+          </div>
+          <Button type="submit" disabled={createToken.isPending || name.trim().length === 0}>
+            <KeyRound />
+            {createToken.isPending ? t("security.creating") : t("security.createToken")}
+          </Button>
         </div>
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">{t("security.scopes")}</legend>
@@ -125,10 +132,33 @@ export function SecurityPage() {
           </label>
           <p className="text-xs text-muted-foreground">{t("security.scopeHint")}</p>
         </fieldset>
-        <Button type="submit" disabled={createToken.isPending || name.trim().length === 0}>
-          <KeyRound />
-          {createToken.isPending ? t("security.creating") : t("security.createToken")}
-        </Button>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">{t("security.repositories")}</legend>
+          {repositories.data && repositories.data.length > 0 ? (
+            <div className="max-h-48 space-y-2 overflow-y-auto rounded-md border border-border p-3">
+              {repositories.data.map((repository) => (
+                <label key={repository.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={repositoryIds.includes(repository.id)}
+                    onChange={(event) => {
+                      setRepositoryIds((current) =>
+                        event.target.checked
+                          ? [...current, repository.id]
+                          : current.filter((id) => id !== repository.id),
+                      );
+                    }}
+                  />
+                  <span className="font-medium">{repository.name}</span>
+                  <span className="text-muted-foreground">{repository.ecosystem}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("security.repositoryEmpty")}</p>
+          )}
+          <p className="text-xs text-muted-foreground">{t("security.repositoryHint")}</p>
+        </fieldset>
       </form>
 
       {isPending ? (
@@ -170,6 +200,7 @@ export function SecurityPage() {
                 <TableHead>{t("security.createdAt")}</TableHead>
                 <TableHead>{t("security.expiresAt")}</TableHead>
                 <TableHead>{t("security.scopes")}</TableHead>
+                <TableHead>{t("security.repositories")}</TableHead>
                 <TableHead className="text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -188,6 +219,9 @@ export function SecurityPage() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatScopes(token.scopes, t)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {formatRepositories(token.repository_ids, repositories.data, t)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -247,6 +281,19 @@ function formatCreatedAt(value: string): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+function formatRepositories(
+  ids: string[],
+  repositories: { id: string; name: string }[] | undefined,
+  t: (key: string) => string,
+): string {
+  if (ids.length === 0) {
+    return t("security.repositoryUnrestricted");
+  }
+  return ids
+    .map((id) => repositories?.find((repository) => repository.id === id)?.name ?? id)
+    .join(", ");
 }
 
 function formatScopes(scopes: string[], t: (key: string) => string): string {

@@ -11,4 +11,8 @@ expires_at?: string,
 /**
  * `read` and/or `write`. Empty or omitted = unrestricted.
  */
-scopes?: Array<string>, };
+scopes?: Array<string>, 
+/**
+ * Repository ids. Empty or omitted = every repository the user can access.
+ */
+repository_ids?: Array<string>, };

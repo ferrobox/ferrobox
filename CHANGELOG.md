@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Security**
+
+- An API token can be limited to specific repositories. An empty list
+  keeps the previous behavior: the token can use every repository the
+  user can already access, including ones created later. A listed set
+  is the intersection of that list, the user's role, their groups, and
+  the read or write scope. Existing tokens stay unrestricted. A
+  repository-scoped token cannot administer the instance (users,
+  groups, the vulnerability feed, or new tokens).
+
 ## [0.2.1] - 2026-10-03
 
 ### Changed

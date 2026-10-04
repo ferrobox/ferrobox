@@ -456,6 +456,10 @@ pub(crate) struct CreateApiTokenRequest {
     #[serde(default)]
     #[ts(optional)]
     pub(crate) scopes: Option<Vec<String>>,
+    /// Repository ids. Empty or omitted = every repository the user can access.
+    #[serde(default)]
+    #[ts(optional)]
+    pub(crate) repository_ids: Option<Vec<String>>,
 }
 
 /// Representation of an API token (without the secret) in listings.
@@ -470,6 +474,8 @@ pub(crate) struct ApiTokenResponse {
     pub(crate) expires_at: Option<String>,
     /// Stored scopes. Empty = unrestricted.
     pub(crate) scopes: Vec<String>,
+    /// Repository ids. Empty = every repository the user can access.
+    pub(crate) repository_ids: Vec<String>,
 }
 
 /// Response after creating an API token: includes the secret only once.
@@ -485,6 +491,8 @@ pub(crate) struct ApiTokenCreatedResponse {
     pub(crate) expires_at: Option<String>,
     /// Stored scopes. Empty = unrestricted.
     pub(crate) scopes: Vec<String>,
+    /// Repository ids. Empty = every repository the user can access.
+    pub(crate) repository_ids: Vec<String>,
 }
 
 /// Labels stored on a token for the API (`read`, `write`).
@@ -494,6 +502,16 @@ pub(crate) fn token_scope_labels(token: &ferrobox_domain::api_token::ApiToken) -
         .as_labels()
         .into_iter()
         .map(str::to_string)
+        .collect()
+}
+
+/// Repository ids stored on a token. Empty = unrestricted.
+pub(crate) fn token_repository_ids(token: &ferrobox_domain::api_token::ApiToken) -> Vec<String> {
+    token
+        .repositories()
+        .as_ids()
+        .iter()
+        .map(ToString::to_string)
         .collect()
 }
 

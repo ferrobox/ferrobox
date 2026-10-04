@@ -74,7 +74,7 @@ pub(crate) async fn list_repositories(
     let repositories = state.list_repositories.execute().await?;
     let mut responses = Vec::new();
     for repository in repositories {
-        if !visibility.contains(repository.id()) {
+        if !visibility.contains(repository.id()) || !token.repositories().allows(repository.id()) {
             continue;
         }
         responses.push(to_repository_response(&state, &user, &repository).await?);

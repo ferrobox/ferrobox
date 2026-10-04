@@ -58,8 +58,9 @@ bucket -- see `infra/.env.example` for the full list.
 - **Three repository kinds**: `Forge` (hosted storage), `Mirror` (pull-through
   cache of an upstream registry), and `Alloy` (a virtual repository that
   aggregates several `Forge`/`Mirror` repositories under one URL).
-- **RBAC**: users, groups, per-repository read/write access, and scoped API
-  tokens, including robot accounts with optional expiry.
+- **RBAC**: users, groups, per-repository read/write access, and API
+  tokens limited by read/write and, optionally, by repository. Robot
+  accounts can have an expiry.
 - **SSO**: OpenID Connect (Keycloak-compatible) with just-in-time provisioning
   and group mapping.
 - **Assays**: automatic SBOM extraction (CycloneDX) plus vulnerability and

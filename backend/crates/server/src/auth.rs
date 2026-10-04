@@ -5,18 +5,18 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use ferrobox_domain::api_token::{ApiTokenName, TokenScopes};
+use ferrobox_domain::api_token::{ApiTokenName, TokenRepositories, TokenScopes};
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
-use ferrobox_domain::ids::ApiTokenId;
+use ferrobox_domain::ids::{ApiTokenId, RepositoryId};
 use ferrobox_domain::user::Username;
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth_extract::AuthenticatedUser;
-use crate::authz::require_token_write;
+use crate::authz::{require_token_write, require_unrestricted_repositories};
 use crate::dto::{
     ApiTokenCreatedResponse, ApiTokenResponse, ChangePasswordRequest, CreateApiTokenRequest,
-    LoginRequest, LoginResponse, UserResponse, token_scope_labels,
+    LoginRequest, LoginResponse, UserResponse, token_repository_ids, token_scope_labels,
 };
 use crate::error::ApiError;
 
@@ -45,6 +45,7 @@ pub(crate) async fn change_password(
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
     require_token_write(&token)?;
+    require_unrestricted_repositories(&token)?;
     if payload.new_password.is_empty() {
         return Err(ApiError::BadRequest("password cannot be empty".to_string()));
     }
@@ -73,8 +74,9 @@ pub(crate) async fn change_password(
 
 pub(crate) async fn list_tokens(
     State(state): State<Arc<AppState>>,
-    AuthenticatedUser { user, .. }: AuthenticatedUser,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
 ) -> Result<Json<Vec<ApiTokenResponse>>, ApiError> {
+    require_unrestricted_repositories(&token)?;
     let tokens = state.list_api_tokens.execute(user.id()).await?;
 
     Ok(Json(
@@ -87,6 +89,7 @@ pub(crate) async fn list_tokens(
                 created_at: record.created_at_rfc3339,
                 expires_at: record.expires_at_rfc3339,
                 scopes: token_scope_labels(&record.token),
+                repository_ids: token_repository_ids(&record.token),
             })
             .collect(),
     ))
@@ -98,15 +101,17 @@ pub(crate) async fn create_token(
     Json(payload): Json<CreateApiTokenRequest>,
 ) -> Result<(StatusCode, Json<ApiTokenCreatedResponse>), ApiError> {
     require_token_write(&token)?;
+    require_unrestricted_repositories(&token)?;
     let name =
         ApiTokenName::parse(payload.name).map_err(|err| ApiError::BadRequest(err.to_string()))?;
     let scopes = TokenScopes::parse(payload.scopes.unwrap_or_default())
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let repositories = parse_repository_scope(&state, &user, payload.repository_ids).await?;
 
     let expires_at = parse_optional_expiry(payload.expires_at.as_deref())?;
     let result = state
         .create_api_token
-        .execute_with_scopes(user.id(), name, expires_at, scopes)
+        .execute_limited(user.id(), name, expires_at, scopes, repositories)
         .await?;
 
     crate::audit::record(
@@ -128,8 +133,47 @@ pub(crate) async fn create_token(
             token: result.plaintext_secret,
             expires_at: result.token.expires_at().map(|at| at.to_rfc3339()),
             scopes: token_scope_labels(&result.token),
+            repository_ids: token_repository_ids(&result.token),
         }),
     ))
+}
+
+const MAX_TOKEN_REPOSITORIES: usize = 100;
+
+async fn parse_repository_scope(
+    state: &AppState,
+    user: &ferrobox_domain::user::User,
+    raw: Option<Vec<String>>,
+) -> Result<TokenRepositories, ApiError> {
+    let Some(raw) = raw.filter(|ids| ids.iter().any(|id| !id.trim().is_empty())) else {
+        return Ok(TokenRepositories::unrestricted());
+    };
+    if raw.len() > MAX_TOKEN_REPOSITORIES {
+        return Err(ApiError::BadRequest(format!(
+            "a token can list at most {MAX_TOKEN_REPOSITORIES} repositories"
+        )));
+    }
+    let visibility = state.groups.visibility(user).await?;
+    let mut ids = Vec::new();
+    for raw_id in raw {
+        let raw_id = raw_id.trim();
+        if raw_id.is_empty() {
+            continue;
+        }
+        let id = Uuid::parse_str(raw_id)
+            .map(RepositoryId::from)
+            .map_err(|err| ApiError::BadRequest(format!("invalid repository id: {err}")))?;
+        state.get_repository.execute(id).await?;
+        if !visibility.contains(id) {
+            return Err(ApiError::Forbidden(
+                "you do not have access to this repository".to_string(),
+            ));
+        }
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(TokenRepositories::from_ids(ids))
 }
 
 pub(crate) fn parse_optional_expiry(
@@ -149,6 +193,7 @@ pub(crate) async fn revoke_token(
     Path(token_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_token_write(&token)?;
+    require_unrestricted_repositories(&token)?;
     state
         .revoke_api_token
         .execute(user.id(), ApiTokenId::from(token_id))

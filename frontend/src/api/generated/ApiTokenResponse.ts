@@ -11,4 +11,8 @@ expires_at: string | null,
 /**
  * Stored scopes. Empty = unrestricted.
  */
-scopes: Array<string>, };
+scopes: Array<string>, 
+/**
+ * Repository ids. Empty = every repository the user can access.
+ */
+repository_ids: Array<string>, };
