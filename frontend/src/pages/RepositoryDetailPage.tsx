@@ -22,6 +22,7 @@ import { ConfirmDeleteDialog } from "@/components/repository/ConfirmDeleteDialog
 import { EcosystemBadge, ecosystemMeta } from "@/components/repository/EcosystemBadge";
 import { EditAlloyMembersDialog } from "@/components/repository/EditAlloyMembersDialog";
 import { MirrorSchedulePanel } from "@/components/repository/MirrorSchedulePanel";
+import { MirrorUpstreamAuthPanel } from "@/components/repository/MirrorUpstreamAuthPanel";
 import { PrefetchPackageDialog } from "@/components/repository/PrefetchPackageDialog";
 import { RepositoryBundleButtons } from "@/components/repository/RepositoryBundleButtons";
 import { KIND_META, RepositoryKindBadge } from "@/components/repository/RepositoryKindBadge";
@@ -252,6 +253,9 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
               lastPrefetchAt={repository.last_prefetch_at}
               canWrite={canWrite}
             />
+          ) : null}
+          {repository.kind.type === "mirror" ? (
+            <MirrorUpstreamAuthPanel repositoryId={repositoryId} canWrite={canWrite} />
           ) : null}
           <OsvFeedSummary canManage={isAdmin} />
           <ArtifactsTable

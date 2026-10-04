@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Security**
+
+- A Mirror can store an upstream username and secret. FerroBox attaches it
+  only to outbound prefetch and pull-through requests (bearer when the
+  username is empty, HTTP Basic otherwise). The API reports whether a
+  secret is configured and the username, and never returns the secret.
+  OCI and Helm mirrors send that credential on the registry token
+  exchange. Removing the repository deletes the secret with it.
+
 ## [0.2.2] - 2026-10-04
 
 ### Added

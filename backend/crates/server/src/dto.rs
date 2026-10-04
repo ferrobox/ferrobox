@@ -184,6 +184,27 @@ pub(crate) struct SetMirrorScheduleRequest {
     pub(crate) prefetch_interval_hours: Option<u32>,
 }
 
+/// Whether a mirror has an upstream secret. The secret itself is never returned.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct MirrorUpstreamAuthResponse {
+    /// `true` when a secret is stored.
+    pub(crate) configured: bool,
+    /// Username, or empty when the secret is a bearer token.
+    pub(crate) username: String,
+}
+
+/// Body that replaces a mirror's upstream credential.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetMirrorUpstreamAuthRequest {
+    /// Empty means the secret is sent as `Authorization: Bearer`.
+    #[serde(default)]
+    pub(crate) username: String,
+    /// Required on every save. Never returned by a later read.
+    pub(crate) secret: String,
+}
+
 /// Request body to create a repository.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]

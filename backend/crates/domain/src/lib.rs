@@ -37,6 +37,9 @@ pub mod group;
 /// HTTP webhook for a repository.
 pub mod webhook;
 
+/// Username and secret a `Mirror` sends to its upstream.
+pub mod mirror_credential;
+
 /// The `ApiToken` entity and the `ApiTokenName` value object.
 pub mod api_token;
 

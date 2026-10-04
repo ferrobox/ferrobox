@@ -52,6 +52,7 @@ use ferrobox_adapter_postgres::artifact_store::PostgresArtifactStore;
 use ferrobox_adapter_postgres::assay_store::PostgresAssayStore;
 use ferrobox_adapter_postgres::audit_store::PostgresAuditStore;
 use ferrobox_adapter_postgres::group_store::PostgresGroupStore;
+use ferrobox_adapter_postgres::mirror_credential_store::PostgresMirrorCredentialStore;
 use ferrobox_adapter_postgres::osv_feed_store::PostgresOsvFeedStore;
 use ferrobox_adapter_postgres::osv_sync_store::PostgresOsvSyncStore;
 use ferrobox_adapter_postgres::package_index_store::PostgresPackageIndexStore;
@@ -148,6 +149,7 @@ struct AppState {
     webhooks: WebhookService,
     audit: AuditService,
     oidc: Option<ferrobox_application::oidc::OidcLoginService>,
+    mirror_credentials: ferrobox_application::mirror_credentials::MirrorCredentialService,
 }
 
 #[tokio::main]
@@ -195,6 +197,7 @@ async fn main() {
     let group_store = Arc::new(PostgresGroupStore::new(pool.clone()));
     let api_token_store = Arc::new(PostgresApiTokenStore::new(pool.clone()));
     let webhook_store = Arc::new(PostgresWebhookStore::new(pool.clone()));
+    let mirror_credential_store = Arc::new(PostgresMirrorCredentialStore::new(pool.clone()));
     let osv_feed_store = Arc::new(PostgresOsvFeedStore::new(pool.clone()));
     let osv_sync_store = Arc::new(PostgresOsvSyncStore::new(pool.clone()));
     let replica_store = Arc::new(PostgresReplicaStore::new(pool));
@@ -226,6 +229,7 @@ async fn main() {
         group_store,
         api_token_store,
         webhook_store,
+        mirror_credential_store,
         replica_store,
         osv_feed_store,
         osv_sync_store,
@@ -383,6 +387,12 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
         .route(
             "/repositories/{repository_id}/schedule",
             put(repositories::set_mirror_schedule),
+        )
+        .route(
+            "/repositories/{repository_id}/upstream-auth",
+            get(repositories::get_upstream_auth)
+                .put(repositories::set_upstream_auth)
+                .delete(repositories::clear_upstream_auth),
         )
         .route(
             "/artifacts/{artifact_id}",
@@ -554,6 +564,7 @@ fn build_app_state(
     group_store: Arc<PostgresGroupStore>,
     api_token_store: Arc<PostgresApiTokenStore>,
     webhook_store: Arc<PostgresWebhookStore>,
+    mirror_credential_store: Arc<PostgresMirrorCredentialStore>,
     replica_store: Arc<PostgresReplicaStore>,
     osv_feed_store: Arc<PostgresOsvFeedStore>,
     osv_sync_store: Arc<PostgresOsvSyncStore>,
@@ -608,6 +619,13 @@ fn build_app_state(
     )
     .with_assays(assay_store.clone())
     .with_vulnerability_feed(Arc::new(assays.clone()));
+    let mirror_credentials = ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+        repository_store.clone(),
+        mirror_credential_store.clone(),
+    );
+    let upstream_credentials: Arc<
+        dyn ferrobox_ports::mirror_credential_store::MirrorCredentialStore,
+    > = mirror_credential_store;
     let packaging = packaging_registry(
         &config.public_base_url,
         &repository_store,
@@ -618,6 +636,7 @@ fn build_app_state(
         &assays,
         quota.clone(),
         admission.clone(),
+        upstream_credentials,
     );
     spawn_mirror_prefetch_loop(
         repository_store.clone(),
@@ -718,6 +737,7 @@ fn build_app_state(
             group_store,
             api_token_store,
         ),
+        mirror_credentials,
     }
 }
 
@@ -858,6 +878,7 @@ fn packaging_registry(
     assays: &AssayService,
     quota: QuotaService,
     admission: AdmissionService,
+    upstream_credentials: Arc<dyn ferrobox_ports::mirror_credential_store::MirrorCredentialStore>,
 ) -> PackagingRegistry {
     PackagingRegistry::new()
         .register(Arc::new(
@@ -869,7 +890,8 @@ fn packaging_registry(
                 repository_store.clone(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             NpmPackagingStrategy::new(
@@ -881,7 +903,8 @@ fn packaging_registry(
                 public_base_url.to_string(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             PypiPackagingStrategy::new(
@@ -893,7 +916,8 @@ fn packaging_registry(
                 public_base_url.to_string(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             OciPackagingStrategy::new(
@@ -905,7 +929,8 @@ fn packaging_registry(
             )
             .with_assays(assays.clone())
             .with_quota(quota.clone())
-            .with_admission(admission.clone()),
+            .with_admission(admission.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             OciPackagingStrategy::for_ecosystem(
@@ -918,7 +943,8 @@ fn packaging_registry(
             )
             .with_assays(assays.clone())
             .with_quota(quota.clone())
-            .with_admission(admission),
+            .with_admission(admission)
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             ConanPackagingStrategy::new(
@@ -929,7 +955,8 @@ fn packaging_registry(
                 repository_store.clone(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             MavenPackagingStrategy::new(
@@ -940,7 +967,8 @@ fn packaging_registry(
                 repository_store.clone(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             NugetPackagingStrategy::new(
@@ -952,7 +980,8 @@ fn packaging_registry(
                 public_base_url.to_string(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota.clone()),
+            .with_quota(quota.clone())
+            .with_upstream_credentials(upstream_credentials.clone()),
         ))
         .register(Arc::new(
             GoPackagingStrategy::new(
@@ -963,7 +992,8 @@ fn packaging_registry(
                 repository_store.clone(),
             )
             .with_assays(assays.clone())
-            .with_quota(quota),
+            .with_quota(quota)
+            .with_upstream_credentials(upstream_credentials),
         ))
 }
 

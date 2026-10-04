@@ -66,6 +66,9 @@ pub mod nuget;
 /// `go mod download`) of the Strategy pattern.
 pub mod golang;
 
+/// Upstream `Authorization` header for a mirror credential.
+pub(crate) mod upstream;
+
 /// Reasons a packaging operation can fail.
 #[derive(Debug, Error)]
 pub enum PackagingError {

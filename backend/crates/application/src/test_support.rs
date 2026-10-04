@@ -16,6 +16,7 @@ use ferrobox_domain::group::GroupName;
 use ferrobox_domain::ids::{
     ApiTokenId, ArtifactId, AssayId, GroupId, RepositoryId, UserId, WebhookId,
 };
+use ferrobox_domain::mirror_credential::MirrorCredential;
 use ferrobox_domain::oidc::OidcIdentity;
 use ferrobox_domain::package_coordinate::{PackageCoordinate, PackageEcosystem, PackageName};
 use ferrobox_domain::quota::StorageQuota;
@@ -32,6 +33,7 @@ use ferrobox_ports::assay_store::{AssayStore, AssayStoreError};
 use ferrobox_ports::audit_store::{AuditStore, AuditStoreError};
 use ferrobox_ports::group_store::{GroupStore, GroupStoreError, RepositoryGroupGrant};
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
+use ferrobox_ports::mirror_credential_store::{MirrorCredentialStore, MirrorCredentialStoreError};
 use ferrobox_ports::package_index_store::{
     IndexedArtifact, PackageIndexRecord, PackageIndexStore, PackageIndexStoreError,
 };
@@ -575,6 +577,50 @@ impl ApiTokenStore for InMemoryApiTokenStore {
     }
 }
 
+#[derive(Default)]
+pub struct InMemoryMirrorCredentialStore {
+    credentials: Mutex<HashMap<RepositoryId, MirrorCredential>>,
+}
+
+#[async_trait]
+impl MirrorCredentialStore for InMemoryMirrorCredentialStore {
+    async fn save(
+        &self,
+        repository_id: RepositoryId,
+        credential: &MirrorCredential,
+    ) -> Result<(), MirrorCredentialStoreError> {
+        self.credentials
+            .lock()
+            .unwrap()
+            .insert(repository_id, credential.clone());
+        Ok(())
+    }
+
+    async fn find(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<Option<MirrorCredential>, MirrorCredentialStoreError> {
+        Ok(self
+            .credentials
+            .lock()
+            .unwrap()
+            .get(&repository_id)
+            .cloned())
+    }
+
+    async fn delete(
+        &self,
+        repository_id: RepositoryId,
+    ) -> Result<bool, MirrorCredentialStoreError> {
+        Ok(self
+            .credentials
+            .lock()
+            .unwrap()
+            .remove(&repository_id)
+            .is_some())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RecordedHttpPost {
     pub url: String,
@@ -586,6 +632,7 @@ pub struct RecordedHttpPost {
 pub struct InMemoryHttpClient {
     responses: Mutex<HashMap<String, VecDeque<HttpResponse>>>,
     posts: Mutex<Vec<RecordedHttpPost>>,
+    gets: Mutex<Vec<RecordedHttpPost>>,
 }
 
 impl InMemoryHttpClient {
@@ -607,6 +654,10 @@ impl InMemoryHttpClient {
     pub fn take_posts(&self) -> Vec<RecordedHttpPost> {
         std::mem::take(&mut *self.posts.lock().unwrap())
     }
+
+    pub fn take_gets(&self) -> Vec<RecordedHttpPost> {
+        std::mem::take(&mut *self.gets.lock().unwrap())
+    }
 }
 
 #[async_trait]
@@ -626,8 +677,16 @@ impl HttpClient for InMemoryHttpClient {
     async fn get_with_headers(
         &self,
         url: &str,
-        _headers: &[(&str, &str)],
+        headers: &[(&str, &str)],
     ) -> Result<HttpResponse, HttpClientError> {
+        self.gets.lock().unwrap().push(RecordedHttpPost {
+            url: url.to_string(),
+            body: Bytes::new(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect(),
+        });
         let mut responses = self.responses.lock().unwrap();
         let Some(queue) = responses.get_mut(url) else {
             return Err(HttpClientError::Status {

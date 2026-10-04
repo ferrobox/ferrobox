@@ -21,6 +21,7 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -31,8 +32,8 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
@@ -48,6 +49,7 @@ pub struct GoPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl GoPackagingStrategy {
@@ -68,6 +70,7 @@ impl GoPackagingStrategy {
             repository_store,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
     }
 
@@ -82,6 +85,13 @@ impl GoPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -267,15 +277,28 @@ impl GoPackagingStrategy {
         let Some(upstream) = Self::mirror_upstream(repository) else {
             return Err(PackagingError::PackageNotFound(module.to_string()));
         };
-        let url = upstream_url(upstream, &escaped_module_path(module), &format!("@v/{version}.zip"));
-        let body = match self.http_client.get(&url).await {
+        let url = upstream_url(
+            upstream,
+            &escaped_module_path(module),
+            &format!("@v/{version}.zip"),
+        );
+        let body = match super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &url,
+        )
+        .await
+        {
             Ok(response) => response.body,
-            Err(HttpClientError::Status { status: 404 | 410, .. }) => {
+            Err(PackagingError::Upstream(HttpClientError::Status {
+                status: 404 | 410, ..
+            })) => {
                 return Err(PackagingError::VersionNotFound(go_coordinate(
                     module, version,
                 )?));
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error),
         };
         let parsed = parse_module_zip(&body, Some(version))?;
         self.store_module(repository, &parsed, body.clone()).await?;
@@ -300,7 +323,9 @@ impl GoPackagingStrategy {
             if Self::mirror_upstream(&target).is_some() {
                 match self.cache_from_upstream(&target, module, version).await {
                     Ok(body) => return Ok(body),
-                    Err(PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_)) => {}
+                    Err(
+                        PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_),
+                    ) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -328,12 +353,22 @@ impl GoPackagingStrategy {
             for target in self.resolve_read_targets(repository).await? {
                 if let Some(upstream) = Self::mirror_upstream(&target) {
                     let url = upstream_url(upstream, &escaped_module_path(module), "@v/list");
-                    match self.http_client.get(&url).await {
+                    match super::upstream::upstream_get(
+                        self.http_client.as_ref(),
+                        self.upstream_credentials.as_deref(),
+                        target.id(),
+                        &url,
+                    )
+                    .await
+                    {
                         Ok(response) => {
                             return Ok(response.body);
                         }
-                        Err(HttpClientError::Status { status: 404 | 410, .. }) => {}
-                        Err(error) => return Err(error.into()),
+                        Err(PackagingError::Upstream(HttpClientError::Status {
+                            status: 404 | 410,
+                            ..
+                        })) => {}
+                        Err(error) => return Err(error),
                     }
                 }
             }
@@ -547,11 +582,7 @@ impl PackagingStrategy for GoPackagingStrategy {
         if entry.files.is_empty() {
             return Err(PackagingError::VersionNotFound(coordinate.clone()));
         }
-        if self
-            .load_version_entry(target, coordinate)
-            .await?
-            .is_some()
-        {
+        if self.load_version_entry(target, coordinate).await?.is_some() {
             return Err(PackagingError::AlreadyPublished(coordinate.clone()));
         }
         if !preserve_yanked {
@@ -666,7 +697,8 @@ enum GoResource {
 fn go_coordinate(module: &str, version: &str) -> Result<PackageCoordinate, PackagingError> {
     Ok(PackageCoordinate::new(
         PackageEcosystem::Go,
-        PackageName::parse(module).map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
+        PackageName::parse(module)
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
         PackageVersion::parse(version)
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
     ))
@@ -896,7 +928,8 @@ fn pick_latest(versions: &[String]) -> Option<&str> {
     } else {
         releases
     };
-    pool.into_iter().max_by(|left, right| cmp_go_version(left, right))
+    pool.into_iter()
+        .max_by(|left, right| cmp_go_version(left, right))
 }
 
 fn cmp_go_version(left: &str, right: &str) -> std::cmp::Ordering {
@@ -905,9 +938,7 @@ fn cmp_go_version(left: &str, right: &str) -> std::cmp::Ordering {
 
 fn version_key(version: &str) -> (u64, u64, u64, bool, String) {
     let without_v = version.strip_prefix('v').unwrap_or(version);
-    let trimmed = without_v
-        .strip_suffix("+incompatible")
-        .unwrap_or(without_v);
+    let trimmed = without_v.strip_suffix("+incompatible").unwrap_or(without_v);
     let (core, pre) = trimmed.split_once('-').unwrap_or((trimmed, ""));
     let mut parts = core.split('.');
     let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -1043,7 +1074,11 @@ mod tests {
             .get_protocol_file(&repository, "github.com/example/hello/@v/v1.0.0.mod")
             .await
             .unwrap();
-        assert!(std::str::from_utf8(&go_mod).unwrap().contains("module github.com/example/hello"));
+        assert!(
+            std::str::from_utf8(&go_mod)
+                .unwrap()
+                .contains("module github.com/example/hello")
+        );
         let zip = strategy
             .get_protocol_file(&repository, "github.com/example/hello/@v/v1.0.0.zip")
             .await
@@ -1121,7 +1156,10 @@ mod tests {
             .get_protocol_file(&repository, "rsc.io/quote/@v/v1.5.2.zip")
             .await
             .unwrap();
-        assert_eq!(parse_module_zip(&body, Some("v1.5.2")).unwrap().module, "rsc.io/quote");
+        assert_eq!(
+            parse_module_zip(&body, Some("v1.5.2")).unwrap().module,
+            "rsc.io/quote"
+        );
     }
 
     #[tokio::test]

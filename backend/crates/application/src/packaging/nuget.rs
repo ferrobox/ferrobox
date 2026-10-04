@@ -21,6 +21,7 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::HttpClient;
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -31,8 +32,8 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
@@ -49,6 +50,7 @@ pub struct NugetPackagingStrategy {
     public_base_url: String,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl NugetPackagingStrategy {
@@ -71,6 +73,7 @@ impl NugetPackagingStrategy {
             public_base_url: public_base_url.into(),
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
     }
 
@@ -85,6 +88,13 @@ impl NugetPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -157,7 +167,10 @@ impl NugetPackagingStrategy {
         for entry_bytes in entries {
             let entry: VersionEntry = serde_json::from_slice(&entry_bytes)
                 .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-            if entry.version.eq_ignore_ascii_case(coordinate.version().as_str()) {
+            if entry
+                .version
+                .eq_ignore_ascii_case(coordinate.version().as_str())
+            {
                 return Ok(Some(entry));
             }
         }
@@ -279,11 +292,17 @@ impl NugetPackagingStrategy {
         let Some(upstream) = Self::mirror_upstream(repository) else {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         };
-        let flat = self.upstream_flat_base(upstream).await?;
+        let flat = self.upstream_flat_base(repository, upstream).await?;
         let id_lower = name.to_ascii_lowercase();
         let ver_lower = version.to_ascii_lowercase();
         let url = format!("{flat}{id_lower}/{ver_lower}/{id_lower}.{ver_lower}.nupkg");
-        let response = self.http_client.get(&url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &url,
+        )
+        .await?;
         if !response.is_success() {
             return Err(PackagingError::FileNotFound(nupkg_filename(name, version)));
         }
@@ -293,9 +312,19 @@ impl NugetPackagingStrategy {
         Ok(response.body)
     }
 
-    async fn upstream_flat_base(&self, upstream: &Url) -> Result<String, PackagingError> {
+    async fn upstream_flat_base(
+        &self,
+        repository: &Repository,
+        upstream: &Url,
+    ) -> Result<String, PackagingError> {
         let index_url = nuget_service_index_url(upstream);
-        let response = self.http_client.get(&index_url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &index_url,
+        )
+        .await?;
         if !response.is_success() {
             return Err(PackagingError::InvalidUpstream(format!(
                 "service index HTTP {}",
@@ -601,7 +630,9 @@ impl PackagingStrategy for NugetPackagingStrategy {
                 }
                 Ok(Self::flat_index(&versions))
             }
-            NugetResource::Nupkg { id, version } => self.nupkg_bytes(repository, &id, &version).await,
+            NugetResource::Nupkg { id, version } => {
+                self.nupkg_bytes(repository, &id, &version).await
+            }
             NugetResource::Nuspec { id, version } => {
                 let nupkg = self.nupkg_bytes(repository, &id, &version).await?;
                 let parsed = parse_nupkg(&nupkg)?;
@@ -679,11 +710,7 @@ impl PackagingStrategy for NugetPackagingStrategy {
         if entry.files.is_empty() {
             return Err(PackagingError::VersionNotFound(coordinate.clone()));
         }
-        if self
-            .load_version_entry(target, coordinate)
-            .await?
-            .is_some()
-        {
+        if self.load_version_entry(target, coordinate).await?.is_some() {
             return Err(PackagingError::AlreadyPublished(coordinate.clone()));
         }
         if !preserve_yanked {
@@ -789,12 +816,29 @@ struct ParsedNupkg {
 
 enum NugetResource {
     ServiceIndex,
-    FlatIndex { id: String },
-    Nupkg { id: String, version: String },
-    Nuspec { id: String, version: String },
-    Registration { id: String },
-    Query { query: String, skip: usize, take: usize },
-    Autocomplete { query: String, take: usize },
+    FlatIndex {
+        id: String,
+    },
+    Nupkg {
+        id: String,
+        version: String,
+    },
+    Nuspec {
+        id: String,
+        version: String,
+    },
+    Registration {
+        id: String,
+    },
+    Query {
+        query: String,
+        skip: usize,
+        take: usize,
+    },
+    Autocomplete {
+        query: String,
+        take: usize,
+    },
 }
 
 fn nuget_coordinate(id: &str, version: &str) -> Result<PackageCoordinate, PackagingError> {
@@ -974,7 +1018,10 @@ fn percent_decode(value: &str) -> String {
 ///
 /// Returns [`PackagingError::InvalidPayload`] if the body is
 /// `multipart` and the first part cannot be extracted.
-pub fn extract_nupkg_bytes(content_type: Option<&str>, body: Bytes) -> Result<Bytes, PackagingError> {
+pub fn extract_nupkg_bytes(
+    content_type: Option<&str>,
+    body: Bytes,
+) -> Result<Bytes, PackagingError> {
     let Some(content_type) = content_type else {
         return Ok(body);
     };
@@ -987,7 +1034,9 @@ pub fn extract_nupkg_bytes(content_type: Option<&str>, body: Bytes) -> Result<By
         .map(str::trim)
         .map(|value| value.trim_matches('"'))
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| PackagingError::InvalidPayload("multipart is missing a boundary".to_string()))?;
+        .ok_or_else(|| {
+            PackagingError::InvalidPayload("multipart is missing a boundary".to_string())
+        })?;
     extract_first_multipart_part(&body, boundary)
 }
 
@@ -1047,9 +1096,8 @@ fn parse_nupkg(body: &[u8]) -> Result<ParsedNupkg, PackagingError> {
     let metadata = xml_section(&nuspec, "metadata").unwrap_or(nuspec.as_str());
     let id = xml_text(metadata, "id")
         .ok_or_else(|| PackagingError::InvalidPayload("nuspec is missing <id>".to_string()))?;
-    let version = xml_text(metadata, "version").ok_or_else(|| {
-        PackagingError::InvalidPayload("nuspec is missing <version>".to_string())
-    })?;
+    let version = xml_text(metadata, "version")
+        .ok_or_else(|| PackagingError::InvalidPayload("nuspec is missing <version>".to_string()))?;
     validate_package_id(&id)?;
     Ok(ParsedNupkg {
         id,
@@ -1224,14 +1272,14 @@ mod tests {
     fn extracts_nupkg_from_multipart() {
         let nupkg = build_nupkg("Hello.World", "1.0.0");
         let mut body = Vec::new();
-        body.extend_from_slice(b"--abc\r\nContent-Disposition: form-data; name=\"package\"\r\n\r\n");
+        body.extend_from_slice(
+            b"--abc\r\nContent-Disposition: form-data; name=\"package\"\r\n\r\n",
+        );
         body.extend_from_slice(&nupkg);
         body.extend_from_slice(b"\r\n--abc--\r\n");
-        let extracted = extract_nupkg_bytes(
-            Some("multipart/form-data; boundary=abc"),
-            Bytes::from(body),
-        )
-        .unwrap();
+        let extracted =
+            extract_nupkg_bytes(Some("multipart/form-data; boundary=abc"), Bytes::from(body))
+                .unwrap();
         let parsed = parse_nupkg(&extracted).unwrap();
         assert_eq!(parsed.id, "Hello.World");
     }
@@ -1271,10 +1319,7 @@ mod tests {
             reg["items"][0]["items"][0]["catalogEntry"]["id"],
             "Hello.World"
         );
-        assert_eq!(
-            reg["items"][0]["items"][0]["catalogEntry"]["listed"],
-            true
-        );
+        assert_eq!(reg["items"][0]["items"][0]["catalogEntry"]["listed"], true);
 
         let index = strategy
             .get_protocol_file(&repository, "v3/index.json")
@@ -1395,10 +1440,7 @@ mod tests {
         let hits = strategy.search(&alloy, "", 10).await.unwrap();
         assert_eq!(hits.len(), 2);
         let nupkg = strategy
-            .get_protocol_file(
-                &alloy,
-                "v3/flat/hello.world/1.0.0/hello.world.1.0.0.nupkg",
-            )
+            .get_protocol_file(&alloy, "v3/flat/hello.world/1.0.0/hello.world.1.0.0.nupkg")
             .await
             .unwrap();
         assert_eq!(parse_nupkg(&nupkg).unwrap().id, "Hello.World");

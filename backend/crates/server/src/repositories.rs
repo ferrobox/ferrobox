@@ -19,8 +19,9 @@ use crate::authz::{
     require_repo_read, require_repo_write, require_token_read, require_write_artifacts,
 };
 use crate::dto::{
-    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse, RepositoryResponse,
-    SetMirrorScheduleRequest, UpdateAlloyMembersRequest,
+    CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse,
+    MirrorUpstreamAuthResponse, RepositoryResponse, SetMirrorScheduleRequest,
+    SetMirrorUpstreamAuthRequest, UpdateAlloyMembersRequest,
 };
 use crate::error::ApiError;
 use ferrobox_application::create_repository::CreateRepositoryKind;
@@ -161,6 +162,74 @@ pub(crate) async fn set_mirror_schedule(
     Ok(Json(
         to_repository_response(&state, &user, &repository).await?,
     ))
+}
+
+pub(crate) async fn get_upstream_auth(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Json<MirrorUpstreamAuthResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_read(&state.groups, &user, &token, repository_id).await?;
+    let status = state.mirror_credentials.status(repository_id).await?;
+    Ok(Json(MirrorUpstreamAuthResponse {
+        configured: status.configured,
+        username: status.username,
+    }))
+}
+
+pub(crate) async fn set_upstream_auth(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<SetMirrorUpstreamAuthRequest>,
+) -> Result<Json<MirrorUpstreamAuthResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
+    let status = state
+        .mirror_credentials
+        .save(repository_id, payload.username, payload.secret)
+        .await?;
+    let repository = state.get_repository.execute(repository_id).await?;
+    let detail = if status.username.is_empty() {
+        "bearer".to_string()
+    } else {
+        status.username.clone()
+    };
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::MirrorUpstreamChanged,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        detail,
+    )
+    .await;
+    Ok(Json(MirrorUpstreamAuthResponse {
+        configured: status.configured,
+        username: status.username,
+    }))
+}
+
+pub(crate) async fn clear_upstream_auth(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
+    let repository = state.get_repository.execute(repository_id).await?;
+    state.mirror_credentials.clear(repository_id).await?;
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::MirrorUpstreamChanged,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        "cleared".to_string(),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub(crate) async fn delete_repository(

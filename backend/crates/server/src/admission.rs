@@ -34,7 +34,13 @@ pub(crate) async fn save_policy(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPolicyResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let (policy, public_keys_pem) = payload.into_policy()?;
     let saved = state
         .admission
@@ -63,7 +69,13 @@ pub(crate) async fn dry_run(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<AdmissionPolicyRequest>,
 ) -> Result<Json<AdmissionPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let (policy, public_keys_pem) = payload.into_policy()?;
     let preview = state
         .admission
@@ -296,6 +308,14 @@ mod tests {
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

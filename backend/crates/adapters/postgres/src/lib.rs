@@ -48,4 +48,7 @@ pub mod osv_sync_store;
 /// Adapter for `WebhookStore`.
 pub mod webhook_store;
 
+/// Adapter for `MirrorCredentialStore`.
+pub mod mirror_credential_store;
+
 mod ecosystem_column;

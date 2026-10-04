@@ -26,6 +26,7 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -34,12 +35,12 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
-use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
+use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
 /// Packaging strategy for the `PyPI` ecosystem.
@@ -52,6 +53,7 @@ pub struct PypiPackagingStrategy {
     public_base_url: String,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl PypiPackagingStrategy {
@@ -75,6 +77,7 @@ impl PypiPackagingStrategy {
             public_base_url,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
     }
 
@@ -89,6 +92,13 @@ impl PypiPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -208,7 +218,13 @@ impl PypiPackagingStrategy {
     ) -> Result<(), PackagingError> {
         let normalized = normalize_pypi_name(name.as_str());
         let page_url = join_upstream(upstream, &format!("{normalized}/"));
-        let response = self.http_client.get(&page_url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &page_url,
+        )
+        .await?;
         let html = std::str::from_utf8(&response.body)
             .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
         let links = parse_simple_links(html, &page_url)?;
@@ -253,12 +269,14 @@ impl PypiPackagingStrategy {
                 }
             }
 
-            let entry = by_version.entry(version.clone()).or_insert_with(|| VersionEntry {
-                name: normalized.clone(),
-                version,
-                yanked: false,
-                files: Vec::new(),
-            });
+            let entry = by_version
+                .entry(version.clone())
+                .or_insert_with(|| VersionEntry {
+                    name: normalized.clone(),
+                    version,
+                    yanked: false,
+                    files: Vec::new(),
+                });
             entry.files.push(file);
         }
 
@@ -298,7 +316,13 @@ impl PypiPackagingStrategy {
         file_index: usize,
         url: &str,
     ) -> Result<Bytes, PackagingError> {
-        let response = self.http_client.get(url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            url,
+        )
+        .await?;
         let content = response.body;
         let checksum = sha256_checksum(&content);
         let expected = entry.files[file_index].sha256.clone();
@@ -518,9 +542,8 @@ impl PackagingStrategy for PypiPackagingStrategy {
                 }
             }
             if documents.is_empty() {
-                return Err(other_error.unwrap_or_else(|| {
-                    PackagingError::PackageNotFound(normalized.to_string())
-                }));
+                return Err(other_error
+                    .unwrap_or_else(|| PackagingError::PackageNotFound(normalized.to_string())));
             }
             return merge_simple_pages(normalized.as_str(), &documents);
         }
@@ -608,12 +631,7 @@ impl PackagingStrategy for PypiPackagingStrategy {
             serde_json::to_vec(&entry).expect("a VersionEntry always serializes to valid JSON"),
         );
         self.package_index_store
-            .upsert_entry(
-                target.id(),
-                coordinate,
-                last_artifact_id,
-                entry_bytes,
-            )
+            .upsert_entry(target.id(), coordinate, last_artifact_id, entry_bytes)
             .await?;
         notify_assay(self.assays.as_ref(), target.id(), coordinate);
 
@@ -786,9 +804,9 @@ fn parse_publish_payload(payload: &[u8]) -> Result<ParsedPublish, PackagingError
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect();
-    let content = BASE64.decode(compact.as_bytes()).map_err(|err| {
-        PackagingError::InvalidPayload(format!("invalid file encoding: {err}"))
-    })?;
+    let content = BASE64
+        .decode(compact.as_bytes())
+        .map_err(|err| PackagingError::InvalidPayload(format!("invalid file encoding: {err}")))?;
     Ok(ParsedPublish {
         name: body.name,
         version: body.version,
@@ -815,7 +833,10 @@ fn simple_project_page(
     if links.is_empty() {
         return Err(PackagingError::PackageNotFound(name.to_string()));
     }
-    Ok(Bytes::from(simple_html(&format!("Links for {name}"), &links)))
+    Ok(Bytes::from(simple_html(
+        &format!("Links for {name}"),
+        &links,
+    )))
 }
 
 fn merge_simple_pages(name: &str, documents: &[Bytes]) -> Result<Bytes, PackagingError> {
@@ -834,7 +855,10 @@ fn merge_simple_pages(name: &str, documents: &[Bytes]) -> Result<Bytes, Packagin
     if links.is_empty() {
         return Err(PackagingError::PackageNotFound(name.to_string()));
     }
-    Ok(Bytes::from(simple_html(&format!("Links for {name}"), &links)))
+    Ok(Bytes::from(simple_html(
+        &format!("Links for {name}"),
+        &links,
+    )))
 }
 
 fn simple_file_link(url: &str, file: &FileEntry, yanked: bool) -> String {
@@ -843,9 +867,12 @@ fn simple_file_link(url: &str, file: &FileEntry, yanked: bool) -> String {
     } else {
         ""
     };
-    let requires_attr = file.requires_python.as_ref().map_or(String::new(), |value| {
-        format!(" data-requires-python=\"{}\"", escape_html(value))
-    });
+    let requires_attr = file
+        .requires_python
+        .as_ref()
+        .map_or(String::new(), |value| {
+            format!(" data-requires-python=\"{}\"", escape_html(value))
+        });
     let hash = if file.sha256.is_empty() {
         String::new()
     } else {
@@ -907,8 +934,8 @@ struct ParsedSimpleLink {
 }
 
 fn parse_simple_links(html: &str, page_url: &str) -> Result<Vec<ParsedSimpleLink>, PackagingError> {
-    let page = Url::parse(page_url)
-        .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
+    let page =
+        Url::parse(page_url).map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
     let lower = html.to_ascii_lowercase();
     let mut links = Vec::new();
     let mut search_from = 0;
@@ -933,7 +960,9 @@ fn parse_simple_links(html: &str, page_url: &str) -> Result<Vec<ParsedSimpleLink
             continue;
         };
         let href = unescape_html(&href);
-        let (href_path, fragment) = href.split_once('#').map_or((href.as_str(), ""), |(path, frag)| (path, frag));
+        let (href_path, fragment) = href
+            .split_once('#')
+            .map_or((href.as_str(), ""), |(path, frag)| (path, frag));
         let resolved = page
             .join(href_path)
             .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
@@ -966,7 +995,8 @@ fn parse_simple_links(html: &str, page_url: &str) -> Result<Vec<ParsedSimpleLink
             url: url.to_string(),
             sha256,
             yanked: has_attr(tag, "data-yanked"),
-            requires_python: attr_value(tag, "data-requires-python").map(|value| unescape_html(&value)),
+            requires_python: attr_value(tag, "data-requires-python")
+                .map(|value| unescape_html(&value)),
         });
     }
 
@@ -988,7 +1018,8 @@ fn attr_value(tag: &str, name: &str) -> Option<String> {
 }
 
 fn has_attr(tag: &str, name: &str) -> bool {
-    tag.to_ascii_lowercase().contains(&name.to_ascii_lowercase())
+    tag.to_ascii_lowercase()
+        .contains(&name.to_ascii_lowercase())
 }
 
 /// Name and version of a wheel or sdist, for evaluating admission on pull.
@@ -1000,10 +1031,7 @@ pub fn admission_download_target(filename: &str) -> Option<(String, String)> {
     if let Some(stem) = filename.strip_suffix(".whl") {
         let parts: Vec<&str> = stem.split('-').collect();
         if parts.len() >= 5 {
-            return Some((
-                normalize_pypi_name(parts[0]),
-                parts[1].replace('_', "-"),
-            ));
+            return Some((normalize_pypi_name(parts[0]), parts[1].replace('_', "-")));
         }
         return None;
     }
@@ -1014,11 +1042,9 @@ pub fn admission_download_target(filename: &str) -> Option<(String, String)> {
         .or_else(|| filename.strip_suffix(".tgz"))
         .or_else(|| filename.strip_suffix(".zip"))?;
     let parts: Vec<&str> = stem.split('-').collect();
-    let split = parts.iter().position(|part| {
-        part.chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_digit())
-    })?;
+    let split = parts
+        .iter()
+        .position(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))?;
     if split == 0 {
         return None;
     }
@@ -1115,13 +1141,9 @@ pub fn simple_root_json(hits: &[PackageSearchHit]) -> Bytes {
 ///
 /// Only if `serde_json` cannot serialize a fixed-shape object, which does not
 /// happen with this payload.
-pub fn project_page_json(
-    name: &str,
-    html: &[u8],
-    page_url: &str,
-) -> Result<Bytes, PackagingError> {
-    let html = std::str::from_utf8(html)
-        .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+pub fn project_page_json(name: &str, html: &[u8], page_url: &str) -> Result<Bytes, PackagingError> {
+    let html =
+        std::str::from_utf8(html).map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
     let links = parse_simple_links(html, page_url)?;
     if links.is_empty() {
         return Err(PackagingError::PackageNotFound(name.to_string()));
@@ -1251,7 +1273,10 @@ mod tests {
 
     #[test]
     fn normalize_pypi_name_collapses_separators() {
-        assert_eq!(normalize_pypi_name("Demo.Ferrobox_Pypi"), "demo-ferrobox-pypi");
+        assert_eq!(
+            normalize_pypi_name("Demo.Ferrobox_Pypi"),
+            "demo-ferrobox-pypi"
+        );
         assert_eq!(normalize_pypi_name("friendly-bard"), "friendly-bard");
     }
 
@@ -1283,10 +1308,7 @@ mod tests {
         )));
         assert!(html.contains("#sha256="));
 
-        let downloaded = strategy
-            .download_file(&repository, filename)
-            .await
-            .unwrap();
+        let downloaded = strategy.download_file(&repository, filename).await.unwrap();
         assert_eq!(downloaded.as_ref(), content);
     }
 
@@ -1355,12 +1377,7 @@ mod tests {
         strategy
             .publish(
                 &repository,
-                publish_body(
-                    "demo-pypi",
-                    "1.0.0",
-                    "demo_pypi-1.0.0.tar.gz",
-                    b"sdist",
-                ),
+                publish_body("demo-pypi", "1.0.0", "demo_pypi-1.0.0.tar.gz", b"sdist"),
             )
             .await
             .unwrap();
@@ -1476,7 +1493,12 @@ mod tests {
         strategy
             .publish(
                 &forge,
-                publish_body("demo-pypi", "1.0.0", "demo_pypi-1.0.0.tar.gz", b"from-forge"),
+                publish_body(
+                    "demo-pypi",
+                    "1.0.0",
+                    "demo_pypi-1.0.0.tar.gz",
+                    b"from-forge",
+                ),
             )
             .await
             .unwrap();
@@ -1518,12 +1540,7 @@ mod tests {
         strategy
             .publish(
                 &repository,
-                publish_body(
-                    "Demo_Pkg",
-                    "1.0.0",
-                    "demo_pkg-1.0.0.tar.gz",
-                    b"sdist",
-                ),
+                publish_body("Demo_Pkg", "1.0.0", "demo_pkg-1.0.0.tar.gz", b"sdist"),
             )
             .await
             .unwrap();
@@ -1614,11 +1631,8 @@ mod tests {
             Some("2.32.3")
         );
         assert_eq!(
-            version_from_filename(
-                "demo_ferrobox_pypi-1.0.0.tar.gz",
-                "demo-ferrobox-pypi"
-            )
-            .as_deref(),
+            version_from_filename("demo_ferrobox_pypi-1.0.0.tar.gz", "demo-ferrobox-pypi")
+                .as_deref(),
             Some("1.0.0")
         );
         assert_eq!(
@@ -1678,7 +1692,10 @@ mod tests {
             repository.id()
         )));
         assert!(!html.contains("files.example"));
-        assert!(html.contains("data-requires-python=\">=3.9\"") || html.contains("data-requires-python=\"&gt;=3.9\""));
+        assert!(
+            html.contains("data-requires-python=\">=3.9\"")
+                || html.contains("data-requires-python=\"&gt;=3.9\"")
+        );
 
         let downloaded = strategy.download_file(&repository, filename).await.unwrap();
         assert_eq!(downloaded, content);

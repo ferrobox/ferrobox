@@ -27,6 +27,7 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::HttpClient;
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -38,8 +39,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
 use crate::content_hash::sha256_checksum;
@@ -55,6 +56,7 @@ pub struct MavenPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl MavenPackagingStrategy {
@@ -75,6 +77,7 @@ impl MavenPackagingStrategy {
             repository_store,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
     }
 
@@ -89,6 +92,13 @@ impl MavenPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -259,9 +269,17 @@ impl MavenPackagingStrategy {
         file_index: usize,
         url: &str,
     ) -> Result<Bytes, PackagingError> {
-        let response = self.http_client.get(url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            url,
+        )
+        .await?;
         if !response.is_success() {
-            return Err(PackagingError::FileNotFound(entry.files[file_index].filename.clone()));
+            return Err(PackagingError::FileNotFound(
+                entry.files[file_index].filename.clone(),
+            ));
         }
         self.store_cached_file(repository, entry, file_index, response.body)
             .await
@@ -276,7 +294,13 @@ impl MavenPackagingStrategy {
         filename: &str,
         url: &str,
     ) -> Result<Bytes, PackagingError> {
-        let response = self.http_client.get(url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            url,
+        )
+        .await?;
         if !response.is_success() {
             return Err(PackagingError::FileNotFound(filename.to_string()));
         }
@@ -349,7 +373,7 @@ impl MavenPackagingStrategy {
             versions.extend(self.load_package_entries(&target, &name).await?);
             if let Some(upstream) = Self::mirror_upstream(&target)
                 && let Ok(remote) = self
-                    .fetch_upstream_metadata(upstream, group_id, artifact_id, None)
+                    .fetch_upstream_metadata(&target, upstream, group_id, artifact_id, None)
                     .await
             {
                 merge_remote_versions(&mut versions, &remote);
@@ -359,7 +383,9 @@ impl MavenPackagingStrategy {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         }
         Ok(Bytes::from(render_artifact_metadata(
-            group_id, artifact_id, &versions,
+            group_id,
+            artifact_id,
+            &versions,
         )))
     }
 
@@ -377,7 +403,13 @@ impl MavenPackagingStrategy {
             }
             if let Some(upstream) = Self::mirror_upstream(&target)
                 && let Ok(body) = self
-                    .fetch_upstream_metadata(upstream, group_id, artifact_id, Some(version))
+                    .fetch_upstream_metadata(
+                        &target,
+                        upstream,
+                        group_id,
+                        artifact_id,
+                        Some(version),
+                    )
                     .await
             {
                 return Ok(body);
@@ -388,6 +420,7 @@ impl MavenPackagingStrategy {
 
     async fn fetch_upstream_metadata(
         &self,
+        repository: &Repository,
         upstream: &Url,
         group_id: &str,
         artifact_id: &str,
@@ -404,7 +437,13 @@ impl MavenPackagingStrategy {
             ),
         };
         let url = join_upstream(upstream, &path);
-        let response = self.http_client.get(&url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &url,
+        )
+        .await?;
         if !response.is_success() {
             return Err(PackagingError::FileNotFound(path));
         }
@@ -670,8 +709,15 @@ impl PackagingStrategy for MavenPackagingStrategy {
                 filename,
                 checksum: None,
             } => {
-                self.put_artifact(repository, &group_id, &artifact_id, &version, &filename, body)
-                    .await
+                self.put_artifact(
+                    repository,
+                    &group_id,
+                    &artifact_id,
+                    &version,
+                    &filename,
+                    body,
+                )
+                .await
             }
         }
     }
@@ -1109,7 +1155,9 @@ fn parse_maven_filename(artifact_id: &str, version: &str, filename: &str) -> Par
 }
 
 fn classifier_from_remainder(remainder: &str) -> Option<String> {
-    let stem = remainder.rsplit_once('.').map_or(remainder, |(stem, _)| stem);
+    let stem = remainder
+        .rsplit_once('.')
+        .map_or(remainder, |(stem, _)| stem);
     if stem.is_empty() {
         None
     } else {
@@ -1129,7 +1177,8 @@ fn maven_coordinate(
     Ok(PackageCoordinate::new(
         PackageEcosystem::Maven,
         package_name(group_id, artifact_id)?,
-        PackageVersion::parse(version).map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
+        PackageVersion::parse(version)
+            .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?,
     ))
 }
 
@@ -1205,7 +1254,11 @@ fn xml_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn render_artifact_metadata(group_id: &str, artifact_id: &str, versions: &[VersionEntry]) -> String {
+fn render_artifact_metadata(
+    group_id: &str,
+    artifact_id: &str,
+    versions: &[VersionEntry],
+) -> String {
     let mut seen = Vec::new();
     for entry in versions {
         if entry.yanked {
@@ -1289,9 +1342,15 @@ fn render_version_metadata(entry: &VersionEntry) -> String {
             .unique_version
             .clone()
             .unwrap_or_else(|| entry.version.clone());
-        let classifier = file.classifier.as_ref().map_or(String::new(), |classifier| {
-            format!("        <classifier>{}</classifier>\n", xml_escape(classifier))
-        });
+        let classifier = file
+            .classifier
+            .as_ref()
+            .map_or(String::new(), |classifier| {
+                format!(
+                    "        <classifier>{}</classifier>\n",
+                    xml_escape(classifier)
+                )
+            });
         snapshot_versions.push_str("      <snapshotVersion>\n");
         snapshot_versions.push_str(&classifier);
         snapshot_versions.push_str("        <extension>");
