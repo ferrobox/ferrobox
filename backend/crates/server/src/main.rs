@@ -106,6 +106,7 @@ use ferrobox_application::webhooks::WebhookService;
 use ferrobox_application::worm::WormService;
 use ferrobox_domain::package_coordinate::PackageEcosystem;
 use ferrobox_domain::user::Username;
+use ferrobox_ports::http_client::HttpClient;
 use ferrobox_ports::osv_sync_store::{
     OSV_SYNC_IMPORTED, OSV_SYNC_REJECTED, OSV_SYNC_UNCHANGED, OsvSyncSettings,
 };
@@ -389,10 +390,18 @@ fn admin_protected_router() -> Router<Arc<AppState>> {
             put(repositories::set_mirror_schedule),
         )
         .route(
+            "/repositories/{repository_id}/upstream",
+            put(repositories::set_mirror_upstream),
+        )
+        .route(
             "/repositories/{repository_id}/upstream-auth",
             get(repositories::get_upstream_auth)
                 .put(repositories::set_upstream_auth)
                 .delete(repositories::clear_upstream_auth),
+        )
+        .route(
+            "/repositories/{repository_id}/upstream-auth/test",
+            post(repositories::test_upstream_auth),
         )
         .route(
             "/artifacts/{artifact_id}",
@@ -619,10 +628,12 @@ fn build_app_state(
     )
     .with_assays(assay_store.clone())
     .with_vulnerability_feed(Arc::new(assays.clone()));
+    let mirror_http: Arc<dyn HttpClient> = http_client.clone();
     let mirror_credentials = ferrobox_application::mirror_credentials::MirrorCredentialService::new(
         repository_store.clone(),
         mirror_credential_store.clone(),
-    );
+    )
+    .with_http(mirror_http);
     let upstream_credentials: Arc<
         dyn ferrobox_ports::mirror_credential_store::MirrorCredentialStore,
     > = mirror_credential_store;

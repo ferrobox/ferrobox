@@ -8,6 +8,7 @@ import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRe
 import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
 import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
 import type { SetMirrorUpstreamAuthRequest } from "@/api/generated/SetMirrorUpstreamAuthRequest";
+import type { SetMirrorUpstreamRequest } from "@/api/generated/SetMirrorUpstreamRequest";
 import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
@@ -183,6 +184,19 @@ export function useSetMirrorSchedule(repositoryId: string) {
   });
 }
 
+export function useSetMirrorUpstream(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: SetMirrorUpstreamRequest) =>
+      api.setMirrorUpstream(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repository(repositoryId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+    },
+  });
+}
+
 export function useMirrorUpstreamAuth(repositoryId: string) {
   return useQuery({
     queryKey: queryKeys.repositoryUpstreamAuth(repositoryId),
@@ -201,6 +215,12 @@ export function useSetMirrorUpstreamAuth(repositoryId: string) {
         queryKey: queryKeys.repositoryUpstreamAuth(repositoryId),
       });
     },
+  });
+}
+
+export function useProbeMirrorUpstreamAuth(repositoryId: string) {
+  return useMutation({
+    mutationFn: () => api.probeMirrorUpstreamAuth(repositoryId),
   });
 }
 

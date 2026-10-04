@@ -17,12 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   secret is configured and the username, and never returns the secret.
   OCI and Helm mirrors send that credential on the registry token
   exchange. Removing the repository deletes the secret with it.
+- Test connection sends one GET to the saved upstream URL using the saved
+  credential and reports only the HTTP status. The response body and the
+  secret are not returned. A public registry may still answer 200 when
+  the token is wrong.
 
 **Web console**
 
 - Prefetch without a version lists every indexed version on the Packages
   tab before the file is downloaded. Download caches that version and
   then saves the file.
+- A Mirror's upstream URL can be changed after the repository is created.
+  The prefetch schedule, the stored credential, and cached packages stay.
+  The URL must be http or https and must not include a username or password.
+  Test connection sits on the same form.
 
 ## [0.2.2] - 2026-10-04
 

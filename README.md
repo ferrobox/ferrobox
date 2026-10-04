@@ -58,8 +58,10 @@ bucket -- see `infra/.env.example` for the full list.
 - **Three repository kinds**: `Forge` (hosted storage), `Mirror` (pull-through
   cache of an upstream registry), and `Alloy` (a virtual repository that
   aggregates several `Forge`/`Mirror` repositories under one URL). A Mirror
-  can store an upstream username and secret. FerroBox sends that secret only
-  on outbound prefetch and pull-through requests, and the API never returns it.
+  can store an upstream username and secret, and the upstream URL can be
+  changed later. FerroBox sends that secret only on outbound prefetch and
+  pull-through requests. The API never returns it. Test connection reports
+  the HTTP status of one request and does not return the response body.
 - **RBAC**: users, groups, per-repository read/write access, and API
   tokens limited by read/write and, optionally, by repository. Robot
   accounts can have an expiry.

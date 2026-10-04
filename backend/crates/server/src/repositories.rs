@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use ferrobox_domain::audit::{AuditAction, AuditTargetKind};
 use ferrobox_domain::group::RepositoryAccess;
 use ferrobox_domain::ids::RepositoryId;
-use ferrobox_domain::repository::{Repository, RepositoryName};
+use ferrobox_domain::repository::{Repository, RepositoryKind, RepositoryName};
 use ferrobox_domain::user::User;
 use uuid::Uuid;
 
@@ -20,8 +20,9 @@ use crate::authz::{
 };
 use crate::dto::{
     CreateRepositoryKindDto, CreateRepositoryRequest, CreateRepositoryResponse,
-    MirrorUpstreamAuthResponse, RepositoryResponse, SetMirrorScheduleRequest,
-    SetMirrorUpstreamAuthRequest, UpdateAlloyMembersRequest,
+    MirrorUpstreamAuthResponse, MirrorUpstreamProbeResponse, RepositoryResponse,
+    SetMirrorScheduleRequest, SetMirrorUpstreamAuthRequest, SetMirrorUpstreamRequest,
+    UpdateAlloyMembersRequest,
 };
 use crate::error::ApiError;
 use ferrobox_application::create_repository::CreateRepositoryKind;
@@ -164,6 +165,41 @@ pub(crate) async fn set_mirror_schedule(
     ))
 }
 
+pub(crate) async fn set_mirror_upstream(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+    Json(payload): Json<SetMirrorUpstreamRequest>,
+) -> Result<Json<RepositoryResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
+
+    let repository = ferrobox_application::mirror_upstream::SetMirrorUpstreamUseCase::execute(
+        &state.get_repository,
+        repository_id,
+        &payload.upstream,
+    )
+    .await?;
+
+    let detail = match repository.kind() {
+        RepositoryKind::Mirror { upstream } => upstream.to_string(),
+        RepositoryKind::Forge | RepositoryKind::Alloy { .. } => payload.upstream,
+    };
+    crate::audit::record(
+        &state,
+        &user,
+        AuditAction::MirrorUpstreamUrlChanged,
+        AuditTargetKind::Repository,
+        repository.name().to_string(),
+        detail,
+    )
+    .await;
+
+    Ok(Json(
+        to_repository_response(&state, &user, &repository).await?,
+    ))
+}
+
 pub(crate) async fn get_upstream_auth(
     State(state): State<Arc<AppState>>,
     AuthenticatedUser { user, token }: AuthenticatedUser,
@@ -208,6 +244,21 @@ pub(crate) async fn set_upstream_auth(
     Ok(Json(MirrorUpstreamAuthResponse {
         configured: status.configured,
         username: status.username,
+    }))
+}
+
+pub(crate) async fn test_upstream_auth(
+    State(state): State<Arc<AppState>>,
+    AuthenticatedUser { user, token }: AuthenticatedUser,
+    Path(repository_id): Path<Uuid>,
+) -> Result<Json<MirrorUpstreamProbeResponse>, ApiError> {
+    let repository_id = RepositoryId::from(repository_id);
+    require_repo_write(&state.groups, &user, &token, repository_id).await?;
+    let probe = state.mirror_credentials.probe(repository_id).await?;
+    Ok(Json(MirrorUpstreamProbeResponse {
+        status: probe.status,
+        ok: probe.ok,
+        authenticated: probe.authenticated,
     }))
 }
 
