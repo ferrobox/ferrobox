@@ -15,27 +15,28 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::ArtifactId;
+use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError};
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
-use url::Url;
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
-use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
+use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
 /// Packaging strategy for the Conan ecosystem.
@@ -47,6 +48,7 @@ pub struct ConanPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl ConanPackagingStrategy {
@@ -67,6 +69,7 @@ impl ConanPackagingStrategy {
             repository_store,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
     }
 
@@ -81,6 +84,13 @@ impl ConanPackagingStrategy {
     #[must_use]
     pub fn with_quota(mut self, quota: QuotaService) -> Self {
         self.quota = Some(quota);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -162,12 +172,8 @@ impl ConanPackagingStrategy {
         entry: &RecipeEntry,
         artifact_id: ArtifactId,
     ) -> Result<(), PackagingError> {
-        let coordinate = recipe_coordinate(
-            &entry.name,
-            &entry.version,
-            &entry.user,
-            &entry.channel,
-        )?;
+        let coordinate =
+            recipe_coordinate(&entry.name, &entry.version, &entry.user, &entry.channel)?;
         let entry_bytes = Bytes::from(
             serde_json::to_vec(entry).expect("a RecipeEntry always serializes to valid JSON"),
         );
@@ -250,9 +256,9 @@ impl ConanPackagingStrategy {
                     .load_recipe(repository, name, version, user, channel)
                     .await?
                     .ok_or_else(|| PackagingError::PackageNotFound(name.clone()))?;
-                let revision = entry.revision(rrev).ok_or_else(|| {
-                    PackagingError::PackageNotFound(rrev.clone())
-                })?;
+                let revision = entry
+                    .revision(rrev)
+                    .ok_or_else(|| PackagingError::PackageNotFound(rrev.clone()))?;
                 Ok(json_bytes(&FilesDocument::from_stored(&revision.files)))
             }
             ConanResource::PackageLatest {
@@ -464,17 +470,25 @@ impl ConanPackagingStrategy {
         Ok(self.storage.get(&storage_key_for(artifact_id)).await?)
     }
 
-    async fn get_upstream(&self, url: &str) -> Result<Option<Bytes>, PackagingError> {
-        let response = match self
-            .http_client
-            .get_with_headers(url, &[("accept", "application/json")])
-            .await
+    async fn get_upstream(
+        &self,
+        repository_id: RepositoryId,
+        url: &str,
+    ) -> Result<Option<Bytes>, PackagingError> {
+        let response = match super::upstream::upstream_get_with_headers(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository_id,
+            url,
+            &[("accept", "application/json")],
+        )
+        .await
         {
             Ok(response) => response,
-            Err(HttpClientError::Status {
+            Err(PackagingError::Upstream(HttpClientError::Status {
                 status: 404 | 410, ..
-            }) => return Ok(None),
-            Err(error) => return Err(error.into()),
+            })) => return Ok(None),
+            Err(error) => return Err(error),
         };
         if matches!(response.status, 404 | 410) {
             return Ok(None);
@@ -498,7 +512,7 @@ impl ConanPackagingStrategy {
             return Err(PackagingError::PackageNotFound(resource.path_hint()));
         };
         let url = join_conan_upstream(upstream, &resource.api_path());
-        self.get_upstream(&url)
+        self.get_upstream(repository.id(), &url)
             .await?
             .ok_or_else(|| PackagingError::PackageNotFound(resource.path_hint()))
     }
@@ -513,7 +527,7 @@ impl ConanPackagingStrategy {
         };
         let url = join_conan_upstream(upstream, &resource.api_path());
         let body = self
-            .get_upstream(&url)
+            .get_upstream(repository.id(), &url)
             .await?
             .ok_or_else(|| PackagingError::FileNotFound(resource.path_hint()))?;
         self.cache_upstream_file(repository, resource, body.clone())
@@ -720,6 +734,7 @@ impl ConanPackagingStrategy {
 
     async fn merge_upstream_search(
         &self,
+        repository_id: RepositoryId,
         hits: &mut Vec<PackageSearchHit>,
         upstream: &Url,
         query: &str,
@@ -730,7 +745,7 @@ impl ConanPackagingStrategy {
         if !query.trim().is_empty() {
             url.query_pairs_mut().append_pair("q", query.trim());
         }
-        let Some(body) = self.get_upstream(url.as_str()).await? else {
+        let Some(body) = self.get_upstream(repository_id, url.as_str()).await? else {
             return Ok(());
         };
         let document: UpstreamSearchDocument = serde_json::from_slice(&body)
@@ -794,8 +809,8 @@ fn recipe_coordinate(
     user: &str,
     channel: &str,
 ) -> Result<PackageCoordinate, PackagingError> {
-    let package_name = PackageName::parse(name)
-        .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
+    let package_name =
+        PackageName::parse(name).map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
     let package_version = PackageVersion::parse(format!("{version}@{user}:{channel}"))
         .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
     Ok(PackageCoordinate::new(
@@ -808,9 +823,7 @@ fn recipe_coordinate(
 fn split_conan_version_field(value: &str) -> (String, String, String) {
     match value.split_once('@') {
         Some((version, rest)) => match rest.split_once(':') {
-            Some((user, channel)) => {
-                (version.to_string(), user.to_string(), channel.to_string())
-            }
+            Some((user, channel)) => (version.to_string(), user.to_string(), channel.to_string()),
             None => (version.to_string(), rest.to_string(), "_".to_string()),
         },
         None => (value.to_string(), "_".to_string(), "_".to_string()),
@@ -881,7 +894,10 @@ fn now_stamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-fn package_search_document(entry: &RecipeEntry, rrev: Option<&str>) -> BTreeMap<String, serde_json::Value> {
+fn package_search_document(
+    entry: &RecipeEntry,
+    rrev: Option<&str>,
+) -> BTreeMap<String, serde_json::Value> {
     let revisions = match rrev {
         Some(revision) => entry
             .revisions
@@ -1245,39 +1261,52 @@ fn parse_conan_path(path: &str) -> Result<ConanResource, PackagingError> {
             rrev: (*rrev).to_string(),
             pkgid: (*pkgid).to_string(),
         }),
-        ["revisions", rrev, "packages", pkgid, "revisions"] => Ok(ConanResource::PackageRevisions {
+        ["revisions", rrev, "packages", pkgid, "revisions"] => {
+            Ok(ConanResource::PackageRevisions {
+                name,
+                version,
+                user,
+                channel,
+                rrev: (*rrev).to_string(),
+                pkgid: (*pkgid).to_string(),
+            })
+        }
+        [
+            "revisions",
+            rrev,
+            "packages",
+            pkgid,
+            "revisions",
+            prev,
+            "files",
+        ] => Ok(ConanResource::PackageFiles {
             name,
             version,
             user,
             channel,
             rrev: (*rrev).to_string(),
             pkgid: (*pkgid).to_string(),
+            prev: (*prev).to_string(),
         }),
-        ["revisions", rrev, "packages", pkgid, "revisions", prev, "files"] => {
-            Ok(ConanResource::PackageFiles {
-                name,
-                version,
-                user,
-                channel,
-                rrev: (*rrev).to_string(),
-                pkgid: (*pkgid).to_string(),
-                prev: (*prev).to_string(),
-            })
-        }
-        ["revisions", rrev, "packages", pkgid, "revisions", prev, "files", filename @ ..]
-            if !filename.is_empty() =>
-        {
-            Ok(ConanResource::PackageFile {
-                name,
-                version,
-                user,
-                channel,
-                rrev: (*rrev).to_string(),
-                pkgid: (*pkgid).to_string(),
-                prev: (*prev).to_string(),
-                filename: filename.join("/"),
-            })
-        }
+        [
+            "revisions",
+            rrev,
+            "packages",
+            pkgid,
+            "revisions",
+            prev,
+            "files",
+            filename @ ..,
+        ] if !filename.is_empty() => Ok(ConanResource::PackageFile {
+            name,
+            version,
+            user,
+            channel,
+            rrev: (*rrev).to_string(),
+            pkgid: (*pkgid).to_string(),
+            prev: (*prev).to_string(),
+            filename: filename.join("/"),
+        }),
         _ => Err(PackagingError::InvalidPayload(format!(
             "invalid Conan path '{path}'"
         ))),
@@ -1616,7 +1645,13 @@ impl PackagingStrategy for ConanPackagingStrategy {
 
         let (version, user, channel) = split_conan_version_field(coordinate.version().as_str());
         let Some(mut entry) = self
-            .load_recipe(source, coordinate.name().as_str(), &version, &user, &channel)
+            .load_recipe(
+                source,
+                coordinate.name().as_str(),
+                &version,
+                &user,
+                &channel,
+            )
             .await?
         else {
             return Err(PackagingError::VersionNotFound(coordinate.clone()));
@@ -1652,8 +1687,8 @@ impl PackagingStrategy for ConanPackagingStrategy {
             bytes_copied += size;
             last_artifact_id = Some(new_id);
         }
-        let last_artifact_id = last_artifact_id
-            .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
+        let last_artifact_id =
+            last_artifact_id.ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
         rewrite_recipe_artifact_ids(&mut entry, &rewritten);
         if !preserve_yanked {
             entry.yanked = false;
@@ -1681,11 +1716,7 @@ impl PackagingStrategy for ConanPackagingStrategy {
         }
         let entries = self
             .package_index_store
-            .entries_for_package(
-                repository.id(),
-                PackageEcosystem::Conan,
-                coordinate.name(),
-            )
+            .entries_for_package(repository.id(), PackageEcosystem::Conan, coordinate.name())
             .await?;
         for entry_bytes in entries {
             let mut entry: RecipeEntry = serde_json::from_slice(&entry_bytes)
@@ -1741,7 +1772,7 @@ impl PackagingStrategy for ConanPackagingStrategy {
                 }
             }
             if let Some(upstream) = Self::mirror_upstream(&target) {
-                self.merge_upstream_search(&mut hits, upstream, query, limit)
+                self.merge_upstream_search(target.id(), &mut hits, upstream, query, limit)
                     .await?;
                 if hits.len() >= limit {
                     return Ok(hits);
@@ -1796,10 +1827,7 @@ mod tests {
             admission_download_target("hello/0.1/_/_/revisions/abc/files/conanfile.py"),
             Some(("hello".into(), "0.1@_:_".into()))
         );
-        assert_eq!(
-            admission_download_target("hello/0.1/_/_/latest"),
-            None
-        );
+        assert_eq!(admission_download_target("hello/0.1/_/_/latest"), None);
     }
 
     #[test]
@@ -1925,10 +1953,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.artifacts_copied, 2);
         let copied = strategy
-            .get_protocol_file(
-                &target,
-                "hello/0.1/_/_/revisions/rrev1/files/conanfile.py",
-            )
+            .get_protocol_file(&target, "hello/0.1/_/_/revisions/rrev1/files/conanfile.py")
             .await
             .unwrap();
         assert_eq!(copied.as_ref(), b"from conan import ConanFile\n");
@@ -2229,7 +2254,10 @@ mod tests {
         )
         .unwrap();
 
-        let hits = strategy.search(&repository, "zlib/1.3.1", 20).await.unwrap();
+        let hits = strategy
+            .search(&repository, "zlib/1.3.1", 20)
+            .await
+            .unwrap();
         assert_eq!(hits[0].name, "zlib/1.3.1@_/_");
         assert_eq!(hits[0].max_version, "1.3.1");
     }

@@ -56,5 +56,8 @@ pub mod quota_store;
 /// Persistence port for a repository WORM lock.
 pub mod worm_store;
 
+/// Persistence port for a mirror's upstream credentials.
+pub mod mirror_credential_store;
+
 /// Outbound HTTP client port.
 pub mod http_client;

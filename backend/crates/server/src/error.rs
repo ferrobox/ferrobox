@@ -21,6 +21,7 @@ use ferrobox_application::manage_groups::GroupError;
 use ferrobox_application::manage_users::{
     ChangeUserRoleError, CreateUserError, DeleteUserError, ListUsersError, ResetUserPasswordError,
 };
+use ferrobox_application::mirror_credentials::MirrorCredentialError;
 use ferrobox_application::mirror_schedule::SetMirrorScheduleError;
 use ferrobox_application::oidc::OidcError;
 use ferrobox_application::packaging::PackagingError;
@@ -124,6 +125,19 @@ impl From<SetMirrorScheduleError> for ApiError {
                 Self::BadRequest(err.to_string())
             }
             SetMirrorScheduleError::Repository(inner) => inner.into(),
+        }
+    }
+}
+
+impl From<MirrorCredentialError> for ApiError {
+    fn from(err: MirrorCredentialError) -> Self {
+        match err {
+            MirrorCredentialError::RepositoryNotFound => Self::NotFound(err.to_string()),
+            MirrorCredentialError::NotAMirror | MirrorCredentialError::Invalid(_) => {
+                Self::BadRequest(err.to_string())
+            }
+            MirrorCredentialError::RepositoryPersistence(inner) => inner.into(),
+            MirrorCredentialError::Persistence(_) => Self::Internal(err.to_string()),
         }
     }
 }

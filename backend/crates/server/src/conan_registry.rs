@@ -221,7 +221,13 @@ async fn conan_put(
     Path((repository_id, rest)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_conan_repository(&state, repository_id).await?;
     let strategy = conan_strategy(&state)?;
     strategy
@@ -235,7 +241,13 @@ async fn yank(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     crate::audit::record(
         &state,
@@ -254,7 +266,13 @@ async fn unyank(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<ConanOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     crate::audit::record(
         &state,
@@ -500,6 +518,14 @@ mod tests {
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

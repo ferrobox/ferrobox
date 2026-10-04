@@ -128,7 +128,13 @@ async fn npm_put(
     Path((repository_id, path)): Path<(Uuid, String)>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let path = decode_npm_path(&path);
 
     if let Some((name, version)) = strip_suffix_action(&path, "/unyank") {
@@ -163,7 +169,13 @@ async fn npm_delete(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, path)): Path<(Uuid, String)>,
 ) -> Result<(StatusCode, Json<NpmOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let path = decode_npm_path(&path);
 
     let Some((name, version)) = strip_suffix_action(&path, "/yank") else {
@@ -556,6 +568,14 @@ mod tests {
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

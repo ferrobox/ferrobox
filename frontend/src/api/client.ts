@@ -23,6 +23,8 @@ import type { PromotePackageRequest } from "@/api/generated/PromotePackageReques
 import type { PromotePackageResponse } from "@/api/generated/PromotePackageResponse";
 import type { RepositoryResponse } from "@/api/generated/RepositoryResponse";
 import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
+import type { MirrorUpstreamAuthResponse } from "@/api/generated/MirrorUpstreamAuthResponse";
+import type { SetMirrorUpstreamAuthRequest } from "@/api/generated/SetMirrorUpstreamAuthRequest";
 import type { QuotaRequest } from "@/api/generated/QuotaRequest";
 import type { QuotaResponse } from "@/api/generated/QuotaResponse";
 import type { WormRequest } from "@/api/generated/WormRequest";
@@ -292,6 +294,33 @@ export function setMirrorSchedule(
   return request<RepositoryResponse>(`/repositories/${repositoryId}/schedule`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function getMirrorUpstreamAuth(
+  repositoryId: string,
+): Promise<MirrorUpstreamAuthResponse> {
+  return request<MirrorUpstreamAuthResponse>(
+    `/repositories/${repositoryId}/upstream-auth`,
+  );
+}
+
+export function setMirrorUpstreamAuth(
+  repositoryId: string,
+  payload: SetMirrorUpstreamAuthRequest,
+): Promise<MirrorUpstreamAuthResponse> {
+  return request<MirrorUpstreamAuthResponse>(
+    `/repositories/${repositoryId}/upstream-auth`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function clearMirrorUpstreamAuth(repositoryId: string): Promise<void> {
+  return request<void>(`/repositories/${repositoryId}/upstream-auth`, {
+    method: "DELETE",
   });
 }
 

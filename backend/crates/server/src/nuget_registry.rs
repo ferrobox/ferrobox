@@ -202,7 +202,13 @@ async fn nuget_push(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let repository = load_nuget_repository(&state, repository_id).await?;
     let strategy = nuget_strategy(&state)?;
     let content_type = headers
@@ -232,7 +238,13 @@ async fn nuget_unlist(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     crate::audit::record(
         &state,
@@ -251,7 +263,13 @@ async fn nuget_relist(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     crate::audit::record(
         &state,
@@ -270,7 +288,13 @@ async fn yank(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<NugetOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, true).await?;
     crate::audit::record(
         &state,
@@ -289,7 +313,13 @@ async fn unyank(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path((repository_id, name, version)): Path<(Uuid, String, String)>,
 ) -> Result<(StatusCode, Json<NugetOk>), ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     set_yanked(&state, repository_id, &name, &version, false).await?;
     crate::audit::record(
         &state,
@@ -535,6 +565,14 @@ mod tests {
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

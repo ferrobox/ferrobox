@@ -34,7 +34,13 @@ pub(crate) async fn save_policy(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<RetentionPolicyResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let saved = state
         .retention
@@ -62,7 +68,13 @@ pub(crate) async fn dry_run(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     let policy = RetentionPolicy::new(payload.keep_last, payload.keep_days)?;
     let preview = state
         .retention
@@ -77,7 +89,13 @@ pub(crate) async fn apply(
     Path(repository_id): Path<Uuid>,
     Json(payload): Json<RetentionPolicyRequest>,
 ) -> Result<Json<CleanupPreviewResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     state
         .worm
         .ensure_mutable(RepositoryId::from(repository_id))
@@ -104,7 +122,13 @@ pub(crate) async fn collect_garbage(
     AuthenticatedUser { user, token }: AuthenticatedUser,
     Path(repository_id): Path<Uuid>,
 ) -> Result<Json<CleanupReportResponse>, ApiError> {
-    require_repo_write(&state.groups, &user, &token, RepositoryId::from(repository_id)).await?;
+    require_repo_write(
+        &state.groups,
+        &user,
+        &token,
+        RepositoryId::from(repository_id),
+    )
+    .await?;
     state
         .worm
         .ensure_mutable(RepositoryId::from(repository_id))
@@ -335,6 +359,14 @@ mod tests {
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

@@ -337,13 +337,21 @@ mod tests {
             groups: GroupService::new(
                 Arc::new(InMemoryGroupStore::default()),
                 user_store,
-                repository_store,
+                repository_store.clone(),
             ),
             webhooks,
             audit: ferrobox_application::audit::AuditService::new(Arc::new(
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let writer = state

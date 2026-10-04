@@ -293,12 +293,20 @@ mod tests {
             webhooks: ferrobox_application::webhooks::WebhookService::new(
                 Arc::new(InMemoryWebhookStore::default()),
                 http_client,
-                repository_store,
+                repository_store.clone(),
             ),
             audit: ferrobox_application::audit::AuditService::new(Arc::new(
                 ferrobox_application::test_support::InMemoryAuditStore::default(),
             )),
             oidc: None,
+            mirror_credentials:
+                ferrobox_application::mirror_credentials::MirrorCredentialService::new(
+                    repository_store.clone(),
+                    std::sync::Arc::new(
+                        ferrobox_application::test_support::InMemoryMirrorCredentialStore::default(
+                        ),
+                    ),
+                ),
         });
 
         let developer = state

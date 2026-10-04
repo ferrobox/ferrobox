@@ -17,13 +17,14 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::Bytes;
 use ferrobox_domain::artifact::Artifact;
-use ferrobox_domain::ids::ArtifactId;
+use ferrobox_domain::ids::{ArtifactId, RepositoryId};
 use ferrobox_domain::package_coordinate::{
     PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
 };
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::{HttpClient, HttpClientError, HttpResponse};
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
@@ -63,6 +64,7 @@ pub struct OciPackagingStrategy {
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
     admission: Option<AdmissionService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl OciPackagingStrategy {
@@ -105,6 +107,7 @@ impl OciPackagingStrategy {
             assays: None,
             quota: None,
             admission: None,
+            upstream_credentials: None,
         }
     }
 
@@ -126,6 +129,13 @@ impl OciPackagingStrategy {
     #[must_use]
     pub fn with_admission(mut self, admission: AdmissionService) -> Self {
         self.admission = Some(admission);
+        self
+    }
+
+    /// Sends this store's secret when the mirror calls its upstream.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
         self
     }
 
@@ -614,10 +624,11 @@ impl OciPackagingStrategy {
             url.push_str(&query_escape(filter));
         }
         let response = self
-            .registry_get_authed(&url, vec![(
-                "Accept".to_string(),
-                INDEX_MEDIA_TYPE.to_string(),
-            )])
+            .registry_get_authed(
+                repository.id(),
+                &url,
+                vec![("Accept".to_string(), INDEX_MEDIA_TYPE.to_string())],
+            )
             .await?;
         Ok(OciManifestDocument {
             media_type: content_type_of(&response, INDEX_MEDIA_TYPE),
@@ -946,10 +957,11 @@ impl OciPackagingStrategy {
         let image = upstream_image_name(upstream, &local_name, self.ecosystem);
         let url = join_v2_path(upstream, &format!("{image}/manifests/{reference}"));
         let response = self
-            .registry_get_authed(&url, vec![(
-                "Accept".to_string(),
-                MANIFEST_ACCEPT.to_string(),
-            )])
+            .registry_get_authed(
+                repository.id(),
+                &url,
+                vec![("Accept".to_string(), MANIFEST_ACCEPT.to_string())],
+            )
             .await
             .map_err(|err| match err {
                 PackagingError::FileNotFound(_) => {
@@ -992,7 +1004,9 @@ impl OciPackagingStrategy {
         let digest = parse_oci_digest(digest)?;
         let image = upstream_image_name(upstream, &local_name, self.ecosystem);
         let url = join_v2_path(upstream, &format!("{image}/blobs/{digest}"));
-        let response = self.registry_get_authed(&url, Vec::new()).await?;
+        let response = self
+            .registry_get_authed(repository.id(), &url, Vec::new())
+            .await?;
         self.put_blob_one(repository, &digest, response.body.clone())
             .await?;
         if let Some(assays) = &self.assays {
@@ -1003,10 +1017,18 @@ impl OciPackagingStrategy {
 
     async fn registry_get_authed(
         &self,
+        repository_id: RepositoryId,
         url: &str,
         extra_headers: Vec<(String, String)>,
     ) -> Result<HttpResponse, PackagingError> {
-        let response = self.exchange(url, extra_headers.clone(), None).await?;
+        let stored = super::upstream::upstream_authorization(
+            self.upstream_credentials.as_deref(),
+            repository_id,
+        )
+        .await?;
+        let response = self
+            .exchange(url, extra_headers.clone(), None, stored.as_deref())
+            .await?;
         if response.is_success() {
             return Ok(response);
         }
@@ -1018,8 +1040,12 @@ impl OciPackagingStrategy {
                 "upstream 401 without a Bearer WWW-Authenticate challenge".to_string(),
             )
         })?;
-        let token = self.fetch_bearer_token(challenge).await?;
-        let retry = self.exchange(url, extra_headers, Some(&token)).await?;
+        let token = self
+            .fetch_bearer_token(challenge, stored.as_deref())
+            .await?;
+        let retry = self
+            .exchange(url, extra_headers, Some(&token), None)
+            .await?;
         if retry.is_success() {
             return Ok(retry);
         }
@@ -1031,10 +1057,17 @@ impl OciPackagingStrategy {
         url: &str,
         extra_headers: Vec<(String, String)>,
         bearer: Option<&str>,
+        stored_authorization: Option<&str>,
     ) -> Result<HttpResponse, PackagingError> {
         let mut headers = extra_headers;
         if let Some(token) = bearer {
             headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        } else if let Some(authorization) = stored_authorization
+            && !headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        {
+            headers.push(("Authorization".to_string(), authorization.to_string()));
         }
         let refs: Vec<(&str, &str)> = headers
             .iter()
@@ -1043,10 +1076,34 @@ impl OciPackagingStrategy {
         Ok(self.http_client.get_with_headers(url, &refs).await?)
     }
 
-    async fn fetch_bearer_token(&self, challenge: &str) -> Result<String, PackagingError> {
+    async fn fetch_bearer_token(
+        &self,
+        challenge: &str,
+        stored: Option<&str>,
+    ) -> Result<String, PackagingError> {
         let parsed = parse_bearer_challenge(challenge)?;
         let token_url = token_request_url(&parsed.realm, &parsed.service, parsed.scope.as_deref())?;
-        let response = self.http_client.get_with_headers(&token_url, &[]).await?;
+        if stored.is_some()
+            && let Ok(token) = self.token_endpoint(&token_url, stored).await
+        {
+            return Ok(token);
+        }
+        self.token_endpoint(&token_url, None).await
+    }
+
+    async fn token_endpoint(
+        &self,
+        token_url: &str,
+        authorization: Option<&str>,
+    ) -> Result<String, PackagingError> {
+        let headers: Vec<(&str, &str)> = match authorization {
+            Some(value) => vec![("authorization", value)],
+            None => Vec::new(),
+        };
+        let response = self
+            .http_client
+            .get_with_headers(token_url, &headers)
+            .await?;
         if !response.is_success() {
             return Err(PackagingError::InvalidUpstream(format!(
                 "token endpoint returned HTTP {}",
@@ -2675,9 +2732,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(strategy.list_tags(&alloy, "demo").await.unwrap(), vec![
-            "latest".to_string()
-        ]);
+        assert_eq!(
+            strategy.list_tags(&alloy, "demo").await.unwrap(),
+            vec!["latest".to_string()]
+        );
         let pulled = strategy
             .get_manifest(&alloy, "demo", "latest")
             .await

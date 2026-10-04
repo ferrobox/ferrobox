@@ -7,6 +7,7 @@ import type { CreateApiTokenRequest } from "@/api/generated/CreateApiTokenReques
 import type { CreateRepositoryRequest } from "@/api/generated/CreateRepositoryRequest";
 import type { PrefetchPackageRequest } from "@/api/generated/PrefetchPackageRequest";
 import type { SetMirrorScheduleRequest } from "@/api/generated/SetMirrorScheduleRequest";
+import type { SetMirrorUpstreamAuthRequest } from "@/api/generated/SetMirrorUpstreamAuthRequest";
 import type { CreateRobotRequest } from "@/api/generated/CreateRobotRequest";
 import type { CreateUserRequest } from "@/api/generated/CreateUserRequest";
 import type { CreateGroupRequest } from "@/api/generated/CreateGroupRequest";
@@ -50,6 +51,7 @@ export const queryKeys = {
   repositoryQuota: (id: string) => ["repositories", id, "quota"] as const,
   repositoryWorm: (id: string) => ["repositories", id, "worm"] as const,
   repositoryWebhooks: (id: string) => ["repositories", id, "webhooks"] as const,
+  repositoryUpstreamAuth: (id: string) => ["repositories", id, "upstream-auth"] as const,
   webhookDeliveries: (repositoryId: string, webhookId: string) =>
     ["repositories", repositoryId, "webhooks", webhookId, "deliveries"] as const,
   packageSearch: (query: string) => ["search", query] as const,
@@ -176,6 +178,40 @@ export function useSetMirrorSchedule(repositoryId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.repositoryArtifacts(repositoryId),
+      });
+    },
+  });
+}
+
+export function useMirrorUpstreamAuth(repositoryId: string) {
+  return useQuery({
+    queryKey: queryKeys.repositoryUpstreamAuth(repositoryId),
+    queryFn: () => api.getMirrorUpstreamAuth(repositoryId),
+  });
+}
+
+export function useSetMirrorUpstreamAuth(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: SetMirrorUpstreamAuthRequest) =>
+      api.setMirrorUpstreamAuth(repositoryId, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryUpstreamAuth(repositoryId),
+      });
+    },
+  });
+}
+
+export function useClearMirrorUpstreamAuth(repositoryId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.clearMirrorUpstreamAuth(repositoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryUpstreamAuth(repositoryId),
       });
     },
   });

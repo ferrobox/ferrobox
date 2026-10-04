@@ -23,19 +23,21 @@ use ferrobox_domain::package_coordinate::{
 use ferrobox_domain::repository::{Repository, RepositoryKind};
 use ferrobox_ports::artifact_store::ArtifactStore;
 use ferrobox_ports::http_client::HttpClient;
+use ferrobox_ports::mirror_credential_store::MirrorCredentialStore;
 use ferrobox_ports::package_index_store::PackageIndexStore;
 use ferrobox_ports::repository_store::RepositoryStore;
 use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::upstream::upstream_get;
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
-use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
+use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
 /// Packaging strategy for the npm ecosystem.
@@ -48,6 +50,7 @@ pub struct NpmPackagingStrategy {
     public_base_url: String,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials: Option<Arc<dyn MirrorCredentialStore>>,
 }
 
 impl NpmPackagingStrategy {
@@ -71,7 +74,15 @@ impl NpmPackagingStrategy {
             public_base_url,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
+    }
+
+    /// Sends this mirror's stored upstream username and secret.
+    #[must_use]
+    pub fn with_upstream_credentials(mut self, store: Arc<dyn MirrorCredentialStore>) -> Self {
+        self.upstream_credentials = Some(store);
+        self
     }
 
     /// Connects automatic assay when publishing or caching a tarball.
@@ -175,7 +186,13 @@ impl NpmPackagingStrategy {
         name: &PackageName,
     ) -> Result<(), PackagingError> {
         let packument_url = join_upstream(upstream, &encode_npm_name(name.as_str()));
-        let response = self.http_client.get(&packument_url).await?;
+        let response = upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &packument_url,
+        )
+        .await?;
         let packument: Value = serde_json::from_slice(&response.body)
             .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
 
@@ -194,11 +211,9 @@ impl NpmPackagingStrategy {
             let mut entry =
                 version_entry_from_upstream_manifest(name.as_str(), version_str, manifest)?;
             entry.dist_tags.clone_from(&dist_tags);
-            let coordinate =
-                PackageCoordinate::new(PackageEcosystem::Npm, name.clone(), version);
+            let coordinate = PackageCoordinate::new(PackageEcosystem::Npm, name.clone(), version);
             let entry_bytes = Bytes::from(
-                serde_json::to_vec(&entry)
-                    .expect("a VersionEntry always serializes to valid JSON"),
+                serde_json::to_vec(&entry).expect("a VersionEntry always serializes to valid JSON"),
             );
             self.package_index_store
                 .upsert_entry(repository.id(), &coordinate, None, entry_bytes)
@@ -240,7 +255,13 @@ impl NpmPackagingStrategy {
                 ))
             })?;
 
-        let response = self.http_client.get(tarball_url).await?;
+        let response = upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            tarball_url,
+        )
+        .await?;
         let tarball = response.body;
 
         if !entry.shasum.is_empty() {
@@ -307,11 +328,9 @@ impl NpmPackagingStrategy {
             return Err(PackagingError::PackageNotFound(name.to_string()));
         }
 
-        packument_from_entries(
-            name.as_str(),
-            &entries,
-            |version| self.tarball_url(serving, name.as_str(), version),
-        )
+        packument_from_entries(name.as_str(), &entries, |version| {
+            self.tarball_url(serving, name.as_str(), version)
+        })
     }
 
     async fn download_one(
@@ -423,11 +442,7 @@ impl PackagingStrategy for NpmPackagingStrategy {
         }
 
         let checksum = sha256_checksum(&parsed.tarball);
-        let artifact = Artifact::new(
-            repository.id(),
-            checksum,
-            parsed.tarball.len() as u64,
-        );
+        let artifact = Artifact::new(repository.id(), checksum, parsed.tarball.len() as u64);
 
         ensure_quota(
             self.quota.as_ref(),
@@ -511,8 +526,9 @@ impl PackagingStrategy for NpmPackagingStrategy {
             for target in &targets {
                 match self.download_one(target, coordinate).await {
                     Ok(bytes) => return Ok(bytes),
-                    Err(PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_)) => {
-                    }
+                    Err(
+                        PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_),
+                    ) => {}
                     Err(error) => last_error = error,
                 }
             }
@@ -775,9 +791,9 @@ fn parse_publish_payload(payload: &[u8]) -> Result<ParsedPublish, PackagingError
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect();
-    let tarball = BASE64
-        .decode(compact.as_bytes())
-        .map_err(|err| PackagingError::InvalidPayload(format!("invalid tarball encoding: {err}")))?;
+    let tarball = BASE64.decode(compact.as_bytes()).map_err(|err| {
+        PackagingError::InvalidPayload(format!("invalid tarball encoding: {err}"))
+    })?;
 
     let manifest = body
         .versions
@@ -805,7 +821,10 @@ fn packument_from_entries(
     for entry_bytes in entries {
         let entry: VersionEntry = serde_json::from_slice(entry_bytes)
             .map_err(|err| PackagingError::InvalidPayload(err.to_string()))?;
-        versions.insert(entry.version.clone(), version_document(&entry, &tarball_for));
+        versions.insert(
+            entry.version.clone(),
+            version_document(&entry, &tarball_for),
+        );
         parsed.push(entry);
     }
 
@@ -870,7 +889,9 @@ fn merge_packuments(documents: &[Bytes]) -> Result<Bytes, PackagingError> {
             continue;
         };
         for (version, body) in map {
-            versions.entry(version.clone()).or_insert_with(|| body.clone());
+            versions
+                .entry(version.clone())
+                .or_insert_with(|| body.clone());
         }
     }
 
@@ -899,7 +920,9 @@ fn packument_document(
         "dist-tags": dist_tags,
         "versions": versions,
     });
-    Bytes::from(serde_json::to_vec(&packument).expect("a packument always serializes to valid JSON"))
+    Bytes::from(
+        serde_json::to_vec(&packument).expect("a packument always serializes to valid JSON"),
+    )
 }
 
 fn parse_dist_tags(value: Option<&Value>) -> BTreeMap<String, String> {
@@ -918,7 +941,12 @@ fn parse_dist_tags(value: Option<&Value>) -> BTreeMap<String, String> {
 fn collect_dist_tags(entries: &[VersionEntry]) -> BTreeMap<String, String> {
     let mut tags = BTreeMap::new();
     for entry in entries {
-        tags.extend(entry.dist_tags.iter().map(|(tag, version)| (tag.clone(), version.clone())));
+        tags.extend(
+            entry
+                .dist_tags
+                .iter()
+                .map(|(tag, version)| (tag.clone(), version.clone())),
+        );
     }
     tags
 }
@@ -1014,6 +1042,7 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
+    use ferrobox_domain::mirror_credential::MirrorCredential;
     use ferrobox_domain::package_coordinate::{
         PackageCoordinate, PackageEcosystem, PackageName, PackageVersion,
     };
@@ -1023,8 +1052,9 @@ mod tests {
     use super::*;
     use crate::assay::AssayService;
     use crate::test_support::{
-        InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient, InMemoryPackageIndexStore,
-        InMemoryRepositoryStore, InMemoryStorage,
+        InMemoryArtifactStore, InMemoryAssayStore, InMemoryHttpClient,
+        InMemoryMirrorCredentialStore, InMemoryPackageIndexStore, InMemoryRepositoryStore,
+        InMemoryStorage,
     };
 
     fn strategy() -> NpmPackagingStrategy {
@@ -1091,9 +1121,13 @@ mod tests {
         assert_eq!(coordinate.name().as_str(), "demo-pkg");
         assert_eq!(coordinate.version().as_str(), "1.0.0");
 
-        let packument: Value =
-            serde_json::from_slice(&strategy.index(&repository, coordinate.name()).await.unwrap())
-                .unwrap();
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, coordinate.name())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(packument["name"], "demo-pkg");
         assert_eq!(packument["dist-tags"]["latest"], "1.0.0");
         assert_eq!(
@@ -1199,9 +1233,13 @@ mod tests {
             .await
             .unwrap();
 
-        let packument: Value =
-            serde_json::from_slice(&strategy.index(&repository, coordinate.name()).await.unwrap())
-                .unwrap();
+        let packument: Value = serde_json::from_slice(
+            &strategy
+                .index(&repository, coordinate.name())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(packument["versions"]["1.0.0"]["deprecated"], "yanked");
     }
 
@@ -1231,7 +1269,11 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.artifacts_copied, 1);
         assert_eq!(
-            strategy.download(&target, &coordinate).await.unwrap().as_ref(),
+            strategy
+                .download(&target, &coordinate)
+                .await
+                .unwrap()
+                .as_ref(),
             b"tarball"
         );
     }
@@ -1517,10 +1559,7 @@ mod tests {
 
         let packument: Value = serde_json::from_slice(
             &strategy
-                .index(
-                    &repository,
-                    &PackageName::parse("@acme/demo-pkg").unwrap(),
-                )
+                .index(&repository, &PackageName::parse("@acme/demo-pkg").unwrap())
                 .await
                 .unwrap(),
         )
@@ -1733,5 +1772,80 @@ mod tests {
         )
         .unwrap();
         assert_eq!(packument["dist-tags"]["latest"], "4.17.21");
+    }
+
+    fn authorization_header(headers: &[(String, String)]) -> Option<&str> {
+        headers.iter().find_map(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization")
+                .then_some(value.as_str())
+        })
+    }
+
+    #[tokio::test]
+    async fn mirror_index_sends_a_stored_bearer_or_basic_secret() {
+        let http = Arc::new(InMemoryHttpClient::default());
+        let credentials = Arc::new(InMemoryMirrorCredentialStore::default());
+        let strategy = NpmPackagingStrategy::new(
+            Arc::new(InMemoryArtifactStore::default()),
+            Arc::new(InMemoryPackageIndexStore::default()),
+            Arc::new(InMemoryStorage::default()),
+            http.clone(),
+            Arc::new(InMemoryRepositoryStore::default()),
+            "http://127.0.0.1:3000".to_string(),
+        )
+        .with_upstream_credentials(credentials.clone());
+        let repository = npm_mirror("npm-private", "https://registry.example");
+        let packument = upstream_packument(
+            "lodash",
+            "1.0.0",
+            "https://registry.example/lodash/-/lodash-1.0.0.tgz",
+            b"tarball",
+        );
+        http.stub("https://registry.example/lodash", 200, packument.clone());
+
+        strategy
+            .index(&repository, &PackageName::parse("lodash").unwrap())
+            .await
+            .unwrap();
+        let anonymous = http.take_gets();
+        assert_eq!(anonymous.len(), 1);
+        assert_eq!(authorization_header(&anonymous[0].headers), None);
+
+        credentials
+            .save(
+                repository.id(),
+                &MirrorCredential::parse("", "token-1").unwrap(),
+            )
+            .await
+            .unwrap();
+        http.stub("https://registry.example/lodash", 200, packument.clone());
+        strategy
+            .index(&repository, &PackageName::parse("lodash").unwrap())
+            .await
+            .unwrap();
+        let bearer = http.take_gets();
+        assert_eq!(
+            authorization_header(&bearer[0].headers),
+            Some("Bearer token-1")
+        );
+
+        credentials
+            .save(
+                repository.id(),
+                &MirrorCredential::parse("ci-bot", "secret").unwrap(),
+            )
+            .await
+            .unwrap();
+        http.stub("https://registry.example/lodash", 200, packument);
+        strategy
+            .index(&repository, &PackageName::parse("lodash").unwrap())
+            .await
+            .unwrap();
+        let basic = http.take_gets();
+        let expected = format!("Basic {}", BASE64.encode(b"ci-bot:secret"));
+        assert_eq!(
+            authorization_header(&basic[0].headers),
+            Some(expected.as_str())
+        );
     }
 }

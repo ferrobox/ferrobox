@@ -62,6 +62,8 @@ pub enum AuditAction {
     RepositoryImported,
     /// A `Mirror`'s refresh interval was changed.
     MirrorScheduleChanged,
+    /// A `Mirror`'s upstream username or secret was replaced or removed.
+    MirrorUpstreamChanged,
     /// The admission policy was saved.
     AdmissionPolicyChanged,
     /// The retention policy was saved.
@@ -243,6 +245,7 @@ impl AuditAction {
             Self::PackagePromoted => "package.promoted",
             Self::PackagePrefetched => "package.prefetched",
             Self::MirrorScheduleChanged => "mirror.schedule_changed",
+            Self::MirrorUpstreamChanged => "mirror.upstream_changed",
             Self::RepositoryExported => "repository.exported",
             Self::RepositoryImported => "repository.imported",
             Self::AdmissionPolicyChanged => "admission.policy_changed",
@@ -290,6 +293,7 @@ impl AuditAction {
             "package.promoted" => Ok(Self::PackagePromoted),
             "package.prefetched" => Ok(Self::PackagePrefetched),
             "mirror.schedule_changed" => Ok(Self::MirrorScheduleChanged),
+            "mirror.upstream_changed" => Ok(Self::MirrorUpstreamChanged),
             "repository.exported" => Ok(Self::RepositoryExported),
             "repository.imported" => Ok(Self::RepositoryImported),
             "admission.policy_changed" => Ok(Self::AdmissionPolicyChanged),
@@ -381,6 +385,7 @@ mod tests {
             AuditAction::PackagePromoted,
             AuditAction::PackagePrefetched,
             AuditAction::MirrorScheduleChanged,
+            AuditAction::MirrorUpstreamChanged,
             AuditAction::RepositoryExported,
             AuditAction::RepositoryImported,
             AuditAction::AdmissionPolicyChanged,

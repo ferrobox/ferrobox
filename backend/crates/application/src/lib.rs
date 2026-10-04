@@ -33,6 +33,9 @@ pub mod repository_bundle;
 /// Interval and scheduled refresh of a `Mirror`.
 pub mod mirror_schedule;
 
+/// Username and secret a `Mirror` sends to its upstream.
+pub mod mirror_credentials;
+
 /// Use case: delete a repository and all of its content.
 pub mod delete_repository;
 

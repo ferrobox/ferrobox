@@ -27,12 +27,12 @@ use ferrobox_ports::storage::StoragePort;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    copy_stored_artifact, ensure_quota, notify_assay, PackageSearchHit, PackagingError,
-    PackagingStrategy, PromoteOutcome, PublishOutcome,
+    PackageSearchHit, PackagingError, PackagingStrategy, PromoteOutcome, PublishOutcome,
+    copy_stored_artifact, ensure_quota, notify_assay,
 };
 use crate::assay::AssayService;
-use crate::quota::QuotaService;
 use crate::content_hash::sha256_checksum;
+use crate::quota::QuotaService;
 use crate::storage_key::storage_key_for;
 
 /// Packaging strategy for the Cargo ecosystem.
@@ -44,6 +44,8 @@ pub struct CargoPackagingStrategy {
     repository_store: Arc<dyn RepositoryStore>,
     assays: Option<AssayService>,
     quota: Option<QuotaService>,
+    upstream_credentials:
+        Option<Arc<dyn ferrobox_ports::mirror_credential_store::MirrorCredentialStore>>,
 }
 
 impl CargoPackagingStrategy {
@@ -64,7 +66,18 @@ impl CargoPackagingStrategy {
             repository_store,
             assays: None,
             quota: None,
+            upstream_credentials: None,
         }
+    }
+
+    /// Sends this mirror's stored upstream username and secret.
+    #[must_use]
+    pub fn with_upstream_credentials(
+        mut self,
+        store: Arc<dyn ferrobox_ports::mirror_credential_store::MirrorCredentialStore>,
+    ) -> Self {
+        self.upstream_credentials = Some(store);
+        self
     }
 
     /// Connects automatic assay when publishing or caching a crate.
@@ -158,7 +171,13 @@ impl CargoPackagingStrategy {
         name: &PackageName,
     ) -> Result<Bytes, PackagingError> {
         let index_url = join_upstream(upstream, &cargo_index_shard_path(name));
-        let response = self.http_client.get(&index_url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &index_url,
+        )
+        .await?;
         let body = response.body;
 
         for line in body.split(|&byte| byte == b'\n') {
@@ -190,11 +209,18 @@ impl CargoPackagingStrategy {
 
     async fn upstream_download_url(
         &self,
+        repository: &Repository,
         upstream: &url::Url,
         coordinate: &PackageCoordinate,
     ) -> Result<String, PackagingError> {
         let config_url = join_upstream(upstream, "config.json");
-        let response = self.http_client.get(&config_url).await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &config_url,
+        )
+        .await?;
         let config: UpstreamRegistryConfig = serde_json::from_slice(&response.body)
             .map_err(|err| PackagingError::InvalidUpstream(err.to_string()))?;
 
@@ -226,8 +252,16 @@ impl CargoPackagingStrategy {
             .await?
             .ok_or_else(|| PackagingError::VersionNotFound(coordinate.clone()))?;
 
-        let download_url = self.upstream_download_url(upstream, coordinate).await?;
-        let response = self.http_client.get(&download_url).await?;
+        let download_url = self
+            .upstream_download_url(repository, upstream, coordinate)
+            .await?;
+        let response = super::upstream::upstream_get(
+            self.http_client.as_ref(),
+            self.upstream_credentials.as_deref(),
+            repository.id(),
+            &download_url,
+        )
+        .await?;
         let crate_bytes = response.body;
 
         let checksum = sha256_checksum(&crate_bytes);
@@ -240,7 +274,12 @@ impl CargoPackagingStrategy {
 
         let artifact = Artifact::new(repository.id(), checksum, crate_bytes.len() as u64);
 
-        ensure_quota(self.quota.as_ref(), repository.id(), crate_bytes.len() as u64).await?;
+        ensure_quota(
+            self.quota.as_ref(),
+            repository.id(),
+            crate_bytes.len() as u64,
+        )
+        .await?;
         self.storage
             .put(&storage_key_for(artifact.id()), crate_bytes.clone())
             .await?;
@@ -486,9 +525,8 @@ impl PackagingStrategy for CargoPackagingStrategy {
                 }
             }
             if documents.is_empty() {
-                return Err(other_error.unwrap_or_else(|| {
-                    PackagingError::PackageNotFound(name.to_string())
-                }));
+                return Err(other_error
+                    .unwrap_or_else(|| PackagingError::PackageNotFound(name.to_string())));
             }
             return Ok(Self::merge_index_documents(&documents));
         }
@@ -509,8 +547,9 @@ impl PackagingStrategy for CargoPackagingStrategy {
             for target in &targets {
                 match self.download_one(target, coordinate).await {
                     Ok(bytes) => return Ok(bytes),
-                    Err(PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_)) => {
-                    }
+                    Err(
+                        PackagingError::VersionNotFound(_) | PackagingError::PackageNotFound(_),
+                    ) => {}
                     Err(error) => last_error = error,
                 }
             }
@@ -695,9 +734,15 @@ fn expand_dl_template(template: &str, crate_name: &str, version: &str) -> String
     // `https://static.crates.io/crates` without a template; without this step the
     // Mirror would request the directory and crates.io responds 403.
     // https://doc.rust-lang.org/cargo/reference/registry-index.html
-    let has_markers = ["{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"]
-        .iter()
-        .any(|marker| template.contains(marker));
+    let has_markers = [
+        "{crate}",
+        "{version}",
+        "{prefix}",
+        "{lowerprefix}",
+        "{sha256-checksum}",
+    ]
+    .iter()
+    .any(|marker| template.contains(marker));
     if !has_markers {
         let base = template.trim_end_matches('/');
         return format!("{base}/{crate_name}/{version}/download");
