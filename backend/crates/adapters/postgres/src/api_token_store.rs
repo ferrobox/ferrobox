@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenScopes};
+use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenRepositories, TokenScopes};
 use ferrobox_domain::ids::{ApiTokenId, UserId};
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use sqlx::PgPool;
@@ -37,6 +37,10 @@ fn parse_scopes(raw: &str) -> Result<TokenScopes, ApiTokenStoreError> {
         .map_err(|err| backend_error(err.to_string()))
 }
 
+fn parse_repositories(raw: &str) -> Result<TokenRepositories, ApiTokenStoreError> {
+    TokenRepositories::parse_stored(raw).map_err(|err| backend_error(err.to_string()))
+}
+
 fn row_to_token(
     id: Uuid,
     user_id: Uuid,
@@ -44,12 +48,14 @@ fn row_to_token(
     prefix: String,
     expires_at: Option<DateTime<Utc>>,
     scopes: &str,
+    repository_ids: &str,
 ) -> Result<ApiToken, ApiTokenStoreError> {
     let name = ApiTokenName::parse(name).map_err(|err| backend_error(err.to_string()))?;
     Ok(
         ApiToken::from_parts(ApiTokenId::from(id), UserId::from(user_id), name, prefix)
             .with_expires_at(expires_at)
-            .with_scopes(parse_scopes(scopes)?),
+            .with_scopes(parse_scopes(scopes)?)
+            .with_repositories(parse_repositories(repository_ids)?),
     )
 }
 
@@ -72,7 +78,18 @@ fn token_from_row(row: &sqlx::postgres::PgRow) -> Result<ApiToken, ApiTokenStore
     let scopes: String = row
         .try_get("scopes")
         .map_err(|err| backend_error(err.to_string()))?;
-    row_to_token(id, user_id, name, prefix, expires_at, &scopes)
+    let repository_ids: String = row
+        .try_get("repository_ids")
+        .map_err(|err| backend_error(err.to_string()))?;
+    row_to_token(
+        id,
+        user_id,
+        name,
+        prefix,
+        expires_at,
+        &scopes,
+        &repository_ids,
+    )
 }
 
 #[async_trait]
@@ -81,17 +98,19 @@ impl ApiTokenStore for PostgresApiTokenStore {
         let id: Uuid = token.id().into();
         let user_id: Uuid = token.user_id().into();
         let scopes = token.scopes().as_stored();
+        let repository_ids = token.repositories().as_stored();
 
         sqlx::query(
             r#"
-            INSERT INTO api_tokens (id, user_id, name, prefix, token_hash, expires_at, scopes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO api_tokens (id, user_id, name, prefix, token_hash, expires_at, scopes, repository_ids)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (id) DO UPDATE
             SET name = EXCLUDED.name,
                 prefix = EXCLUDED.prefix,
                 token_hash = EXCLUDED.token_hash,
                 expires_at = EXCLUDED.expires_at,
-                scopes = EXCLUDED.scopes
+                scopes = EXCLUDED.scopes,
+                repository_ids = EXCLUDED.repository_ids
             "#,
         )
         .bind(id)
@@ -101,6 +120,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
         .bind(token_hash)
         .bind(token.expires_at())
         .bind(scopes)
+        .bind(repository_ids)
         .execute(&self.pool)
         .await
         .map_err(|err| backend_error(err.to_string()))?;
@@ -114,7 +134,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
     ) -> Result<Option<ApiToken>, ApiTokenStoreError> {
         let row = sqlx::query(
             r#"
-            SELECT id, user_id, name, prefix, expires_at, scopes
+            SELECT id, user_id, name, prefix, expires_at, scopes, repository_ids
             FROM api_tokens
             WHERE token_hash = $1
             "#,
@@ -135,7 +155,7 @@ impl ApiTokenStore for PostgresApiTokenStore {
 
         let rows = sqlx::query(
             r#"
-            SELECT id, user_id, name, prefix, created_at, expires_at, scopes
+            SELECT id, user_id, name, prefix, created_at, expires_at, scopes, repository_ids
             FROM api_tokens
             WHERE user_id = $1
             ORDER BY created_at DESC

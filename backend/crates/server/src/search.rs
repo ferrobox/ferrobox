@@ -36,7 +36,10 @@ pub(crate) async fn search_packages(
     Ok(Json(SearchResponse {
         hits: hits
             .into_iter()
-            .filter(|hit| visibility.contains(hit.repository_id))
+            .filter(|hit| {
+                visibility.contains(hit.repository_id)
+                    && token.repositories().allows(hit.repository_id)
+            })
             .map(PackageSearchHitResponse::from)
             .collect(),
     }))

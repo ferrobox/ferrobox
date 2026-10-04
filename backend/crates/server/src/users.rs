@@ -111,6 +111,7 @@ pub(crate) async fn create_robot(
                 token: token.plaintext_secret,
                 expires_at: token.token.expires_at().map(|at| at.to_rfc3339()),
                 scopes: token_scope_labels(&token.token),
+                repository_ids: crate::dto::token_repository_ids(&token.token),
             },
         }),
     ))

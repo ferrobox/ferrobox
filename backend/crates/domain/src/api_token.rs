@@ -3,7 +3,7 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use crate::ids::{ApiTokenId, UserId};
+use crate::ids::{ApiTokenId, RepositoryId, UserId};
 
 const MAX_NAME_LENGTH: usize = 100;
 
@@ -106,6 +106,92 @@ impl TokenScope {
     }
 }
 
+/// Repositories a token may touch. Empty = every repository the user can
+/// already access.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TokenRepositories(Vec<RepositoryId>);
+
+/// Reasons why a stored repository list is not valid.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum TokenRepositoryError {
+    /// A stored id is not a UUID.
+    #[error("repository id must be a UUID")]
+    Invalid,
+}
+
+impl TokenRepositories {
+    /// No repository limit beyond the user's role and groups.
+    #[must_use]
+    pub fn unrestricted() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Builds a list, dropping duplicates and keeping the first occurrence.
+    #[must_use]
+    pub fn from_ids(ids: impl IntoIterator<Item = RepositoryId>) -> Self {
+        let mut repositories = Vec::new();
+        for id in ids {
+            if !repositories.contains(&id) {
+                repositories.push(id);
+            }
+        }
+        Self(repositories)
+    }
+
+    /// Parses the stored comma-separated form. Empty is unrestricted.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenRepositoryError::Invalid`] if any id is not a UUID.
+    pub fn parse_stored(raw: &str) -> Result<Self, TokenRepositoryError> {
+        if raw.is_empty() {
+            return Ok(Self::unrestricted());
+        }
+        let mut ids = Vec::new();
+        for part in raw.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let id = uuid::Uuid::parse_str(part)
+                .map(RepositoryId::from)
+                .map_err(|_| TokenRepositoryError::Invalid)?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        Ok(Self(ids))
+    }
+
+    /// Stored form: empty, or comma-separated repository ids.
+    #[must_use]
+    pub fn as_stored(&self) -> String {
+        self.0
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Repository ids. Empty means unrestricted.
+    #[must_use]
+    pub fn as_ids(&self) -> &[RepositoryId] {
+        &self.0
+    }
+
+    /// `true` when no repositories were set.
+    #[must_use]
+    pub fn is_unrestricted(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// `true` for an unrestricted token or one that lists `id`.
+    #[must_use]
+    pub fn allows(&self, id: RepositoryId) -> bool {
+        self.is_unrestricted() || self.0.contains(&id)
+    }
+}
+
 /// Set of scopes on a token. Empty = the token inherits the user's full role.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TokenScopes(Vec<TokenScope>);
@@ -186,6 +272,7 @@ pub struct ApiToken {
     prefix: String,
     expires_at: Option<DateTime<Utc>>,
     scopes: TokenScopes,
+    repositories: TokenRepositories,
 }
 
 impl ApiToken {
@@ -199,6 +286,7 @@ impl ApiToken {
             prefix,
             expires_at: None,
             scopes: TokenScopes::unrestricted(),
+            repositories: TokenRepositories::unrestricted(),
         }
     }
 
@@ -213,6 +301,7 @@ impl ApiToken {
             prefix,
             expires_at: None,
             scopes: TokenScopes::unrestricted(),
+            repositories: TokenRepositories::unrestricted(),
         }
     }
 
@@ -270,6 +359,21 @@ impl ApiToken {
     #[must_use]
     pub fn with_scopes(self, scopes: TokenScopes) -> Self {
         Self { scopes, ..self }
+    }
+
+    /// Repositories this token may touch. Empty is unrestricted.
+    #[must_use]
+    pub fn repositories(&self) -> &TokenRepositories {
+        &self.repositories
+    }
+
+    /// Replace the repository list.
+    #[must_use]
+    pub fn with_repositories(self, repositories: TokenRepositories) -> Self {
+        Self {
+            repositories,
+            ..self
+        }
     }
 }
 
@@ -361,6 +465,35 @@ mod tests {
         assert_eq!(
             TokenScopes::parse(["read", "admin"]),
             Err(TokenScopeError::Unknown)
+        );
+    }
+
+    #[test]
+    fn empty_repositories_allow_every_repository() {
+        let repositories = TokenRepositories::unrestricted();
+        let id = RepositoryId::new();
+        assert!(repositories.is_unrestricted());
+        assert!(repositories.allows(id));
+        assert_eq!(repositories.as_stored(), "");
+        assert!(repositories.as_ids().is_empty());
+    }
+
+    #[test]
+    fn listed_repositories_are_an_allow_list() {
+        let allowed = RepositoryId::new();
+        let other = RepositoryId::new();
+        let repositories = TokenRepositories::from_ids([allowed, allowed, other]);
+        assert!(!repositories.is_unrestricted());
+        assert!(repositories.allows(allowed));
+        assert!(repositories.allows(other));
+        assert!(!repositories.allows(RepositoryId::new()));
+        assert_eq!(repositories.as_ids().len(), 2);
+
+        let parsed = TokenRepositories::parse_stored(&repositories.as_stored()).unwrap();
+        assert_eq!(parsed, repositories);
+        assert_eq!(
+            TokenRepositories::parse_stored("not-a-uuid"),
+            Err(TokenRepositoryError::Invalid)
         );
     }
 

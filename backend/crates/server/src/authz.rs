@@ -31,8 +31,22 @@ pub(crate) fn require_token_write(token: &ApiToken) -> Result<(), ApiError> {
     }
 }
 
+/// Instance administration is only for a token that is not limited to
+/// a repository list. A repository-scoped token keeps its read or write
+/// scope on those repositories and cannot mint a wider credential.
+pub(crate) fn require_unrestricted_repositories(token: &ApiToken) -> Result<(), ApiError> {
+    if token.repositories().is_unrestricted() {
+        Ok(())
+    } else {
+        Err(ApiError::Forbidden(
+            "token is limited to specific repositories".to_string(),
+        ))
+    }
+}
+
 /// Requires the user to be able to manage other users (`Admin`).
 pub(crate) fn require_manage_users(user: &User, token: &ApiToken) -> Result<(), ApiError> {
+    require_unrestricted_repositories(token)?;
     require_token_write(token)?;
     if user.role().can_manage_users() {
         Ok(())
@@ -45,6 +59,7 @@ pub(crate) fn require_manage_users(user: &User, token: &ApiToken) -> Result<(), 
 
 /// Requires the user to be able to manage groups (`Admin`).
 pub(crate) fn require_manage_groups(user: &User, token: &ApiToken) -> Result<(), ApiError> {
+    require_unrestricted_repositories(token)?;
     require_token_write(token)?;
     if user.role().can_manage_users() {
         Ok(())
@@ -58,6 +73,7 @@ pub(crate) fn require_manage_groups(user: &User, token: &ApiToken) -> Result<(),
 /// Requires the user to be able to create repositories and publish
 /// artifacts (`Admin` or `Developer`) at instance level.
 pub(crate) fn require_write_artifacts(user: &User, token: &ApiToken) -> Result<(), ApiError> {
+    require_unrestricted_repositories(token)?;
     require_token_write(token)?;
     if user.role().can_write_artifacts() {
         Ok(())
@@ -76,6 +92,11 @@ pub(crate) async fn require_repo_read(
     repository_id: RepositoryId,
 ) -> Result<RepositoryAccess, ApiError> {
     require_token_read(token)?;
+    if !token.repositories().allows(repository_id) {
+        return Err(ApiError::Forbidden(
+            "token is not scoped to this repository".to_string(),
+        ));
+    }
     groups
         .access_on(user, repository_id)
         .await?
@@ -108,36 +129,58 @@ pub(crate) async fn require_public_repo_read(
     headers: &HeaderMap,
     repository_id: RepositoryId,
 ) -> Result<(), ApiError> {
-    if !groups.is_restricted(repository_id).await? {
-        return Ok(());
-    }
-
-    let Some((user, token)) = authenticate_from_headers(authenticate, headers).await? else {
-        return Err(ApiError::Unauthorized(
-            "authentication required to read this repository".to_string(),
-        ));
-    };
-    require_repo_read(groups, &user, &token, repository_id).await?;
-    Ok(())
-}
-
-async fn authenticate_from_headers(
-    authenticate: &AuthenticateTokenUseCase,
-    headers: &HeaderMap,
-) -> Result<Option<(User, ApiToken)>, ApiError> {
+    let restricted = groups.is_restricted(repository_id).await?;
     let Some(secret) = extract_bearer_token(headers) else {
-        return Ok(None);
+        return if restricted {
+            Err(ApiError::Unauthorized(
+                "authentication required to read this repository".to_string(),
+            ))
+        } else {
+            Ok(())
+        };
     };
     if secret == OCI_ANONYMOUS_TOKEN {
-        return Ok(None);
+        return if restricted {
+            Err(ApiError::Unauthorized(
+                "authentication required to read this repository".to_string(),
+            ))
+        } else {
+            Ok(())
+        };
     }
-    let principal = authenticate.execute(&secret).await?;
-    Ok(Some((principal.user, principal.token)))
+
+    match authenticate.execute(&secret).await {
+        Ok(principal) => {
+            if !principal.token.repositories().allows(repository_id) {
+                return Err(ApiError::Forbidden(
+                    "token is not scoped to this repository".to_string(),
+                ));
+            }
+            if restricted {
+                require_repo_read(groups, &principal.user, &principal.token, repository_id).await?;
+            } else {
+                require_token_read(&principal.token)?;
+            }
+            Ok(())
+        }
+        // A public repository stays readable when the presented token
+        // cannot be authenticated. A valid token is still limited to
+        // its repository list.
+        Err(_) if !restricted => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenScopes};
+    use std::sync::Arc;
+
+    use ferrobox_application::manage_groups::GroupService;
+    use ferrobox_application::test_support::{
+        InMemoryGroupStore, InMemoryRepositoryStore, InMemoryUserStore,
+    };
+    use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenRepositories, TokenScopes};
+    use ferrobox_domain::ids::RepositoryId;
     use ferrobox_domain::user::{Role, User, Username};
 
     use super::*;
@@ -168,6 +211,14 @@ mod tests {
         assert!(require_write_artifacts(&user, &token).is_ok());
     }
 
+    fn groups() -> GroupService {
+        GroupService::new(
+            Arc::new(InMemoryGroupStore::default()),
+            Arc::new(InMemoryUserStore::default()),
+            Arc::new(InMemoryRepositoryStore::default()),
+        )
+    }
+
     #[test]
     fn unrestricted_token_keeps_role_checks() {
         let (admin, token) = principal(Role::Admin, &[]);
@@ -176,5 +227,33 @@ mod tests {
         let (reader, token) = principal(Role::Reader, &[]);
         assert!(require_manage_users(&reader, &token).is_err());
         assert!(require_write_artifacts(&reader, &token).is_err());
+    }
+
+    #[test]
+    fn repository_scoped_token_cannot_administer_the_instance() {
+        let (user, token) = principal(Role::Admin, &["write"]);
+        let token = token.with_repositories(TokenRepositories::from_ids([RepositoryId::new()]));
+        assert!(require_manage_users(&user, &token).is_err());
+        assert!(require_write_artifacts(&user, &token).is_err());
+        assert!(require_unrestricted_repositories(&token).is_err());
+    }
+
+    #[tokio::test]
+    async fn repository_scoped_token_cannot_read_another_repository() {
+        let (user, token) = principal(Role::Admin, &["read"]);
+        let allowed = RepositoryId::new();
+        let token = token.with_repositories(TokenRepositories::from_ids([allowed]));
+        let groups = groups();
+
+        assert!(
+            require_repo_read(&groups, &user, &token, allowed)
+                .await
+                .is_ok()
+        );
+        assert!(
+            require_repo_read(&groups, &user, &token, RepositoryId::new())
+                .await
+                .is_err()
+        );
     }
 }

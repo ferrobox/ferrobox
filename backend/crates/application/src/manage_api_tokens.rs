@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenScopes};
+use ferrobox_domain::api_token::{ApiToken, ApiTokenName, TokenRepositories, TokenScopes};
 use ferrobox_domain::ids::UserId;
 use ferrobox_ports::api_token_store::{ApiTokenRecord, ApiTokenStore, ApiTokenStoreError};
 use thiserror::Error;
@@ -61,7 +61,8 @@ impl CreateApiTokenUseCase {
     ///
     /// # Errors
     ///
-    /// [`CreateApiTokenError::Persistence`] if the store fails.
+    /// [`CreateApiTokenError::ExpiryInThePast`] if `expires_at` is not in
+    /// the future, or [`CreateApiTokenError::Persistence`] if the store fails.
     pub async fn execute_with_scopes(
         &self,
         user_id: UserId,
@@ -69,13 +70,39 @@ impl CreateApiTokenUseCase {
         expires_at: Option<DateTime<Utc>>,
         scopes: TokenScopes,
     ) -> Result<CreateApiTokenResult, CreateApiTokenError> {
+        self.execute_limited(
+            user_id,
+            name,
+            expires_at,
+            scopes,
+            TokenRepositories::unrestricted(),
+        )
+        .await
+    }
+
+    /// Issues a token with scopes and an optional repository allow-list.
+    /// Empty repositories inherit every repository the user can access.
+    ///
+    /// # Errors
+    ///
+    /// [`CreateApiTokenError::ExpiryInThePast`] if `expires_at` is not in
+    /// the future, or [`CreateApiTokenError::Persistence`] if the store fails.
+    pub async fn execute_limited(
+        &self,
+        user_id: UserId,
+        name: ApiTokenName,
+        expires_at: Option<DateTime<Utc>>,
+        scopes: TokenScopes,
+        repositories: TokenRepositories,
+    ) -> Result<CreateApiTokenResult, CreateApiTokenError> {
         if expires_at.is_some_and(|at| at <= Utc::now()) {
             return Err(CreateApiTokenError::ExpiryInThePast);
         }
         let (plaintext_secret, prefix) = generate_api_token_secret();
         let token = ApiToken::new(user_id, name, prefix)
             .with_expires_at(expires_at)
-            .with_scopes(scopes);
+            .with_scopes(scopes)
+            .with_repositories(repositories);
         let token_hash = hash_api_token_secret(&plaintext_secret);
         self.api_token_store.save(&token, &token_hash).await?;
 
@@ -239,6 +266,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed[0].token.scopes().as_stored(), "read");
+        assert!(listed[0].token.repositories().is_unrestricted());
+    }
+
+    #[tokio::test]
+    async fn create_persists_repository_allow_list() {
+        let store = Arc::new(InMemoryApiTokenStore::default());
+        let user = User::new(Username::parse("admin").unwrap(), Role::Admin);
+        let repository_id = ferrobox_domain::ids::RepositoryId::new();
+
+        let created = CreateApiTokenUseCase::new(store.clone())
+            .execute_limited(
+                user.id(),
+                ApiTokenName::parse("ci").unwrap(),
+                None,
+                TokenScopes::parse(["write"]).unwrap(),
+                TokenRepositories::from_ids([repository_id]),
+            )
+            .await
+            .unwrap();
+
+        assert!(created.token.repositories().allows(repository_id));
+        assert!(
+            !created
+                .token
+                .repositories()
+                .allows(ferrobox_domain::ids::RepositoryId::new())
+        );
+
+        let listed = ListApiTokensUseCase::new(store)
+            .execute(user.id())
+            .await
+            .unwrap();
+        assert_eq!(
+            listed[0].token.repositories().as_stored(),
+            repository_id.to_string()
+        );
     }
 
     #[tokio::test]
