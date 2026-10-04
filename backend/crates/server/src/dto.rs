@@ -194,6 +194,27 @@ pub(crate) struct MirrorUpstreamAuthResponse {
     pub(crate) username: String,
 }
 
+/// Body that replaces a `Mirror`'s upstream URL.
+#[derive(Deserialize, Serialize, TS)]
+#[ts(export)]
+pub(crate) struct SetMirrorUpstreamRequest {
+    /// Absolute `http` or `https` URL, without a username or password.
+    pub(crate) upstream: String,
+}
+
+/// Result of one GET against the saved upstream. The body is never included.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub(crate) struct MirrorUpstreamProbeResponse {
+    /// HTTP status returned by the upstream.
+    #[ts(type = "number")]
+    pub(crate) status: u16,
+    /// `true` when `status` is 2xx.
+    pub(crate) ok: bool,
+    /// `true` when a stored credential was attached to the request.
+    pub(crate) authenticated: bool,
+}
+
 /// Body that replaces a mirror's upstream credential.
 #[derive(Deserialize, Serialize, TS)]
 #[ts(export)]

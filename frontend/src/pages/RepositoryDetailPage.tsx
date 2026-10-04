@@ -255,7 +255,11 @@ function RepositoryDetailContent({ repositoryId }: { repositoryId: string }) {
             />
           ) : null}
           {repository.kind.type === "mirror" ? (
-            <MirrorUpstreamAuthPanel repositoryId={repositoryId} canWrite={canWrite} />
+            <MirrorUpstreamAuthPanel
+              repositoryId={repositoryId}
+              upstream={repository.kind.upstream}
+              canWrite={canWrite}
+            />
           ) : null}
           <OsvFeedSummary canManage={isAdmin} />
           <ArtifactsTable

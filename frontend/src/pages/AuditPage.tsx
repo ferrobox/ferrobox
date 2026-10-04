@@ -43,6 +43,7 @@ const ACTION_KEYS = [
   "package.prefetched",
   "mirror.schedule_changed",
   "mirror.upstream_changed",
+  "mirror.upstream_url_changed",
   "repository.exported",
   "repository.imported",
   "admission.policy_changed",

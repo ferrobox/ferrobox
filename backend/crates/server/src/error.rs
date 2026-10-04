@@ -23,6 +23,7 @@ use ferrobox_application::manage_users::{
 };
 use ferrobox_application::mirror_credentials::MirrorCredentialError;
 use ferrobox_application::mirror_schedule::SetMirrorScheduleError;
+use ferrobox_application::mirror_upstream::SetMirrorUpstreamError;
 use ferrobox_application::oidc::OidcError;
 use ferrobox_application::packaging::PackagingError;
 use ferrobox_application::prefetch_package::PrefetchError;
@@ -129,6 +130,17 @@ impl From<SetMirrorScheduleError> for ApiError {
     }
 }
 
+impl From<SetMirrorUpstreamError> for ApiError {
+    fn from(err: SetMirrorUpstreamError) -> Self {
+        match err {
+            SetMirrorUpstreamError::NotAMirror(_) | SetMirrorUpstreamError::InvalidUpstream(_) => {
+                Self::BadRequest(err.to_string())
+            }
+            SetMirrorUpstreamError::Repository(inner) => inner.into(),
+        }
+    }
+}
+
 impl From<MirrorCredentialError> for ApiError {
     fn from(err: MirrorCredentialError) -> Self {
         match err {
@@ -136,8 +148,11 @@ impl From<MirrorCredentialError> for ApiError {
             MirrorCredentialError::NotAMirror | MirrorCredentialError::Invalid(_) => {
                 Self::BadRequest(err.to_string())
             }
+            MirrorCredentialError::Upstream(_) => Self::BadRequest(err.to_string()),
             MirrorCredentialError::RepositoryPersistence(inner) => inner.into(),
-            MirrorCredentialError::Persistence(_) => Self::Internal(err.to_string()),
+            MirrorCredentialError::Persistence(_) | MirrorCredentialError::ProbeUnavailable => {
+                Self::Internal(err.to_string())
+            }
         }
     }
 }

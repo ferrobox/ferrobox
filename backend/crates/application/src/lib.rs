@@ -33,6 +33,9 @@ pub mod repository_bundle;
 /// Interval and scheduled refresh of a `Mirror`.
 pub mod mirror_schedule;
 
+/// Replace the upstream URL of a `Mirror`.
+pub mod mirror_upstream;
+
 /// Username and secret a `Mirror` sends to its upstream.
 pub mod mirror_credentials;
 
