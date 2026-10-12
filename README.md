@@ -42,6 +42,14 @@ Settings shows `Directory /var/lib/ferrobox/blobs`. See
 [docs/install-upgrade.md](docs/install-upgrade.md) for the image digest
 check, the upgrade steps, and what a rollback does to PostgreSQL.
 
+### Offline copy
+
+`infra/offline-bundle.sh` packs that directory install for a machine that
+cannot pull images: the FerroBox image, PostgreSQL, the chart, the
+vulnerability index, and `osv-sync.pub.pem`. Signatures are checked while
+you are online. The other machine checks `SHA256SUMS` and does not start
+Garage. See [docs/offline-bundle.md](docs/offline-bundle.md).
+
 ## Quickstart: Helm
 
 Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
