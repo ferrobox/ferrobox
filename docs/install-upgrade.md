@@ -130,20 +130,31 @@ Restarting the container, or recreating the pod on the same volume, is a
 process restart. The catalog and the bytes are still there. It is not a
 version rollback.
 
+An offline copy of one version (image, PostgreSQL, chart, vulnerability
+index, and the index public key) is described in
+[offline-bundle.md](offline-bundle.md).
+
 ## ferrobox.io
 
-The site is a separate repository. Do not describe this directory until
-the release tag that contains it exists. The published site can keep
-saying PostgreSQL and S3 while `0.2.2` is the latest tag.
+The site is a separate repository. Do not edit it from this repository.
 
-After that tag:
+Image tag `0.2.4` contains directory storage. Inside that image, Settings
+still shows server version `0.2.2` and the sidebar still says
+`FerroBox v0.2.2`, because the tag was cut on the feature merge without
+the version-pin commit. The site should name the image tag and the digest
+on the GitHub Release. It should not say the Settings page prints `0.2.4`.
 
-- Say that bytes can live in a local directory or in S3. `./dev-up.sh`
-  remains the Garage quickstart. `./dev-up.sh --filesystem` is PostgreSQL
-  plus one directory.
+The offline bundle (`infra/offline-bundle.sh`) is not in a release tag
+yet. Do not describe it on the site until the tag that contains it exists.
+
+For the directory, which is already tagged:
+
+- Bytes can live in a local directory or in S3. `./dev-up.sh` remains the
+  Garage quickstart. `./dev-up.sh --filesystem` is PostgreSQL plus one
+  directory.
 - Keep Forge, Mirror, and Alloy as the only repository kinds.
-- Name the version that actually contains the feature. Do not attach it
-  to `0.2.2`.
+- Name `0.2.4` as the image tag that contains the directory. Do not attach
+  the feature to `0.2.2`.
 - On the upgrade notes: pin the image by digest; 0.2.x migrations add
   tables and columns; rolling the process back does not rewind
   PostgreSQL; a breaking schema change is a major version and the way

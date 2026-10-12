@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Install**
 
+- `infra/offline-bundle.sh` packs a directory you can carry offline: the
+  FerroBox image, `postgres:18-alpine`, the Helm chart, one signed
+  vulnerability index, `osv-sync.pub.pem`, and `SHA256SUMS`. Garage and a
+  container scanner are not in it. The script checks the keyless image
+  signature and the index key while it still has the network, then pulls
+  the index by the signed manifest digest. The offline machine checks the
+  checksums, loads the images, and imports the index with
+  `POST /api/security/osv-feed`. See `docs/offline-bundle.md`.
 - Artifact bytes can live in a directory (`STORAGE_BACKEND=filesystem`,
   `STORAGE_PATH`) instead of an S3 bucket. `./dev-up.sh` still starts
   Garage. `./dev-up.sh --filesystem` starts PostgreSQL and FerroBox only.
