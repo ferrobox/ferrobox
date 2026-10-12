@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Install**
+
+- `docs/client-smoke.md` is the empty-instance check for a release. It
+  publishes and reads back with the real npm, Cargo, Docker, Maven,
+  NuGet, and Go clients, one Forge each. It does not add a format.
+
 ## [0.2.6] - 2026-10-12
 
 ### Added
