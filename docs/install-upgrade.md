@@ -101,6 +101,11 @@ docker exec ferrobox find /var/lib/ferrobox/blobs -type f
 That command is for a directory install. A Garage install stores the same
 logical object in the bucket; the directory is empty or absent.
 
+The next GitHub Release attaches `ferrobox-sbom.cdx.json`. That file is
+a CycloneDX bill of the FerroBox image. The assay SBOM on a package page
+is a different file. `v0.2.5` does not include the image bill. The
+published image is `linux/amd64`.
+
 ## Upgrade
 
 1. Read this file and the changelog entry for the version you are moving to.

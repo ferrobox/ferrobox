@@ -131,10 +131,9 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          # linux/amd64 only for now: cross-compiling the Rust backend for
-          # arm64 under QEMU is a lot slower and nobody has asked for it
-          # yet. Add linux/arm64 here (and a cross toolchain in the
-          # Dockerfile) when that changes.
+          # linux/amd64 only. A multi-arch tag is a manifest list, and the
+          # digest written down for the offline bundle is the digest Cosign
+          # signed. Add linux/arm64 once that check is written for the list.
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -155,6 +154,23 @@ jobs:
           subject-name: ${{ needs.prepare.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: SBOM of the FerroBox image
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: ${{ needs.prepare.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: ferrobox-sbom.cdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrobox-sbom
+          path: ferrobox-sbom.cdx.json
+          if-no-files-found: error
 
   chart:
     name: Package and push the Helm chart
@@ -199,6 +215,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: ferrobox-sbom
+          path: dist
+
       - name: Create the release
         uses: softprops/action-gh-release@v2
         with:
@@ -206,7 +227,10 @@ jobs:
           name: FerroBox v${{ needs.prepare.outputs.version }}
           prerelease: ${{ needs.prepare.outputs.prerelease }}
           generate_release_notes: true
+          files: dist/ferrobox-sbom.cdx.json
           body: |
             Image: `${{ needs.prepare.outputs.image }}@${{ needs.image.outputs.digest }}`, signed with [Cosign](https://github.com/sigstore/cosign) (keyless) and published with a [build provenance attestation](https://github.com/${{ github.repository }}/attestations).
+
+            SBOM of this image: `ferrobox-sbom.cdx.json` (CycloneDX). It describes the FerroBox container, not a package stored in a repository.
 
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/v${{ needs.prepare.outputs.version }}/CHANGELOG.md) for what changed.

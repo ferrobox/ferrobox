@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Install**
+
+- Pull requests and pushes to `main` run the Rust tests with
+  `cargo test --locked` and the frontend lint and build with
+  `pnpm install --frozen-lockfile`. `Cargo.lock` and `pnpm-lock.yaml`
+  stay the pins.
+- A release attaches `ferrobox-sbom.cdx.json`, a CycloneDX bill of the
+  FerroBox image. It is not the assay SBOM of a package stored in a
+  repository. The published image stays `linux/amd64`.
+
 ## [0.2.5] - 2026-10-12
 
 ### Added

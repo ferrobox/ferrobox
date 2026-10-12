@@ -1,0 +1,63 @@
+name: CI
+
+# Runs on every pull request and on every push to main. A tag still
+# publishes the image from release.yml. The Rust toolchain here matches
+# backend/rust-toolchain.toml.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.97.1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Test with Cargo.lock
+        working-directory: backend
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo test --locked --workspace
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install, lint, and build
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm build
+
+  scripts:
+    name: Bundle script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack a fake offline bundle
+        run: bash infra/offline-bundle-test.sh
