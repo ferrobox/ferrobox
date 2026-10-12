@@ -196,6 +196,18 @@ export function SettingsPage() {
                   </p>
                 </div>
                 <div>
+                  <p className="text-sm text-muted-foreground">{t("settings.artifactStorage")}</p>
+                  <p className="mt-1 font-mono text-sm text-foreground">
+                    {settings?.storage_backend === "filesystem"
+                      ? t("settings.artifactStorageFilesystem", {
+                          path: settings?.storage_location ?? "",
+                        })
+                      : t("settings.artifactStorageS3", {
+                          bucket: settings?.storage_location ?? "",
+                        })}
+                  </p>
+                </div>
+                <div>
                   <p className="text-sm text-muted-foreground">{t("storage.title")}</p>
                   <p className="mt-1 text-sm text-foreground">
                     {storage

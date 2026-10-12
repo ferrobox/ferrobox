@@ -1,3 +1,10 @@
+{{- $backend := .Values.storage.backend | default "s3" }}
+{{- if not (or (eq $backend "s3") (eq $backend "filesystem")) }}
+{{- fail "storage.backend must be s3 or filesystem" }}
+{{- end }}
+{{- if and (eq $backend "filesystem") (gt (int .Values.replicaCount) 1) }}
+{{- fail "storage.backend filesystem requires replicaCount: 1" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,7 +34,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if or .Values.postgresql.enabled .Values.garage.enabled }}
+      {{- if or .Values.postgresql.enabled .Values.garage.enabled (eq $backend "filesystem") }}
       initContainers:
         {{- if .Values.postgresql.enabled }}
         - name: wait-postgres
@@ -69,6 +76,16 @@ spec:
               mountPath: /bootstrap.sh
               subPath: bootstrap.sh
               readOnly: true
+        {{- end }}
+        {{- if eq $backend "filesystem" }}
+        - name: prepare-blobs
+          image: busybox:1.37
+          command: ["chown", "65534:65534", {{ .Values.storage.filesystem.path | quote }}]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: blobs
+              mountPath: {{ .Values.storage.filesystem.path }}
         {{- end }}
       {{- end }}
       containers:
@@ -113,6 +130,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "ferrobox.appSecretName" . }}
                   key: S3_BUCKET
+            - name: STORAGE_BACKEND
+              value: {{ $backend | quote }}
+            {{- if eq $backend "filesystem" }}
+            - name: STORAGE_PATH
+              value: {{ .Values.storage.filesystem.path | quote }}
+            {{- end }}
             - name: PUBLIC_BASE_URL
               valueFrom:
                 secretKeyRef:
@@ -167,16 +190,28 @@ spec:
               port: http
             initialDelaySeconds: 20
             periodSeconds: 10
+          {{- if eq $backend "filesystem" }}
+          volumeMounts:
+            - name: blobs
+              mountPath: {{ .Values.storage.filesystem.path }}
+          {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if .Values.garage.enabled }}
+      {{- if or .Values.garage.enabled (eq $backend "filesystem") }}
       volumes:
+        {{- if .Values.garage.enabled }}
         - name: bootstrap
           configMap:
             name: {{ include "ferrobox.garageName" . }}-bootstrap
             defaultMode: 0555
+        {{- end }}
+        {{- if eq $backend "filesystem" }}
+        - name: blobs
+          persistentVolumeClaim:
+            claimName: {{ include "ferrobox.fullname" . }}-blobs
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

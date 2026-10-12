@@ -5,6 +5,7 @@ members = [
     "crates/ports",
     "crates/application",
     "crates/adapters/s3-storage",
+    "crates/adapters/fs-storage",
     "crates/adapters/postgres",
     "crates/adapters/http",
     "crates/server",

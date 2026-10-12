@@ -1,0 +1,14 @@
+[package]
+name = "ferrobox-adapter-fs-storage"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+ferrobox-ports = { path = "../../ports" }
+async-trait.workspace = true
+bytes.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt"] }
+
+[lints]
+workspace = true

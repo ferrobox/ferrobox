@@ -1,6 +1,6 @@
 apiVersion: v2
 name: ferrobox
-description: FerroBox (API + UI) with optional PostgreSQL and single-node Garage
+description: FerroBox (API + UI) with optional PostgreSQL, Garage, or a directory volume
 type: application
 version: 0.2.2
 appVersion: "0.2.2"

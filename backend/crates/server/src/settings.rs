@@ -22,5 +22,7 @@ pub(crate) async fn get_settings(
         version: env!("CARGO_PKG_VERSION").to_string(),
         oidc_enabled,
         oidc_issuer,
+        storage_backend: state.storage_backend.clone(),
+        storage_location: state.storage_location.clone(),
     })
 }

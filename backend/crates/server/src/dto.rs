@@ -468,6 +468,11 @@ pub(crate) struct SettingsResponse {
     pub(crate) oidc_enabled: bool,
     /// `OIDC` issuer, if SSO is active.
     pub(crate) oidc_issuer: Option<String>,
+    /// `s3` or `filesystem`. Where artifact bytes are stored.
+    /// Not a repository kind.
+    pub(crate) storage_backend: String,
+    /// Bucket name, or the directory path. No credentials.
+    pub(crate) storage_location: String,
 }
 
 /// Public status of federated sign-in (does not require a session).

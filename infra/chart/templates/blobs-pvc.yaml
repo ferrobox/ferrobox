@@ -1,0 +1,19 @@
+{{- $backend := .Values.storage.backend | default "s3" }}
+{{- if eq $backend "filesystem" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ferrobox.fullname" . }}-blobs
+  labels:
+    {{- include "ferrobox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: blobs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.filesystem.persistence.size }}
+  {{- if .Values.storage.filesystem.persistence.storageClass }}
+  storageClassName: {{ .Values.storage.filesystem.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

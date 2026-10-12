@@ -23,6 +23,10 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=backend /ferrobox-server /usr/local/bin/ferrobox-server
 COPY --from=frontend /src/frontend/dist /app/www
+# A fresh named volume copies this directory's ownership. The process
+# runs as nobody, so the default filesystem backend can create objects.
+RUN mkdir -p /var/lib/ferrobox/blobs \
+    && chown -R nobody:nogroup /var/lib/ferrobox
 ENV FRONTEND_DIR=/app/www \
     BIND_ADDRESS=0.0.0.0:3000
 EXPOSE 3000

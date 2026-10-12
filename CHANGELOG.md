@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+**Install**
+
+- Artifact bytes can live in a directory (`STORAGE_BACKEND=filesystem`,
+  `STORAGE_PATH`) instead of an S3 bucket. `./dev-up.sh` still starts
+  Garage. `./dev-up.sh --filesystem` starts PostgreSQL and FerroBox only.
+  The Helm default stays S3; `storage.backend=filesystem` adds a volume
+  and works with `garage.enabled=false`. Switching backends does not copy
+  objects. Settings shows which backend is in use. See
+  `docs/install-upgrade.md` for the image digest check and the database
+  promise: inside 0.2.x, migrations add tables and columns, the previous
+  process ignores objects it does not know, and replacing the process
+  does not rewind PostgreSQL. A migration that removes or renames a
+  column is a major version; the way back is a database dump plus the
+  storage volume.
+
 **Security**
 
 - A Mirror can store an upstream username and secret. FerroBox attaches it
