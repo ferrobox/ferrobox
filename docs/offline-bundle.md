@@ -98,7 +98,8 @@ release that contains this script. Its digest is
 **Settings** in that image still shows server version `0.2.2`. The image
 tagged `0.2.6` shows server version `0.2.6` on **Settings** and
 **FerroBox v0.2.6** in the sidebar. Its chart values set `image.tag`
-to `0.2.6`.
+to `0.2.6`. Its digest is
+`sha256:5b1e9998912eba21cfbd455c7d27c44eba0639d222addc64138d4412bf33142f`.
 
 ## Install
 
