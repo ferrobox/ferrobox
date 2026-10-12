@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-10-12
+
 ### Added
 
 **Install**
@@ -21,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ferrobox-sbom-linux-amd64.cdx.json` and
   `ferrobox-sbom-linux-arm64.cdx.json`. Neither file is the assay SBOM
   of a package stored in a repository. The image tagged `0.2.5` is
-  `linux/amd64` only.
+  `linux/amd64` only. This image shows server version `0.2.6` on
+  **Settings** and **FerroBox v0.2.6** in the sidebar.
 
 ## [0.2.5] - 2026-10-12
 
@@ -271,7 +274,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/ferrobox/ferrobox/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/ferrobox/ferrobox/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/ferrobox/ferrobox/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ferrobox/ferrobox/compare/v0.2.2...v0.2.3

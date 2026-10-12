@@ -56,9 +56,9 @@ Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
 registry).
 
 ```bash
-helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.5 \
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.6 \
   --namespace ferrobox --create-namespace \
-  --set image.tag=0.2.5
+  --set image.tag=0.2.6
 ```
 
 The chart bundles a single-node PostgreSQL and a single-node Garage
@@ -68,15 +68,16 @@ set one yourself; point `postgresql.externalUrl` or `s3.external*` at your
 own if you'd rather bring your own. A directory volume is
 `storage.backend=filesystem`, `garage.enabled=false`, and one replica.
 The charts already published for `0.2.4` and `0.2.5` still carry
-`image.tag` `0.2.2` in their values, so the `--set` above is what selects
-the image you named. See `infra/chart/values.yaml` for every option, and
+`image.tag` `0.2.2` in their values. The `0.2.6` chart values set
+`image.tag` to `0.2.6`. The `--set` above names the image. See
+`infra/chart/values.yaml` for every option, and
 run `helm status ferrobox -n ferrobox` after install for the admin
 credentials and access URL.
 
 ## Container image
 
 ```bash
-docker pull ghcr.io/ferrobox/ferrobox:0.2.5
+docker pull ghcr.io/ferrobox/ferrobox:0.2.6
 ```
 
 The same image is used by both quickstarts above. It expects a `DATABASE_URL`
@@ -141,6 +142,14 @@ and imports the file with `POST /api/security/osv-feed` and an
 OCI images, Helm charts, Conan, and generic files are not part of that index.
 The **Download** button in the console does not apply admission policies; a
 client pull and a promote do.
+
+## Upgrading to 0.2.6
+
+Client protocols are unchanged. The image tag is a manifest list of
+`linux/amd64` and `linux/arm64`. The digest on the GitHub Release is
+the list Cosign signs. **Settings** shows server version `0.2.6` and
+the sidebar says **FerroBox v0.2.6**. The image tagged `0.2.5` is
+`linux/amd64` only and still shows server version `0.2.2`.
 
 ## Upgrading to 0.2.5
 

@@ -66,8 +66,8 @@ The script stops if the tag's digest is different.
 you name with `--platform linux/amd64` or `--platform linux/arm64`. Both
 images in the directory, FerroBox and PostgreSQL, use that architecture.
 `install.sh` refuses to load the directory on the other one. The image
-tagged `0.2.5` contains `linux/amd64` only. `--platform linux/arm64`
-applies once a release lists that architecture.
+tagged `0.2.5` contains `linux/amd64` only. `0.2.6` lists `linux/arm64`,
+so `--platform linux/arm64` applies from that tag.
 
 The compose file in the bundle is the install that stays inside these
 files. It starts PostgreSQL and FerroBox only. Docker copies the image
@@ -95,7 +95,10 @@ to `0.2.2` in their values. Those tags were cut before the pin, and
 the image you loaded. `replicaCount` stays 1. Image tag `0.2.5` is the
 release that contains this script. Its digest is
 `sha256:609afb8c1ec94acc72a2c6142c9f5e983d88fa5c957d3185d37da2047eb2524a`.
-**Settings** in that image still shows server version `0.2.2`.
+**Settings** in that image still shows server version `0.2.2`. The image
+tagged `0.2.6` shows server version `0.2.6` on **Settings** and
+**FerroBox v0.2.6** in the sidebar. Its chart values set `image.tag`
+to `0.2.6`.
 
 ## Install
 
