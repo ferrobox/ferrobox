@@ -84,6 +84,10 @@ The same image is used by both quickstarts above. It expects a `DATABASE_URL`
 and either `S3_*` variables or `STORAGE_BACKEND=filesystem` with
 `STORAGE_PATH`. See `infra/.env.example` for the full list.
 
+On an empty instance, [docs/client-smoke.md](docs/client-smoke.md) publishes
+one package with npm, Cargo, Docker, Maven, NuGet, and Go, then reads it
+back. That check does not add a format.
+
 ## Features
 
 - **Ten package ecosystems** behind one binary: Cargo, npm, PyPI, OCI images,
