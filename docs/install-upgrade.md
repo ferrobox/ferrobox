@@ -105,7 +105,8 @@ logical object in the bucket; the directory is empty or absent.
 
 `0.2.6` is one tag whose digest is a manifest list of `linux/amd64`
 and `linux/arm64`. That digest is what Cosign signs. `docker pull`
-prints it on the `Digest:` line. The release attaches
+prints it on the `Digest:` line:
+`sha256:5b1e9998912eba21cfbd455c7d27c44eba0639d222addc64138d4412bf33142f`. The release attaches
 `ferrobox-sbom-linux-amd64.cdx.json` and
 `ferrobox-sbom-linux-arm64.cdx.json`. Those files are CycloneDX bills
 of the FerroBox image. The assay SBOM on a package page is a different
@@ -166,10 +167,10 @@ not say the Settings page prints `0.2.4` or `0.2.5`.
 The charts published for those tags still have `image.tag` `0.2.2`.
 A Helm example sets `image.tag` to the same version as `--version`.
 
-`0.2.6` is one tag for `linux/amd64` and `linux/arm64`. The digest is
-the manifest list in the GitHub Release body. Copy it after the Release
-workflow is green. Settings in that image shows server version `0.2.6`,
-and the sidebar says `FerroBox v0.2.6`. The chart values in that tag
+`0.2.6` is one tag for `linux/amd64` and `linux/arm64`. Its digest is
+`sha256:5b1e9998912eba21cfbd455c7d27c44eba0639d222addc64138d4412bf33142f`,
+the manifest list in the GitHub Release body. Settings in that image
+shows server version `0.2.6`, and the sidebar says `FerroBox v0.2.6`. The chart values in that tag
 set `image.tag` to `0.2.6`. The release attaches
 `ferrobox-sbom-linux-amd64.cdx.json` and
 `ferrobox-sbom-linux-arm64.cdx.json`. Those files describe the FerroBox
