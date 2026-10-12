@@ -1,7 +1,7 @@
 {
   "app": {
     "tagline": "Artifact registry",
-    "version": "FerroBox v0.2.5"
+    "version": "FerroBox v0.2.6"
   },
   "nav": {
     "repositories": "Repositories",
