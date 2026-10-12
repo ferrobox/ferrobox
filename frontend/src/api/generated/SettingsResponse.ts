@@ -20,4 +20,13 @@ oidc_enabled: boolean,
 /**
  * `OIDC` issuer, if SSO is active.
  */
-oidc_issuer: string | null, };
+oidc_issuer: string | null, 
+/**
+ * `s3` or `filesystem`. Where artifact bytes are stored.
+ * Not a repository kind.
+ */
+storage_backend: string, 
+/**
+ * Bucket name, or the directory path. No credentials.
+ */
+storage_location: string, };

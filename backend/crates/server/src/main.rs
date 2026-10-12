@@ -44,7 +44,8 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
-use config::Config;
+use config::{Config, StorageConfig};
+use ferrobox_adapter_fs_storage::FsStorageAdapter;
 use ferrobox_adapter_http::ReqwestHttpClient;
 use ferrobox_adapter_postgres::admission_store::PostgresAdmissionStore;
 use ferrobox_adapter_postgres::api_token_store::PostgresApiTokenStore;
@@ -64,6 +65,7 @@ use ferrobox_adapter_postgres::user_store::PostgresUserStore;
 use ferrobox_adapter_postgres::webhook_store::PostgresWebhookStore;
 use ferrobox_adapter_postgres::worm_store::PostgresWormStore;
 use ferrobox_adapter_s3_storage::S3StorageAdapter;
+use ferrobox_ports::storage::StoragePort;
 use ferrobox_application::admission::AdmissionService;
 use ferrobox_application::assay::{AssayService, OsvFeed};
 use ferrobox_application::audit::AuditService;
@@ -151,6 +153,8 @@ struct AppState {
     audit: AuditService,
     oidc: Option<ferrobox_application::oidc::OidcLoginService>,
     mirror_credentials: ferrobox_application::mirror_credentials::MirrorCredentialService,
+    storage_backend: String,
+    storage_location: String,
 }
 
 #[tokio::main]
@@ -167,11 +171,6 @@ async fn main() {
                 .join(", ")
         );
     }
-    eprintln!(
-        "ferrobox: s3 endpoint={} bucket={}",
-        config.s3_endpoint_url, config.s3_bucket
-    );
-
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .connect(&config.database_url)
@@ -182,8 +181,6 @@ async fn main() {
         .run(&pool)
         .await
         .expect("failed to run database migrations");
-
-    let s3_client = build_s3_client(&config);
 
     let repository_store = Arc::new(PostgresRepositoryStore::new(pool.clone()));
     let artifact_store = Arc::new(PostgresArtifactStore::new(pool.clone()));
@@ -202,15 +199,7 @@ async fn main() {
     let osv_feed_store = Arc::new(PostgresOsvFeedStore::new(pool.clone()));
     let osv_sync_store = Arc::new(PostgresOsvSyncStore::new(pool.clone()));
     let replica_store = Arc::new(PostgresReplicaStore::new(pool));
-    let storage = Arc::new(S3StorageAdapter::new(s3_client, config.s3_bucket.clone()));
-    storage.ensure_reachable().await.unwrap_or_else(|err| {
-        panic!(
-            "S3 bucket '{}' is not reachable at {}: {err}. \
-             For host cargo run, set S3_ENDPOINT_URL=http://127.0.0.1:3900 and use the same \
-             S3_BUCKET / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY as infra/.env (compose default bucket: ferrobox).",
-            config.s3_bucket, config.s3_endpoint_url
-        );
-    });
+    let storage = open_storage(&config).await;
     let http_client = Arc::new(ReqwestHttpClient::new());
 
     bootstrap_admin(&config, user_store.clone()).await;
@@ -577,7 +566,7 @@ fn build_app_state(
     replica_store: Arc<PostgresReplicaStore>,
     osv_feed_store: Arc<PostgresOsvFeedStore>,
     osv_sync_store: Arc<PostgresOsvSyncStore>,
-    storage: Arc<S3StorageAdapter>,
+    storage: Arc<dyn StoragePort>,
     http_client: Arc<ReqwestHttpClient>,
 ) -> AppState {
     let webhooks =
@@ -749,6 +738,8 @@ fn build_app_state(
             api_token_store,
         ),
         mirror_credentials,
+        storage_backend: config.storage.backend_name().to_string(),
+        storage_location: config.storage.location(),
     }
 }
 
@@ -884,7 +875,7 @@ fn packaging_registry(
     repository_store: &Arc<PostgresRepositoryStore>,
     artifact_store: &Arc<PostgresArtifactStore>,
     package_index_store: &Arc<PostgresPackageIndexStore>,
-    storage: &Arc<S3StorageAdapter>,
+    storage: &Arc<dyn StoragePort>,
     http_client: Arc<ReqwestHttpClient>,
     assays: &AssayService,
     quota: QuotaService,
@@ -1008,10 +999,52 @@ fn packaging_registry(
         ))
 }
 
-fn build_s3_client(config: &Config) -> S3Client {
+async fn open_storage(config: &Config) -> Arc<dyn StoragePort> {
+    match &config.storage {
+        StorageConfig::S3 {
+            endpoint_url,
+            region,
+            access_key_id,
+            secret_access_key,
+            bucket,
+        } => {
+            eprintln!("ferrobox: storage=s3 endpoint={endpoint_url} bucket={bucket}");
+            let s3_client = build_s3_client(endpoint_url, region, access_key_id, secret_access_key);
+            let adapter = Arc::new(S3StorageAdapter::new(s3_client, bucket.clone()));
+            adapter.ensure_reachable().await.unwrap_or_else(|err| {
+                panic!(
+                    "S3 bucket '{bucket}' is not reachable at {endpoint_url}: {err}. \
+                     For host cargo run, set S3_ENDPOINT_URL=http://127.0.0.1:3900 and use the same \
+                     S3_BUCKET / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY as infra/.env (compose default bucket: ferrobox)."
+                );
+            });
+            adapter as Arc<dyn StoragePort>
+        }
+        StorageConfig::Filesystem { path } => {
+            let adapter = FsStorageAdapter::open(path).unwrap_or_else(|err| {
+                panic!(
+                    "STORAGE_PATH={} is not a usable directory: {err}",
+                    path.display()
+                );
+            });
+            eprintln!(
+                "ferrobox: storage=filesystem path={}",
+                adapter.root().display()
+            );
+            Arc::new(adapter) as Arc<dyn StoragePort>
+        }
+    }
+}
+
+fn build_s3_client(
+    endpoint_url: &str,
+    region: &str,
+    access_key_id: &str,
+    secret_access_key: &str,
+) -> S3Client {
     let credentials = Credentials::new(
-        &config.s3_access_key_id,
-        &config.s3_secret_access_key,
+        access_key_id,
+        secret_access_key,
         None,
         None,
         "ferrobox-server",
@@ -1019,8 +1052,8 @@ fn build_s3_client(config: &Config) -> S3Client {
 
     let s3_config = aws_sdk_s3::config::Builder::new()
         .behavior_version(BehaviorVersion::latest())
-        .region(Region::new(config.s3_region.clone()))
-        .endpoint_url(&config.s3_endpoint_url)
+        .region(Region::new(region.to_string()))
+        .endpoint_url(endpoint_url)
         .credentials_provider(credentials)
         .force_path_style(true)
         // Garage rejects the AWS SDK default CRC32 checksums on PutObject.

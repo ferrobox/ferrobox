@@ -2,7 +2,8 @@
 
 FerroBox is a self-hosted artifact registry for Cargo, npm, PyPI, OCI images,
 Helm charts, Conan, Maven, NuGet, Go modules, and generic files, backed by
-PostgreSQL and any S3-compatible object store.
+PostgreSQL. Artifact bytes live in one place for the whole instance: an
+S3-compatible bucket, or a directory on disk.
 
 ## Quickstart: Docker Compose
 
@@ -23,6 +24,24 @@ change them in `.env` before first boot if you want different ones).
 To stop the stack: `docker compose -f infra/docker-compose.yml down` (add
 `-v` to also delete the PostgreSQL and Garage volumes).
 
+### Directory instead of S3
+
+`./dev-up.sh --filesystem` starts PostgreSQL and FerroBox only. Bytes go to
+the `ferrobox_blobs` volume, mounted at `/var/lib/ferrobox/blobs`. Forge,
+Mirror, and Alloy stay the same: the directory is not a fourth repository
+kind. Stop the Garage stack first; the container names are shared, and
+switching storage does not copy objects.
+
+```bash
+cd ferrobox/infra
+docker compose down
+./dev-up.sh --filesystem
+```
+
+Settings shows `Directory /var/lib/ferrobox/blobs`. See
+[docs/install-upgrade.md](docs/install-upgrade.md) for the image digest
+check, the upgrade steps, and what a rollback does to PostgreSQL.
+
 ## Quickstart: Helm
 
 Requires Kubernetes and Helm 3.8 or later (needed to pull a chart from an OCI
@@ -37,9 +56,12 @@ The chart bundles a single-node PostgreSQL and a single-node Garage
 (S3-compatible storage) by default, and generates every secret (admin
 password, database password, Garage tokens) on first install if you don't
 set one yourself; point `postgresql.externalUrl` or `s3.external*` at your
-own if you'd rather bring your own. See `infra/chart/values.yaml` for every
-option, and run `helm status ferrobox -n ferrobox` after install for the
-admin credentials and access URL.
+own if you'd rather bring your own. The published `0.2.2` chart is
+still Garage only. This repository's chart can keep bytes on a volume
+instead: `storage.backend=filesystem` and `garage.enabled=false` (one
+replica). See `infra/chart/values.yaml` for every option, and run
+`helm status ferrobox -n ferrobox` after install for the admin credentials
+and access URL.
 
 ## Container image
 
@@ -48,8 +70,8 @@ docker pull ghcr.io/ferrobox/ferrobox:0.2.2
 ```
 
 The same image is used by both quickstarts above. It expects a `DATABASE_URL`
-and a set of `S3_*` variables pointing at PostgreSQL and an S3-compatible
-bucket -- see `infra/.env.example` for the full list.
+and either `S3_*` variables or `STORAGE_BACKEND=filesystem` with
+`STORAGE_PATH`. See `infra/.env.example` for the full list.
 
 ## Features
 
@@ -62,6 +84,8 @@ bucket -- see `infra/.env.example` for the full list.
   changed later. FerroBox sends that secret only on outbound prefetch and
   pull-through requests. The API never returns it. Test connection reports
   the HTTP status of one request and does not return the response body.
+- **One storage backend for the instance**: an S3 bucket, or a directory.
+  That choice is not a repository kind.
 - **RBAC**: users, groups, per-repository read/write access, and API
   tokens limited by read/write and, optionally, by repository. Robot
   accounts can have an expiry.

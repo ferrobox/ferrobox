@@ -227,6 +227,8 @@ mod tests {
                         ),
                     ),
                 ),
+            storage_backend: "s3".to_string(),
+            storage_location: "test".to_string(),
         });
 
         let admin = state.create_user.seed("admin", Role::Admin).await.unwrap();

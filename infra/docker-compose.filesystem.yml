@@ -1,0 +1,78 @@
+# PostgreSQL + FerroBox. Artifact bytes live in a directory, not in Garage.
+# This is not a fourth repository kind. Forge, Mirror, and Alloy stay.
+# Switching to or from the S3 compose file does not copy objects.
+# Stop the other stack first: the container names are the same.
+name: ferrobox
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: ferrobox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  blobs-init:
+    image: alpine:3.21
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ferrobox_blobs:/var/lib/ferrobox/blobs
+    command: ["chown", "65534:65534", "/var/lib/ferrobox/blobs"]
+
+  ferrobox:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ferrobox:local
+    container_name: ferrobox
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      blobs-init:
+        condition: service_completed_successfully
+    ports:
+      - "${FERROBOX_PORT:-3000}:3000"
+    volumes:
+      - ferrobox_blobs:/var/lib/ferrobox/blobs
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      STORAGE_BACKEND: filesystem
+      STORAGE_PATH: /var/lib/ferrobox/blobs
+      BIND_ADDRESS: 0.0.0.0:3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:3000}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      FRONTEND_DIR: /app/www
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SUCCESS_REDIRECT: ${OIDC_SUCCESS_REDIRECT:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_ADMIN_ROLES: ${OIDC_ADMIN_ROLES:-}
+      OIDC_DEVELOPER_ROLES: ${OIDC_DEVELOPER_ROLES:-}
+      OIDC_READER_ROLES: ${OIDC_READER_ROLES:-}
+      OIDC_ROLE_CLAIM: ${OIDC_ROLE_CLAIM:-}
+      OIDC_GROUP_CLAIM: ${OIDC_GROUP_CLAIM:-}
+      OIDC_AUTO_CREATE_GROUPS: ${OIDC_AUTO_CREATE_GROUPS:-true}
+      OSV_SYNC_REF: ${OSV_SYNC_REF:-}
+      OSV_SYNC_KEY: ${OSV_SYNC_KEY:-}
+      OSV_SYNC_PUBKEY_B64: ${OSV_SYNC_PUBKEY_B64:-}
+      OSV_SYNC_TOKEN: ${OSV_SYNC_TOKEN:-}
+      OSV_SYNC_INTERVAL_HOURS: ${OSV_SYNC_INTERVAL_HOURS:-24}
+
+volumes:
+  postgres_data:
+  ferrobox_blobs:

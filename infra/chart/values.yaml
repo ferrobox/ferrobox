@@ -79,8 +79,21 @@ s3:
   bucket: ferrobox
   accessKeyId: ""
   secretAccessKey: ""
-  # Required when garage.enabled=false
+  # Required when garage.enabled=false and storage.backend=s3
   externalEndpointUrl: ""
+
+# Where artifact bytes go. s3 is the default and matches previous
+# installs. filesystem keeps them on a volume inside the FerroBox pod.
+# It is not a fourth repository kind. Switching backends does not copy
+# objects. With filesystem, set garage.enabled=false unless you still
+# want Garage running unused, and keep replicaCount at 1.
+storage:
+  backend: s3
+  filesystem:
+    path: /var/lib/ferrobox/blobs
+    persistence:
+      size: 8Gi
+      storageClass: ""
 
 resources: {}
 nodeSelector: {}

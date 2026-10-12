@@ -647,6 +647,8 @@ mod tests {
                         ),
                     ),
                 ),
+            storage_backend: "s3".to_string(),
+            storage_location: "test".to_string(),
         });
 
         let developer = state
@@ -1031,6 +1033,8 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["public_base_url"], "http://127.0.0.1:3000");
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(json["storage_backend"], "s3");
+        assert_eq!(json["storage_location"], "test");
     }
 
     #[tokio::test]

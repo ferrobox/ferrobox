@@ -11,22 +11,91 @@ pub enum ConfigError {
     /// A required environment variable is missing.
     #[error("missing required environment variable: {0}")]
     MissingVar(&'static str),
+
+    /// An environment variable is set to a value this server does not accept.
+    #[error("invalid value for {name}: {value}")]
+    InvalidValue {
+        /// Environment variable name.
+        name: &'static str,
+        /// The rejected value.
+        value: String,
+    },
+}
+
+/// Where artifact bytes are stored.
+///
+/// This is not a repository kind. Forge, Mirror, and Alloy stay the
+/// same; only the shelf under them changes. Switching from one variant
+/// to the other does not copy objects.
+pub enum StorageConfig {
+    /// S3-compatible bucket. Garage in the default quickstart.
+    S3 {
+        /// Endpoint URL, for example `http://garage:3900`.
+        endpoint_url: String,
+        /// Region sent to the S3 client.
+        region: String,
+        /// Access-key identifier.
+        access_key_id: String,
+        /// Access-key secret.
+        secret_access_key: String,
+        /// Bucket name.
+        bucket: String,
+    },
+    /// Directory on the local filesystem.
+    Filesystem {
+        /// Directory that will hold every object. Created at startup.
+        path: PathBuf,
+    },
+}
+
+impl StorageConfig {
+    /// `s3` or `filesystem`.
+    #[must_use]
+    pub fn backend_name(&self) -> &'static str {
+        match self {
+            Self::S3 { .. } => "s3",
+            Self::Filesystem { .. } => "filesystem",
+        }
+    }
+
+    /// Bucket name, or the configured directory. No credentials.
+    #[must_use]
+    pub fn location(&self) -> String {
+        match self {
+            Self::S3 { bucket, .. } => bucket.clone(),
+            Self::Filesystem { path } => path.display().to_string(),
+        }
+    }
+}
+
+impl std::fmt::Debug for StorageConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::S3 {
+                endpoint_url,
+                region,
+                access_key_id,
+                bucket,
+                ..
+            } => f
+                .debug_struct("S3")
+                .field("endpoint_url", endpoint_url)
+                .field("region", region)
+                .field("access_key_id", access_key_id)
+                .field("secret_access_key", &"***")
+                .field("bucket", bucket)
+                .finish(),
+            Self::Filesystem { path } => f.debug_struct("Filesystem").field("path", path).finish(),
+        }
+    }
 }
 
 /// Server configuration, assembled once at startup.
 pub struct Config {
     /// `PostgreSQL` connection string.
     pub database_url: String,
-    /// S3 *endpoint* URL (Garage in development, AWS S3 in production).
-    pub s3_endpoint_url: String,
-    /// S3 region to use.
-    pub s3_region: String,
-    /// S3 access-key identifier.
-    pub s3_access_key_id: String,
-    /// S3 access-key secret.
-    pub s3_secret_access_key: String,
-    /// Name of the S3 *bucket* where artifacts are stored.
-    pub s3_bucket: String,
+    /// Where artifact bytes are stored. See [`StorageConfig`].
+    pub storage: StorageConfig,
     /// Address and port the HTTP server listens on.
     pub bind_address: String,
     /// Public URL (scheme + host + port, no trailing slash) at which
@@ -90,15 +159,12 @@ impl Config {
     /// # Errors
     ///
     /// Returns [`ConfigError::MissingVar`] if a required variable is
-    /// missing.
+    /// missing, or [`ConfigError::InvalidValue`] when `STORAGE_BACKEND`
+    /// is neither `s3` nor `filesystem`.
     pub fn from_env() -> Result<Self, ConfigError> {
         Ok(Self {
             database_url: require_env("DATABASE_URL")?,
-            s3_endpoint_url: require_env("S3_ENDPOINT_URL")?,
-            s3_region: env_or("S3_REGION", "garage"),
-            s3_access_key_id: require_env("S3_ACCESS_KEY_ID")?,
-            s3_secret_access_key: require_env("S3_SECRET_ACCESS_KEY")?,
-            s3_bucket: require_env("S3_BUCKET")?,
+            storage: storage_from_env()?,
             bind_address: env_or("BIND_ADDRESS", "127.0.0.1:3000"),
             public_base_url: env_or("PUBLIC_BASE_URL", "http://127.0.0.1:3000"),
             admin_username: env_or("ADMIN_USERNAME", "admin"),
@@ -208,6 +274,54 @@ fn load_env_file(path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
+fn storage_from_env() -> Result<StorageConfig, ConfigError> {
+    storage_from_values(
+        optional_env("STORAGE_BACKEND").as_deref(),
+        optional_env("STORAGE_PATH").as_deref(),
+        optional_env("S3_ENDPOINT_URL").as_deref(),
+        optional_env("S3_REGION").as_deref(),
+        optional_env("S3_ACCESS_KEY_ID").as_deref(),
+        optional_env("S3_SECRET_ACCESS_KEY").as_deref(),
+        optional_env("S3_BUCKET").as_deref(),
+    )
+}
+
+fn storage_from_values(
+    backend: Option<&str>,
+    path: Option<&str>,
+    endpoint_url: Option<&str>,
+    region: Option<&str>,
+    access_key_id: Option<&str>,
+    secret_access_key: Option<&str>,
+    bucket: Option<&str>,
+) -> Result<StorageConfig, ConfigError> {
+    let raw = backend.unwrap_or("s3");
+    match raw.to_ascii_lowercase().as_str() {
+        "s3" => Ok(StorageConfig::S3 {
+            endpoint_url: required("S3_ENDPOINT_URL", endpoint_url)?,
+            region: region.unwrap_or("garage").to_string(),
+            access_key_id: required("S3_ACCESS_KEY_ID", access_key_id)?,
+            secret_access_key: required("S3_SECRET_ACCESS_KEY", secret_access_key)?,
+            bucket: required("S3_BUCKET", bucket)?,
+        }),
+        "filesystem" => Ok(StorageConfig::Filesystem {
+            path: PathBuf::from(required("STORAGE_PATH", path)?),
+        }),
+        _ => Err(ConfigError::InvalidValue {
+            name: "STORAGE_BACKEND",
+            value: raw.to_string(),
+        }),
+    }
+}
+
+fn required(name: &'static str, value: Option<&str>) -> Result<String, ConfigError> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or(ConfigError::MissingVar(name))
+}
+
 fn require_env(key: &'static str) -> Result<String, ConfigError> {
     std::env::var(key)
         .ok()
@@ -294,6 +408,58 @@ mod tests {
     fn absolute_env_file_is_used_as_is() {
         let paths = dotenv_candidates_from(Some("/tmp/.env_a"));
         assert_eq!(paths, vec![PathBuf::from("/tmp/.env_a")]);
+    }
+
+    #[test]
+    fn missing_storage_backend_is_s3_and_still_requires_s3() {
+        let storage = storage_from_values(
+            None,
+            None,
+            Some("http://garage:3900"),
+            None,
+            Some("GK0123456789abcdef01234567"),
+            Some("secret"),
+            Some("ferrobox"),
+        )
+        .unwrap();
+        assert_eq!(storage.backend_name(), "s3");
+        assert_eq!(storage.location(), "ferrobox");
+    }
+
+    #[test]
+    fn filesystem_backend_does_not_require_s3() {
+        let storage = storage_from_values(
+            Some("FileSystem"),
+            Some("/var/lib/ferrobox/blobs"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(storage.backend_name(), "filesystem");
+        assert_eq!(storage.location(), "/var/lib/ferrobox/blobs");
+    }
+
+    #[test]
+    fn filesystem_backend_requires_a_path() {
+        let error = storage_from_values(Some("filesystem"), None, None, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(error, ConfigError::MissingVar("STORAGE_PATH")));
+    }
+
+    #[test]
+    fn unknown_storage_backend_is_rejected() {
+        let error =
+            storage_from_values(Some("blob"), None, None, None, None, None, None).unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::InvalidValue {
+                name: "STORAGE_BACKEND",
+                ..
+            }
+        ));
     }
 
     #[test]

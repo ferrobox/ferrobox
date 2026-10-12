@@ -21,5 +21,12 @@ Port-forward:
 UI: {{ .Values.publicBaseUrl }}
 {{- end }}
 
+Almacenamiento: {{ .Values.storage.backend | default "s3" }}.
+{{- if eq (.Values.storage.backend | default "s3") "filesystem" }}
+Los bytes van al volumen {{ include "ferrobox.fullname" . }}-blobs ({{ .Values.storage.filesystem.path }}). No es un cuarto tipo de repositorio. Con este modo, garage.enabled puede quedar en false.
+{{- else }}
+Los bytes van al bucket S3. El chart por defecto arranca Garage.
+{{- end }}
+
 La imagen por defecto es {{ .Values.image.repository }}:{{ .Values.image.tag }}.
 En kind/k3d: docker build -t {{ .Values.image.repository }}:{{ .Values.image.tag }} . && kind load docker-image {{ .Values.image.repository }}:{{ .Values.image.tag }}

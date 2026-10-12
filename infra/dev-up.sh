@@ -4,6 +4,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+MODE=s3
+if [ "${1:-}" = "--filesystem" ]; then
+  MODE=filesystem
+elif [ $# -gt 0 ]; then
+  echo "Usage: ./dev-up.sh [--filesystem]" >&2
+  exit 1
+fi
+
+compose() {
+  if [ "$MODE" = filesystem ]; then
+    docker compose -f docker-compose.filesystem.yml "$@"
+  else
+    docker compose "$@"
+  fi
+}
+
 # 1. Automatic .env generation if not present
 if [ ! -f .env ]; then
   echo "No .env file found. Initializing from .env.example with generated secrets..."
@@ -28,14 +44,10 @@ if [ ! -f .env ]; then
   echo "  Generated secure secrets in .env successfully."
 fi
 
-# 2. Boot infrastructure
-echo "Starting FerroBox infrastructure (PostgreSQL + Garage)..."
-docker compose up -d postgres garage-config garage
-
 wait_for_healthy() {
   local service="$1"
   local container
-  container="$(docker compose ps -q "$service")"
+  container="$(compose ps -q "$service")"
   echo "Waiting for '$service' to become healthy..."
   until [ "$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null)" = "healthy" ]; do
     sleep 1
@@ -43,23 +55,44 @@ wait_for_healthy() {
   echo "  '$service' is healthy."
 }
 
+if [ "$MODE" = filesystem ]; then
+  echo "Starting FerroBox (PostgreSQL + a directory for artifact bytes)..."
+  compose up -d postgres
+  wait_for_healthy postgres
+
+  echo "Starting FerroBox application..."
+  compose up -d --build ferrobox
+  wait_for_healthy ferrobox
+
+  echo ""
+  echo "FerroBox is up. Artifact bytes are in the ferrobox_blobs volume (/var/lib/ferrobox/blobs)."
+  echo "This is not a new repository type. Forge, Mirror, and Alloy are unchanged."
+  echo "Web UI: http://localhost:3000"
+  compose ps
+  exit 0
+fi
+
+# 2. Boot infrastructure
+echo "Starting FerroBox infrastructure (PostgreSQL + Garage)..."
+compose up -d postgres garage-config garage
+
 wait_for_healthy postgres
 wait_for_healthy garage
 
 # 3. Provision Garage storage
 echo "Initializing Garage storage..."
-docker compose up --no-deps --exit-code-from garage-init garage-init
+compose up --no-deps --exit-code-from garage-init garage-init
 
 # 4. Launch application
 echo "Starting FerroBox application..."
 # --build: the ferrobox:local image is only built once; without --build,
 # `up` reuses whatever image already exists and silently ignores any
 # source changes since the last build.
-docker compose up -d --build ferrobox
+compose up -d --build ferrobox
 
 wait_for_healthy ferrobox
 
 echo ""
 echo "FerroBox stack is up and running!"
 echo "Web UI: http://localhost:3000"
-docker compose ps
+compose ps
