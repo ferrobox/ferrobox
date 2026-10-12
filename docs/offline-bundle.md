@@ -81,10 +81,13 @@ helm install ferrobox chart/ferrobox-0.2.4.tgz \
   --set image.tag=0.2.4
 ```
 
-The chart published for `0.2.4` still has `image.tag` set to `0.2.2` in
-its values. The release tag was cut without the version-pin commit, and
-`helm package` does not rewrite that field. `--set image.tag=0.2.4`
-selects the image you loaded. `replicaCount` stays 1.
+The charts published for `0.2.4` and `0.2.5` still have `image.tag` set
+to `0.2.2` in their values. Those tags were cut before the pin, and
+`helm package` does not rewrite that field. `--set image.tag` selects
+the image you loaded. `replicaCount` stays 1. Image tag `0.2.5` is the
+release that contains this script. Its digest is
+`sha256:609afb8c1ec94acc72a2c6142c9f5e983d88fa5c957d3185d37da2047eb2524a`.
+**Settings** in that image still shows server version `0.2.2`.
 
 ## Install
 

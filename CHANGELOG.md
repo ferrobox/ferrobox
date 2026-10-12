@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Install**
 
+- Pull requests and pushes to `main` run the Rust tests with
+  `cargo test --locked` and the frontend lint and build with
+  `pnpm install --frozen-lockfile`. `Cargo.lock` and `pnpm-lock.yaml`
+  stay the pins.
+- A release attaches `ferrobox-sbom.cdx.json`, a CycloneDX bill of the
+  FerroBox image. It is not the assay SBOM of a package stored in a
+  repository. The published image stays `linux/amd64`.
+
+## [0.2.5] - 2026-10-12
+
+### Added
+
+**Install**
+
 - `infra/offline-bundle.sh` packs a directory you can carry offline: the
   FerroBox image, `postgres:18-alpine`, the Helm chart, one signed
   vulnerability index, `osv-sync.pub.pem`, and `SHA256SUMS`. Garage and a
@@ -19,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the index by the signed manifest digest. The offline machine checks the
   checksums, loads the images, and imports the index with
   `POST /api/security/osv-feed`. See `docs/offline-bundle.md`.
+
+## [0.2.4] - 2026-10-12
+
+### Added
+
+**Install**
+
 - Artifact bytes can live in a directory (`STORAGE_BACKEND=filesystem`,
   `STORAGE_PATH`) instead of an S3 bucket. `./dev-up.sh` still starts
   Garage. `./dev-up.sh --filesystem` starts PostgreSQL and FerroBox only.
@@ -31,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not rewind PostgreSQL. A migration that removes or renames a
   column is a major version; the way back is a database dump plus the
   storage volume.
+
+## [0.2.3] - 2026-10-04
+
+### Added
 
 **Security**
 
@@ -242,7 +267,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Helm chart for Kubernetes, with optional bundled PostgreSQL and
   Garage.
 
-[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ferrobox/ferrobox/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/ferrobox/ferrobox/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/ferrobox/ferrobox/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/ferrobox/ferrobox/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ferrobox/ferrobox/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ferrobox/ferrobox/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ferrobox/ferrobox/compare/v0.1.1...v0.2.0
