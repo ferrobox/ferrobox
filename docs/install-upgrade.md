@@ -36,26 +36,30 @@ PostgreSQL and FerroBox start. Garage does not. Bytes go to the
 
 ### Helm
 
-The published chart still defaults to PostgreSQL plus Garage:
+The published chart defaults to PostgreSQL plus Garage:
 
 ```bash
-helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.2 \
-  --namespace ferrobox --create-namespace
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.5 \
+  --namespace ferrobox --create-namespace \
+  --set image.tag=0.2.5
 ```
 
-That `--version` is the last published chart. This directory option ships
-in the next chart release. Until that tag exists, render the chart from
-this repository:
+Directory storage is in the `0.2.4` chart and later. `replicaCount` must
+stay `1`: two pods cannot share that volume.
 
 ```bash
-helm install ferrobox infra/chart --namespace ferrobox --create-namespace \
+helm install ferrobox oci://ghcr.io/ferrobox/charts/ferrobox --version 0.2.5 \
+  --namespace ferrobox --create-namespace \
+  --set image.tag=0.2.5 \
   --set storage.backend=filesystem \
-  --set garage.enabled=false
+  --set garage.enabled=false \
+  --set replicaCount=1
 ```
 
-`replicaCount` must stay `1` with a directory: two pods cannot share that
-volume. Leave `storage.backend` unset (or `s3`) to keep the previous
-install.
+The charts published for `0.2.4` and `0.2.5` were packaged before
+`image.tag` moved, so their values still say `0.2.2`. `--set image.tag`
+selects the image. Leave `storage.backend` unset (or `s3`) to keep the
+previous install.
 
 ### What you should see
 
@@ -65,9 +69,11 @@ On **Settings**, under **Server version**:
   environment; the default is `ferrobox`).
 - Directory install: `Directory /var/lib/ferrobox/blobs`.
 
-The version string stays the published crate version until a new tag is
-cut. A directory install is not a new repository type. Creating a Forge
-still offers the same ecosystems.
+**Settings** shows the crate version compiled into that image. The
+images tagged `0.2.4` and `0.2.5` were built before this pin, so both
+still show server version `0.2.2` and the sidebar still says
+`FerroBox v0.2.2`. A directory install is not a new repository type.
+Creating a Forge still offers the same ecosystems.
 
 ## Check the image
 
@@ -75,7 +81,7 @@ Settings shows the version string compiled into the binary. The digest is
 what you pin.
 
 ```bash
-docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/ferrobox/ferrobox:0.2.2
+docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/ferrobox/ferrobox:0.2.5
 ```
 
 For the local quickstart image there is no registry digest. Record the
@@ -138,23 +144,29 @@ index, and the index public key) is described in
 
 The site is a separate repository. Do not edit it from this repository.
 
-Image tag `0.2.4` contains directory storage. Inside that image, Settings
-still shows server version `0.2.2` and the sidebar still says
-`FerroBox v0.2.2`, because the tag was cut on the feature merge without
-the version-pin commit. The site should name the image tag and the digest
-on the GitHub Release. It should not say the Settings page prints `0.2.4`.
+`0.2.4` is directory storage. Its digest is
+`sha256:cec6f297ba140724b6208d5118a893226bb1fb66d57616ad1920448684bb6591`.
+`0.2.5` is the offline bundle. Its digest is
+`sha256:609afb8c1ec94acc72a2c6142c9f5e983d88fa5c957d3185d37da2047eb2524a`.
+Both tags were cut on the feature merge. Settings in both images still
+shows server version `0.2.2`, and the sidebar still says
+`FerroBox v0.2.2`. The site names the image tag and the digest. It does
+not say the Settings page prints `0.2.4` or `0.2.5`.
 
-The offline bundle (`infra/offline-bundle.sh`) is not in a release tag
-yet. Do not describe it on the site until the tag that contains it exists.
+The charts published for those tags still have `image.tag` `0.2.2`.
+A Helm example sets `image.tag` to the same version as `--version`.
 
-For the directory, which is already tagged:
+The offline bundle is in `0.2.5`. One directory carries the FerroBox
+image, PostgreSQL, the chart, the vulnerability index, and
+`osv-sync.pub.pem`. Signatures are checked while online. The other
+machine checks `SHA256SUMS`. Garage is not in that directory. The index
+is imported with `POST /api/security/osv-feed`, and the page then shows
+mode `file`.
 
 - Bytes can live in a local directory or in S3. `./dev-up.sh` remains the
   Garage quickstart. `./dev-up.sh --filesystem` is PostgreSQL plus one
   directory.
 - Keep Forge, Mirror, and Alloy as the only repository kinds.
-- Name `0.2.4` as the image tag that contains the directory. Do not attach
-  the feature to `0.2.2`.
 - On the upgrade notes: pin the image by digest; 0.2.x migrations add
   tables and columns; rolling the process back does not rewind
   PostgreSQL; a breaking schema change is a major version and the way
