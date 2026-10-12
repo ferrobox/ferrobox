@@ -15,9 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo test --locked` and the frontend lint and build with
   `pnpm install --frozen-lockfile`. `Cargo.lock` and `pnpm-lock.yaml`
   stay the pins.
-- A release attaches `ferrobox-sbom.cdx.json`, a CycloneDX bill of the
-  FerroBox image. It is not the assay SBOM of a package stored in a
-  repository. The published image stays `linux/amd64`.
+- A release publishes one tag for `linux/amd64` and `linux/arm64`.
+  The digest on the release is the manifest list Cosign signs. Each
+  platform has its own CycloneDX file,
+  `ferrobox-sbom-linux-amd64.cdx.json` and
+  `ferrobox-sbom-linux-arm64.cdx.json`. Neither file is the assay SBOM
+  of a package stored in a repository. The image tagged `0.2.5` is
+  `linux/amd64` only.
 
 ## [0.2.5] - 2026-10-12
 

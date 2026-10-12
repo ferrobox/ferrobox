@@ -38,6 +38,45 @@ then
   echo "two manifest digests must be rejected" >&2
   exit 1
 fi
+digest_header="$(printf 'HTTP/1.1 200 OK\r\nDocker-Content-Digest: %s\r\n\r\n' "$digest")"
+got_header="$(printf '%s' "$digest_header" | "$SCRIPT_DIR/offline-bundle.sh" --digest-from-headers)"
+test "$got_header" = "$digest"
+if printf 'HTTP/1.1 200 OK\r\n\r\n' | "$SCRIPT_DIR/offline-bundle.sh" --digest-from-headers; then
+  echo "headers without a digest must be rejected" >&2
+  exit 1
+fi
+amd64_digest="sha256:$(python3 -c 'print("cd"*32)')"
+arm64_digest="sha256:$(python3 -c 'print("ef"*32)')"
+attestation_digest="sha256:$(python3 -c 'print("12"*32)')"
+got_platform="$(
+  python3 - "$amd64_digest" "$arm64_digest" "$attestation_digest" <<'PY' | "$SCRIPT_DIR/offline-bundle.sh" --platform-digest-from-index linux/arm64
+import json, sys
+json.dump({
+    "manifests": [
+        {"digest": sys.argv[1], "platform": {"os": "linux", "architecture": "amd64"}},
+        {"digest": sys.argv[3], "platform": {"os": "unknown", "architecture": "unknown"}},
+        {"digest": sys.argv[2], "platform": {"os": "linux", "architecture": "arm64"}},
+    ]
+}, sys.stdout)
+PY
+)"
+test "$got_platform" = "$arm64_digest"
+if printf '%s\n' '{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":{"os":"unknown","architecture":"unknown"}}]}' \
+  | "$SCRIPT_DIR/offline-bundle.sh" --platform-digest-from-index linux/amd64
+then
+  echo "an attestation manifest must not count as linux/amd64" >&2
+  exit 1
+fi
+if "$SCRIPT_DIR/offline-bundle.sh" --assemble \
+  --version 0.2.4 \
+  --platform linux/ppc64le \
+  --osv-ref ghcr.io/ferrobox/osv-db:2026-10-12 \
+  --out "$tmp/rejected-platform"
+then
+  echo "an unsupported platform must be rejected" >&2
+  exit 1
+fi
+
 if "$SCRIPT_DIR/offline-bundle.sh" --assemble \
   --version v0.2.4 \
   --osv-ref ghcr.io/ferrobox/osv-db:2026-10-12 \
@@ -49,6 +88,7 @@ fi
 
 "$SCRIPT_DIR/offline-bundle.sh" --assemble \
   --version 0.2.4 \
+  --platform linux/amd64 \
   --osv-ref ghcr.io/ferrobox/osv-db:2026-10-12 \
   --out "$tmp/bundle" \
   --ferrobox-tar "$tmp/src/ferrobox.tar" \
@@ -89,10 +129,14 @@ assert doc["storage"] == "filesystem"
 assert doc["osv_ref"] == "ghcr.io/ferrobox/osv-db:2026-10-12"
 assert doc["image_signature"] == "keyless-cosign-checked-while-online"
 assert "osv_manifest_digest" not in doc
+assert doc["ferrobox_platform"] == "linux/amd64"
+assert "ferrobox_platform_digest" not in doc
 assert doc["osv_sha256"] == open(sys.argv[1].replace("bundle.json", "osv/ferrobox-osv-index.json.gz.sha256")).read().split()[0]
 PY
 bash -n "$tmp/bundle/install.sh"
 test -x "$tmp/bundle/install.sh"
+grep -q 'ferrobox_platform' "$tmp/bundle/install.sh"
+grep -q 'linux/amd64' "$tmp/bundle/README.txt"
 if "$SCRIPT_DIR/offline-bundle.sh" --assemble \
   --version 0.2.4 \
   --osv-ref ghcr.io/ferrobox/osv-db:2026-10-12 \

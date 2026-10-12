@@ -58,8 +58,16 @@ and `alpine/helm:3.16.4`. Docker pulls each one once.
 
 `--version` is the image tag without a leading `v`. `--osv-ref` is a date
 tag, not a digest. `--expect-ferrobox-digest` is the digest on the GitHub
-Release page for that version. The script stops if the pulled image is a
-different digest.
+Release page. For `0.2.5` and later that digest is the manifest list, the
+object Cosign signs, not the digest of the `linux/amd64` image inside it.
+The script stops if the tag's digest is different.
+
+`docker save` writes one architecture: the machine you are on, or the one
+you name with `--platform linux/amd64` or `--platform linux/arm64`. Both
+images in the directory, FerroBox and PostgreSQL, use that architecture.
+`install.sh` refuses to load the directory on the other one. The image
+tagged `0.2.5` contains `linux/amd64` only. `--platform linux/arm64`
+applies once a release lists that architecture.
 
 The compose file in the bundle is the install that stays inside these
 files. It starts PostgreSQL and FerroBox only. Docker copies the image

@@ -101,10 +101,12 @@ docker exec ferrobox find /var/lib/ferrobox/blobs -type f
 That command is for a directory install. A Garage install stores the same
 logical object in the bucket; the directory is empty or absent.
 
-The next GitHub Release attaches `ferrobox-sbom.cdx.json`. That file is
-a CycloneDX bill of the FerroBox image. The assay SBOM on a package page
-is a different file. `v0.2.5` does not include the image bill. The
-published image is `linux/amd64`.
+The next GitHub Release is one tag whose digest is a manifest list of
+`linux/amd64` and `linux/arm64`. That digest is what Cosign signs.
+The release attaches `ferrobox-sbom-linux-amd64.cdx.json` and
+`ferrobox-sbom-linux-arm64.cdx.json`. Those files are CycloneDX bills
+of the FerroBox image. The assay SBOM on a package page is a different
+file. `v0.2.5` does not include them. Its tag is `linux/amd64` only.
 
 ## Upgrade
 

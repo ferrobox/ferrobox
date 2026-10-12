@@ -29,15 +29,19 @@ usage() {
 Usage:
   offline-bundle.sh --version VERSION --osv-ref REF --out DIR
                     [--expect-ferrobox-digest sha256:HEX]
+                    [--platform linux/amd64|linux/arm64]
   offline-bundle.sh --assemble --version VERSION --osv-ref REF --out DIR \
                     --ferrobox-tar FILE --ferrobox-digest sha256:HEX \
                     --postgres-tar FILE --postgres-digest sha256:HEX \
-                    --chart FILE --index FILE --index-sha FILE
+                    --chart FILE --index FILE --index-sha FILE \
+                    [--ferrobox-platform linux/amd64|linux/arm64]
 
 --version is the FerroBox image tag without a leading v (0.2.4).
 --osv-ref is the signed index, for example ghcr.io/ferrobox/osv-db:2026-10-12.
-The fetch form pulls those artifacts and checks signatures before packing.
-The assemble form only packs files you already have. It is what the test uses.
+--expect-ferrobox-digest is the manifest-list digest on the GitHub Release.
+--platform chooses which image docker save writes. The default is the
+architecture of this machine. The assemble form only packs files you
+already have. It is what the test uses.
 EOF
 }
 
@@ -66,6 +70,11 @@ INDEX_FILE=""
 INDEX_SHA_FILE=""
 OSV_MANIFEST_DIGEST=""
 MANIFEST_FROM_JSON=0
+DIGEST_FROM_HEADERS=0
+PLATFORM_DIGEST_OSARCH=""
+PLATFORM=""
+FERROBOX_PLATFORM=""
+FERROBOX_PLATFORM_DIGEST=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -87,6 +96,11 @@ while [ $# -gt 0 ]; do
     --expect-ferrobox-digest)
       need_value "$@"
       EXPECT_FERROBOX_DIGEST="$2"
+      shift 2
+      ;;
+    --platform|--ferrobox-platform)
+      need_value "$@"
+      PLATFORM="$2"
       shift 2
       ;;
     --assemble)
@@ -134,6 +148,17 @@ while [ $# -gt 0 ]; do
       MANIFEST_FROM_JSON=1
       shift
       ;;
+    # Reads HTTP response headers on stdin and prints Docker-Content-Digest.
+    --digest-from-headers)
+      DIGEST_FROM_HEADERS=1
+      shift
+      ;;
+    # Reads an OCI index on stdin and prints the manifest for OS/ARCH.
+    --platform-digest-from-index)
+      need_value "$@"
+      PLATFORM_DIGEST_OSARCH="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -147,12 +172,16 @@ done
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 export LC_ALL=C
 
-if [ "$MANIFEST_FROM_JSON" -eq 0 ]; then
+if [ "$MANIFEST_FROM_JSON" -eq 0 ] && [ "$DIGEST_FROM_HEADERS" -eq 0 ] && [ -z "$PLATFORM_DIGEST_OSARCH" ]; then
   [ -n "$VERSION" ] || die "--version is required"
   [ -n "$OSV_REF" ] || die "--osv-ref is required"
   [ -n "$OUT" ] || die "--out is required"
   [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--version must look like 0.2.4, without a leading v"
   [[ "$OSV_REF" =~ ^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || die "--osv-ref must be a registry tag, not a digest"
+  if [ -n "$PLATFORM" ]; then
+    [[ "$PLATFORM" =~ ^linux/(amd64|arm64)$ ]] || die "--platform must be linux/amd64 or linux/arm64"
+    FERROBOX_PLATFORM="$PLATFORM"
+  fi
   case "$EXPECT_FERROBOX_DIGEST$FERROBOX_DIGEST$POSTGRES_DIGEST" in
     *" "*) die "digests cannot contain spaces" ;;
   esac
@@ -230,10 +259,60 @@ print(digest)
 '
 }
 
+digest_from_headers() {
+  python3 -c '
+import sys
+digest = ""
+for line in sys.stdin:
+    if line.lower().startswith("docker-content-digest:"):
+        digest = line.split(":", 1)[1].strip()
+hexpart = digest[7:] if digest.startswith("sha256:") else ""
+if len(hexpart) != 64 or any(c not in "0123456789abcdef" for c in hexpart):
+    sys.exit("registry response has no sha256 digest")
+print(digest)
+'
+}
+
+platform_digest_from_index() {
+  python3 -c '
+import json, sys
+os_name, arch = sys.argv[1].split("/", 1)
+doc = json.load(sys.stdin)
+for item in doc.get("manifests") or []:
+    plat = item.get("platform") or {}
+    if plat.get("os") == os_name and plat.get("architecture") == arch:
+        print(item["digest"])
+        raise SystemExit
+sys.exit("index has no %s manifest" % sys.argv[1])
+' "$1"
+}
+
 if [ "$MANIFEST_FROM_JSON" -eq 1 ]; then
   signed_manifest_digest
   exit
 fi
+
+if [ "$DIGEST_FROM_HEADERS" -eq 1 ]; then
+  digest_from_headers
+  exit
+fi
+
+if [ -n "$PLATFORM_DIGEST_OSARCH" ]; then
+  [[ "$PLATFORM_DIGEST_OSARCH" =~ ^linux/(amd64|arm64)$ ]] || die "--platform-digest-from-index expects linux/amd64 or linux/arm64"
+  platform_digest_from_index "$PLATFORM_DIGEST_OSARCH"
+  exit
+fi
+
+ghcr_tag_digest() {
+  local repo="$1" tag="$2" body_file="$3" token headers
+  token="$(curl -fsSL "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+  headers="$(curl -fsSL -D - -o "$body_file" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+    "https://ghcr.io/v2/${repo}/manifests/${tag}")"
+  printf '%s\n' "$headers" | digest_from_headers
+}
 
 run_oras_pull() {
   local dest="$1"
@@ -278,16 +357,38 @@ fetch_into() {
   mkdir -p "$stage"
   command -v docker >/dev/null 2>&1 || die "docker is required to fetch the bundle"
   local ferrobox_image="ghcr.io/ferrobox/ferrobox:${VERSION}"
-  echo "Pulling ${ferrobox_image}"
-  docker pull "$ferrobox_image"
-  FERROBOX_DIGEST="$(image_digest "$ferrobox_image")"
+  local manifest_body="$stage/ferrobox-manifest.json"
+  command -v curl >/dev/null 2>&1 || die "curl is required to read the image digest"
+  echo "Reading the tag digest for ${ferrobox_image}"
+  FERROBOX_DIGEST="$(ghcr_tag_digest "ferrobox/ferrobox" "$VERSION" "$manifest_body")" \
+    || die "could not read the FerroBox tag digest"
   if [ -n "$EXPECT_FERROBOX_DIGEST" ] && [ "$FERROBOX_DIGEST" != "$EXPECT_FERROBOX_DIGEST" ]; then
     die "FerroBox digest is ${FERROBOX_DIGEST}, expected ${EXPECT_FERROBOX_DIGEST}"
   fi
+  local -a pull_args=()
+  if [ -n "$PLATFORM" ]; then
+    pull_args=(--platform "$PLATFORM")
+  fi
+  echo "Pulling ${ferrobox_image}${PLATFORM:+ for ${PLATFORM}}"
+  docker pull "${pull_args[@]}" "$ferrobox_image"
+  local image_os image_arch
+  image_os="$(docker image inspect --format '{{.Os}}' "$ferrobox_image")"
+  image_arch="$(docker image inspect --format '{{.Architecture}}' "$ferrobox_image")"
+  FERROBOX_PLATFORM="${image_os}/${image_arch}"
+  [[ "$FERROBOX_PLATFORM" =~ ^linux/(amd64|arm64)$ ]] || die "pulled ${FERROBOX_PLATFORM}; this bundle supports linux/amd64 and linux/arm64"
+  if [ -n "$PLATFORM" ] && [ "$FERROBOX_PLATFORM" != "$PLATFORM" ]; then
+    die "pulled ${FERROBOX_PLATFORM}, requested ${PLATFORM}"
+  fi
+  if python3 -c 'import json,sys; doc=json.load(open(sys.argv[1])); raise SystemExit(0 if doc.get("manifests") else 1)' "$manifest_body"; then
+    FERROBOX_PLATFORM_DIGEST="$(platform_digest_from_index "$FERROBOX_PLATFORM" < "$manifest_body")" \
+      || die "the tag digest has no ${FERROBOX_PLATFORM} image"
+  else
+    FERROBOX_PLATFORM_DIGEST="$FERROBOX_DIGEST"
+  fi
   echo "Checking the FerroBox image signature (keyless; this step needs Sigstore)"
   verify_ferrobox_image "${ferrobox_image}@${FERROBOX_DIGEST}"
-  echo "Pulling postgres:18-alpine"
-  docker pull postgres:18-alpine
+  echo "Pulling postgres:18-alpine${PLATFORM:+ for ${PLATFORM}}"
+  docker pull "${pull_args[@]}" postgres:18-alpine
   POSTGRES_DIGEST="$(image_digest postgres:18-alpine)"
   echo "Checking the vulnerability index signature (key in osv-sync.pub.pem, no transparency log)"
   local verify_json index_ref
@@ -325,6 +426,12 @@ write_bundle() {
   [ -n "$POSTGRES_DIGEST" ] || die "missing postgres digest"
   [[ "$FERROBOX_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die "FerroBox digest must be sha256: and 64 hex digits"
   [[ "$POSTGRES_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die "postgres digest must be sha256: and 64 hex digits"
+  if [ -n "$FERROBOX_PLATFORM" ]; then
+    [[ "$FERROBOX_PLATFORM" =~ ^linux/(amd64|arm64)$ ]] || die "FerroBox platform must be linux/amd64 or linux/arm64"
+  fi
+  if [ -n "$FERROBOX_PLATFORM_DIGEST" ]; then
+    [[ "$FERROBOX_PLATFORM_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die "FerroBox platform digest must be sha256: and 64 hex digits"
+  fi
 
   if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null || true)" ]; then
     die "output directory is not empty: $OUT"
@@ -396,7 +503,9 @@ EOF
   [[ "$INDEX_HEX" =~ ^[0-9a-f]{64}$ ]] || die "index checksum file must start with 64 lowercase hex digits"
   export BUNDLE_VERSION="$VERSION" BUNDLE_OSV_REF="$OSV_REF" \
     BUNDLE_FERROBOX_DIGEST="$FERROBOX_DIGEST" BUNDLE_POSTGRES_DIGEST="$POSTGRES_DIGEST" \
-    BUNDLE_INDEX_SHA256="$INDEX_HEX" BUNDLE_OSV_MANIFEST_DIGEST="$OSV_MANIFEST_DIGEST"
+    BUNDLE_INDEX_SHA256="$INDEX_HEX" BUNDLE_OSV_MANIFEST_DIGEST="$OSV_MANIFEST_DIGEST" \
+    BUNDLE_FERROBOX_PLATFORM="$FERROBOX_PLATFORM" \
+    BUNDLE_FERROBOX_PLATFORM_DIGEST="$FERROBOX_PLATFORM_DIGEST"
   python3 - <<'PY' > "$OUT/bundle.json"
 import json
 import os
@@ -419,6 +528,12 @@ document = {
 manifest = os.environ.get("BUNDLE_OSV_MANIFEST_DIGEST", "")
 if manifest:
     document["osv_manifest_digest"] = manifest
+platform = os.environ.get("BUNDLE_FERROBOX_PLATFORM", "")
+if platform:
+    document["ferrobox_platform"] = platform
+platform_digest = os.environ.get("BUNDLE_FERROBOX_PLATFORM_DIGEST", "")
+if platform_digest:
+    document["ferrobox_platform_digest"] = platform_digest
 json.dump(document, sys.stdout, indent=2)
 sys.stdout.write("\n")
 PY
@@ -452,6 +567,8 @@ Then import the index (the Sync button would call the registry):
     --data-binary @osv/ferrobox-osv-index.json.gz
 
 The header is the hex digest, without a sha256: prefix.
+The FerroBox archive in this directory is ${FERROBOX_PLATFORM:-the architecture of the machine that packed it}.
+install.sh loads it only on that architecture.
 Settings shows a directory. The Vulnerability feed page then shows mode file.
 Garage is not part of this bundle. The index covers npm, PyPI, crates.io,
 Maven, NuGet, and Go.
@@ -463,6 +580,16 @@ set -euo pipefail
 cd "$(dirname "$0")"
 export LC_ALL=C
 sha256sum -c SHA256SUMS
+platform="$(sed -n 's/.*"ferrobox_platform": "\([^"]*\)".*/\1/p' bundle.json)"
+case "$(uname -m)" in
+  x86_64|amd64) host_platform=linux/amd64 ;;
+  aarch64|arm64) host_platform=linux/arm64 ;;
+  *) host_platform="$(uname -m)" ;;
+esac
+if [ -n "$platform" ] && [ "$platform" != "$host_platform" ]; then
+  echo "This bundle contains ${platform} images. This machine is ${host_platform}." >&2
+  exit 1
+fi
 docker load -i images/ferrobox.tar
 docker load -i images/postgres.tar
 if [ ! -f compose/.env ]; then
